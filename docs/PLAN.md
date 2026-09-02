@@ -1,0 +1,254 @@
+# QView Rebuild — Plan
+
+Written at the end of Phase 0. Build order, data model, routes, and dependencies, each
+with a justification. Deviations from the current system are called out explicitly, per
+guardrail 1 ("note any change in `docs/PLAN.md` first").
+
+## Stack decision
+
+Stay on the current stack: **Express 4 + TypeScript + better-sqlite3 + vanilla ES modules
+in the browser.** No React, no Vite, no bundler.
+
+Justification: the app is a single-user internal dashboard behind a VPN. A framework would
+add a build step, a `node_modules` tree in the image, and a class of runtime errors that
+the current setup cannot have. The nine pages are all "fetch JSON, render a table or a
+list", which vanilla DOM handles fine. The one thing the current front end genuinely lacks
+is *structure* — one 1,200-line `dashboard.js` — and that is fixed by splitting into ES
+modules served directly (`<script type="module">`), which every browser I care about
+supports natively.
+
+## Dependencies to add
+
+| Package | Why |
+|---|---|
+| *(none)* | Everything needed is already present or in the standard library. |
+
+Specifically avoided:
+
+- **A date library (`date-fns`, `luxon`).** Business-hours math and EST/UTC formatting are
+  done with `Intl.DateTimeFormat` and a small `src/businessHours.ts`. The rules are
+  fixed (Mon–Fri, 09:00–18:00 America/New_York) and about 80 lines; a library would be
+  more code in the image than the code it replaces.
+- **A charting library.** The charts required are bar, line, and histogram. They are drawn
+  as CSS flex columns and inline SVG polylines — the same approach the existing component
+  chart already uses successfully, and it keeps the "no third-party scripts near customer
+  data" rule trivially true.
+- **A router library.** ~60 lines of `history.pushState` + a path-pattern matcher.
+- **A front-end framework.** See above.
+
+SQLite FTS5 is used for cross-case search. It is compiled into better-sqlite3 already, so
+this is a schema decision, not a dependency.
+
+## Data model
+
+New SQLite schema in `/data/qview.db`, alongside the existing `suggested_replies` table
+(which is left untouched — guardrail 1).
+
+```
+cases
+  id                TEXT PRIMARY KEY      -- Salesforce 18-char Id
+  case_number       TEXT UNIQUE NOT NULL
+  subject           TEXT
+  description       TEXT
+  status            TEXT
+  priority          TEXT
+  type              TEXT
+  origin            TEXT
+  problem_type      TEXT                  -- Problem_Type__c
+  sub_component     TEXT
+  account           TEXT
+  contact_name      TEXT
+  owner_name        TEXT
+  is_escalated      INTEGER
+  is_closed         INTEGER
+  labels            TEXT
+  created_date      TEXT                  -- ISO 8601, as returned by SF
+  last_modified     TEXT                  -- drives delta sync
+  closed_date       TEXT
+  ncc_date          TEXT
+  last_customer_update TEXT
+  active_ttr        REAL
+  product_area      TEXT                  -- derived, see below
+  first_response_at TEXT                  -- derived from comments
+  last_my_touch     TEXT                  -- derived from comments
+  last_customer_touch TEXT                -- derived from comments
+  needs_my_reply    INTEGER               -- derived
+  synced_at         INTEGER
+
+comments
+  id                TEXT PRIMARY KEY      -- SF CaseComment.Id or EmailMessage.Id
+  case_id           TEXT NOT NULL REFERENCES cases(id)
+  source            TEXT NOT NULL         -- 'comment' | 'email'
+  body              TEXT NOT NULL
+  is_public         INTEGER NOT NULL
+  author            TEXT
+  is_mine           INTEGER NOT NULL      -- author == SALESFORCE_OWNER_NAME
+  created_date      TEXT NOT NULL
+  synced_at         INTEGER
+
+comments_fts        -- FTS5 virtual table over (body), external content = comments
+cases_fts           -- FTS5 virtual table over (subject, description)
+
+commitments
+  id                TEXT PRIMARY KEY
+  case_id           TEXT NOT NULL REFERENCES cases(id)
+  case_number       TEXT NOT NULL
+  due_at            TEXT                  -- ISO 8601 UTC; NULL when unparsed
+  raw_text          TEXT NOT NULL         -- the sentence it came from
+  source            TEXT NOT NULL         -- 'parsed' | 'manual'
+  source_comment_id TEXT                  -- provenance for parsed ones
+  state             TEXT NOT NULL         -- 'active'|'met'|'breached'|'superseded'|'dismissed'|'unparsed'
+  superseded_by     TEXT                  -- commitment id, for renegotiation history
+  met_at            TEXT                  -- reply timestamp that satisfied it
+  created_at        INTEGER NOT NULL
+  updated_at        INTEGER NOT NULL
+
+artifacts
+  id                TEXT PRIMARY KEY
+  case_id           TEXT NOT NULL REFERENCES cases(id)
+  kind              TEXT NOT NULL         -- cluster_id|cluster_name|version|node_count|
+                                          -- error_code|log_bundle|bucket|job_id|ip|jira
+  value             TEXT NOT NULL
+  first_seen        TEXT                  -- comment created_date it came from
+  UNIQUE(case_id, kind, value)
+
+sync_state
+  key               TEXT PRIMARY KEY      -- 'cases'|'comments'
+  last_modified     TEXT                  -- watermark for delta sync
+  last_success      INTEGER
+  last_error        TEXT
+  error_count       INTEGER
+  api_calls         INTEGER
+
+settings          key TEXT PRIMARY KEY, value TEXT   -- server-side prefs (sync interval, thresholds, webhook)
+manual_metrics    id, period_start, period_end, csat, nps, iqs, note, created_at
+```
+
+Client-side (`localStorage`) holds only presentation state: column visibility and order,
+density, theme, saved views, sidebar collapsed. Nothing derived from case data, so a
+cleared browser loses nothing but layout.
+
+### Derived fields, and where they are computed
+
+Computed **server-side during sync** and stored, because Phases 4–6 need to query them:
+
+- `product_area` — `Problem_Type__c` when present, else keyword match over subject +
+  description against CDM, RSC, AWS, Azure, GCP, M365, Archival, Cyber Recovery.
+- `last_my_touch`, `last_customer_touch`, `first_response_at`, `needs_my_reply` — from the
+  comment stream. `needs_my_reply` = the newest comment is not mine and the case is open.
+- Commitments and artifacts — extracted from comment bodies on insert.
+
+Computed **client-side at render**, because they change every second:
+
+- Age, countdowns, relative times, row state classes, badge counts.
+
+## Routes
+
+### Pages (client-side, `history.pushState`)
+
+| Path | Page | Notes |
+|---|---|---|
+| `/` | Queue | default; filters live in the query string |
+| `/case/:caseNumber` | Case detail | tabs via `?tab=timeline\|artifacts\|commitments\|related\|draft` |
+| `/commitments` | Commitments | |
+| `/metrics` | IQS Scorecard | `?period=week\|month\|quarter\|half\|custom` |
+| `/triage` | Triage | |
+| `/escalations` | Escalations | |
+| `/search` | Search | `?q=` |
+| `/patterns` | Patterns | |
+| `/settings` | Settings | |
+
+Express serves `index.html` for any non-`/api`, non-asset path so deep links and reload
+both work.
+
+### API (server)
+
+Existing, unchanged in shape — guardrail 1:
+
+| Method | Path |
+|---|---|
+| POST | `/api/auth/login`, `/api/auth/logout` |
+| GET | `/api/auth/me` |
+| GET | `/api/cases` — same JSON shape, now served from cache |
+| GET | `/api/cases/search?q=` |
+| POST | `/api/intelligence/suggest-reply` |
+| GET | `/api/app-versions` |
+
+New:
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/cases/:caseNumber` | one case + derived fields |
+| GET | `/api/cases/:caseNumber/timeline` | comments + emails, public and internal |
+| GET | `/api/cases/:caseNumber/artifacts` | extracted key-values |
+| GET | `/api/cases/:caseNumber/related` | same account / signature / product area |
+| GET | `/api/commitments` | `?state=`, all cases |
+| POST | `/api/commitments` | manual add |
+| PATCH | `/api/commitments/:id` | edit, dismiss, mark met, **renegotiate** |
+| GET | `/api/metrics?period=` | scorecard aggregates |
+| GET | `/api/metrics/manual`, POST same | CSAT / NPS / IQS entries |
+| GET | `/api/search?q=` | FTS5 across cases + comments |
+| GET | `/api/patterns` | clustered signatures |
+| GET | `/api/settings`, PATCH same | server-side prefs |
+| POST | `/api/sync` | manual refresh / full resync (`?full=1`) |
+| GET | `/api/sync/status` | last sync, staleness, error count |
+| GET | `/healthz` | unauthenticated liveness + sync summary |
+
+**Change to note (guardrail 1):** `GET /api/cases` stops hitting Salesforce on every
+request and reads the cache instead. The response body keeps the exact same field names,
+so the existing front end would still work against it unchanged. The one behavioural
+difference is that data can now be up to one sync interval old — which is why the response
+gains a `syncedAt` field and the UI gains a staleness banner.
+
+**Second change to note:** `getCaseComments()` currently filters `IsPublished = true`. The
+Timeline tab requires internal comments too, so that filter is removed and `IsPublished` is
+carried through as `is_public`. Internal comments are visually distinct and filterable in
+the UI, and are never fed to the customer-facing draft path — `claude.ts` keeps asking for
+public-only.
+
+## Build order
+
+Each phase ends with a commit and a live verification pass (guardrails 5 and 6).
+
+**Phase 1 — cache + sync + shell.** The spec lists the shell as Phase 1 and the cache as
+cross-cutting, but the cache is a hard prerequisite for Phases 2–6 (badge counts, "needs my
+reply", commitments, metrics, search all read it), so it is built first inside Phase 1
+rather than retrofitted later.
+
+1. `src/log.ts` — structured JSON logger to stdout and file.
+2. `src/db.ts` — new tables, FTS5, migrations. Additive; `suggested_replies` untouched.
+3. `src/salesforce.ts` — widen the comment query, add `EmailMessage`, add delta-by-
+   `LastModifiedDate` and a closed-case window for metrics.
+4. `src/productArea.ts`, `src/artifacts.ts`, `src/businessHours.ts`, `src/commitments.ts`
+   — pure functions, unit-testable by hand.
+5. `src/sync.ts` — background loop, delta by watermark, exponential backoff, active-window
+   gating, API-call accounting.
+6. `src/server.ts` — serve `/api/cases` from cache, add `/api/sync/status` and `/healthz`,
+   SPA fallback.
+7. `public/index.html` + `public/css/*` + `public/js/router.js`, `app.js`, `lib/*` — shell,
+   sidebar, top bar, dual clock, health dot, badge counts, keyboard shortcuts, skeletons.
+
+**Phase 2 — Queue.** The table, all eleven columns, row states, saved views, multi-sort,
+group-by, density, keyboard nav, context menu, CSV.
+
+**Phase 3 — Case detail.** Five tabs, prev/next.
+
+**Phase 4 — Commitments.** Parser is written in Phase 1 (sync needs it); this phase is the
+page, the bands, the duplicate warning, manual CRUD, and renegotiation.
+
+**Phase 5 — Metrics.** Aggregates endpoint + scorecard page + drill-through links.
+
+**Phase 6 — Triage, Escalations, Search, Patterns, Settings.** Plus notifications and the
+optional webhook, `.env.example`, `docker-compose.yml`, `README.md`.
+
+## Risks
+
+- **Salesforce API volume.** Delta sync keeps steady-state cost to one query per interval
+  plus one comment query per changed case. The first full sync of comment history is the
+  expensive one; it runs once, is chunked, and is visible in the API-call counter.
+- **`EmailMessage` access.** If the connected app cannot read `EmailMessage`, the timeline
+  degrades to `CaseComment` only. The sync catches that error, records it, and the UI says
+  emails are unavailable rather than pretending there are none.
+- **Commitment parsing false negatives.** Mitigated by the `unparsed` state: anything that
+  looks like a commitment but does not yield a datetime is surfaced for manual fixing
+  rather than dropped.
