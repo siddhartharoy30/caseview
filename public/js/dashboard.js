@@ -2,8 +2,6 @@
   const state = {
     cases: [],
     email: null,
-    pendingEmail: null,
-    resendCooldownHandle: null,
     suggestCaseNumber: null,
     refreshHandle: null,
     sortKey: "priority",
@@ -11,8 +9,6 @@
     statusFilter: "",
     componentFilter: "",
   };
-
-  const RESEND_COOLDOWN_SECONDS = 30;
 
   const AUTO_REFRESH_MS = 5 * 60 * 1000;
 
@@ -42,7 +38,8 @@
     el("loginScreen").classList.remove("d-none");
     el("app").classList.add("d-none");
     if (state.refreshHandle) clearInterval(state.refreshHandle);
-    showEmailStep();
+    el("emailError").classList.add("d-none");
+    el("emailInput").value = "";
   }
 
   function showApp(email) {
@@ -64,59 +61,7 @@
     }
   }
 
-  // ---------- Login: email + Slack OTP ----------
-
-  function showEmailStep() {
-    state.pendingEmail = null;
-    if (state.resendCooldownHandle) clearInterval(state.resendCooldownHandle);
-    el("codeForm").classList.add("d-none");
-    el("emailForm").classList.remove("d-none");
-    el("emailError").classList.add("d-none");
-    el("codeError").classList.add("d-none");
-    el("codeInput").value = "";
-  }
-
-  function showCodeStep(email) {
-    state.pendingEmail = email;
-    el("codeEmailLabel").textContent = email;
-    el("emailForm").classList.add("d-none");
-    el("codeForm").classList.remove("d-none");
-    el("codeError").classList.add("d-none");
-    el("codeInput").value = "";
-    el("codeInput").focus();
-    startResendCooldown();
-  }
-
-  function startResendCooldown() {
-    if (state.resendCooldownHandle) clearInterval(state.resendCooldownHandle);
-    let remaining = RESEND_COOLDOWN_SECONDS;
-    const btn = el("resendCodeBtn");
-    btn.disabled = true;
-    btn.textContent = "Resend code (" + remaining + "s)";
-    state.resendCooldownHandle = setInterval(() => {
-      remaining -= 1;
-      if (remaining <= 0) {
-        clearInterval(state.resendCooldownHandle);
-        state.resendCooldownHandle = null;
-        btn.disabled = false;
-        btn.textContent = "Resend code";
-      } else {
-        btn.textContent = "Resend code (" + remaining + "s)";
-      }
-    }, 1000);
-  }
-
-  async function requestOtp(email) {
-    const res = await fetch("/api/auth/request-otp", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || "failed to send code");
-    }
-  }
+  // ---------- Login: email only ----------
 
   el("emailForm").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -124,44 +69,17 @@
     const email = el("emailInput").value.trim();
     if (!email) return;
     try {
-      await requestOtp(email);
-      showCodeStep(email);
-    } catch (err) {
-      el("emailError").textContent = err.message || "Something went wrong. Try again.";
-      el("emailError").classList.remove("d-none");
-    }
-  });
-
-  el("codeForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    el("codeError").classList.add("d-none");
-    const email = state.pendingEmail;
-    const code = el("codeInput").value.trim();
-    if (!email || !code) return;
-    try {
-      const res = await fetch("/api/auth/verify-otp", {
+      const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, code }),
+        body: JSON.stringify({ email }),
       });
-      if (!res.ok) throw new Error("invalid code");
+      if (!res.ok) throw new Error("not authorized");
       const data = await res.json();
       showApp(data.email);
-    } catch {
-      el("codeError").classList.remove("d-none");
-    }
-  });
-
-  el("changeEmailBtn").addEventListener("click", () => showEmailStep());
-
-  el("resendCodeBtn").addEventListener("click", async () => {
-    if (!state.pendingEmail || el("resendCodeBtn").disabled) return;
-    try {
-      await requestOtp(state.pendingEmail);
-      startResendCooldown();
     } catch (err) {
-      el("codeError").textContent = err.message || "Failed to resend code";
-      el("codeError").classList.remove("d-none");
+      el("emailError").textContent = err.message || "Not authorized";
+      el("emailError").classList.remove("d-none");
     }
   });
 

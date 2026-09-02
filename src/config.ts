@@ -35,7 +35,6 @@ export const config = {
 
   auth: {
     allowedEmail: required("QVIEW_ALLOWED_EMAIL"),
-    slackBotToken: required("SLACK_BOT_TOKEN"),
   },
 };
 

@@ -10,4 +10,4 @@ Case queue dashboard with SLA alerts and AI-suggested replies, built on top of R
 
 ## Auth
 
-Login is email + Slack one-time-password, restricted to a single allowed email (QVIEW_ALLOWED_EMAIL). The code is posted to a fixed Slack channel via the bot token (SLACK_BOT_TOKEN), not DMed.
+Login is email-only, restricted to a single allowed email (QVIEW_ALLOWED_EMAIL). There is no password or second factor — anyone who submits that exact email address is granted a session.

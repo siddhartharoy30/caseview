@@ -3,7 +3,6 @@ import cookieParser from "cookie-parser";
 import path from "path";
 import { config } from "./config";
 import { COOKIE_NAME, makeSessionToken, requireAuth, verifySessionToken } from "./auth";
-import { requestOtp, verifyOtp } from "./otp";
 import { listOpenCases, getCaseByNumber, searchCases } from "./salesforce";
 import { computeSla, deriveQueue, deriveNextAction } from "./sla";
 import { getLatestSuggestedReply, saveSuggestedReply } from "./db";
@@ -19,22 +18,10 @@ const SESSION_COOKIE_OPTS = {
   maxAge: 12 * 60 * 60 * 1000,
 };
 
-app.post("/api/auth/request-otp", async (req, res) => {
+app.post("/api/auth/login", (req, res) => {
   const email = String(req.body?.email || "").trim();
-  if (!email) return res.status(400).json({ error: "email is required" });
-  try {
-    await requestOtp(email);
-  } catch (err: any) {
-    return res.status(429).json({ error: err.message || "please wait before requesting another code" });
-  }
-  res.json({ ok: true });
-});
-
-app.post("/api/auth/verify-otp", (req, res) => {
-  const email = String(req.body?.email || "").trim();
-  const code = String(req.body?.code || "").trim();
-  if (!email || !code || !verifyOtp(email, code)) {
-    return res.status(401).json({ error: "invalid or expired code" });
+  if (!email || email.toLowerCase() !== config.auth.allowedEmail.toLowerCase()) {
+    return res.status(401).json({ error: "not authorized" });
   }
   const token = makeSessionToken(email);
   res.cookie(COOKIE_NAME, token, SESSION_COOKIE_OPTS);
