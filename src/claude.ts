@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config";
 import type { SalesforceCase, SalesforceCaseComment } from "./salesforce";
-import { getCaseComments } from "./salesforce";
+import { getPublicCaseComments } from "./salesforce";
 
 const client = new Anthropic({
   authToken: config.anthropic.authToken,
@@ -222,7 +222,7 @@ function buildFollowupBody(attempt: 1 | 2): string {
 }
 
 export async function draftSuggestedReply(c: SalesforceCase): Promise<DraftResult> {
-  const comments = await getCaseComments(c.Id);
+  const comments = await getPublicCaseComments(c.Id);
   const detection = detectKeyword(c, comments);
   const ownerName = c.Owner?.Name || "the case owner";
   const ownerFirstName = ownerName.split(" ")[0];

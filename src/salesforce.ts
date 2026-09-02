@@ -1,4 +1,13 @@
 import { config } from "./config";
+import { countApiCalls } from "./db";
+import { log, errText } from "./log";
+
+/**
+ * Salesforce REST client.
+ *
+ * Everything here is read-only: there is no POST or PATCH to any Salesforce
+ * object anywhere in this codebase, by design.
+ */
 
 interface TokenState {
   accessToken: string;
@@ -44,18 +53,24 @@ async function getToken(): Promise<TokenState> {
 
 async function sfFetch(path: string): Promise<any> {
   let t = await getToken();
+  countApiCalls(1);
   let res = await fetch(`${t.instanceUrl}${path}`, {
     headers: { Authorization: `Bearer ${t.accessToken}` },
   });
   if (res.status === 401) {
     t = await refreshAccessToken();
+    countApiCalls(1);
     res = await fetch(`${t.instanceUrl}${path}`, {
       headers: { Authorization: `Bearer ${t.accessToken}` },
     });
   }
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Salesforce API error: ${res.status} ${text}`);
+    const err = new Error(`Salesforce API error: ${res.status} ${text}`) as Error & {
+      status?: number;
+    };
+    err.status = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -63,6 +78,21 @@ async function sfFetch(path: string): Promise<any> {
 function soqlQuery(soql: string): Promise<any> {
   const v = config.salesforce.apiVersion;
   return sfFetch(`/services/data/${v}/query?q=${encodeURIComponent(soql)}`);
+}
+
+/**
+ * Run a SOQL query and follow `nextRecordsUrl` until every page is in hand.
+ * Salesforce caps a page at 2,000 records; a full comment backfill will exceed
+ * that on its own.
+ */
+async function soqlQueryAll<T>(soql: string, cap = 20000): Promise<T[]> {
+  let data = await soqlQuery(soql);
+  const out: T[] = (data.records || []) as T[];
+  while (!data.done && data.nextRecordsUrl && out.length < cap) {
+    data = await sfFetch(data.nextRecordsUrl);
+    out.push(...((data.records || []) as T[]));
+  }
+  return out;
 }
 
 export interface SalesforceCase {
@@ -116,17 +146,60 @@ const CASE_FIELDS = [
   "Active_TTR__c",
 ].join(", ");
 
-function escapeSoqlString(s: string): string {
+export function escapeSoqlString(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
-export async function listOpenCases(): Promise<SalesforceCase[]> {
-  const ownerClause = config.salesforce.ownerName
-    ? `Owner.Name = '${escapeSoqlString(config.salesforce.ownerName)}' AND `
+function ownerClause(joiner = " AND "): string {
+  return config.salesforce.ownerName
+    ? `Owner.Name = '${escapeSoqlString(config.salesforce.ownerName)}'${joiner}`
     : "";
-  const soql = `SELECT ${CASE_FIELDS} FROM Case WHERE ${ownerClause}IsClosed = false ORDER BY CreatedDate ASC LIMIT 200`;
-  const data = await soqlQuery(soql);
-  return data.records as SalesforceCase[];
+}
+
+/** Quote a list of Ids for an IN clause. */
+function idList(ids: string[]): string {
+  return ids.map((id) => `'${escapeSoqlString(id)}'`).join(", ");
+}
+
+/** Chunk Ids so a single SOQL statement stays well inside the 100k char limit. */
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+export async function listOpenCases(): Promise<SalesforceCase[]> {
+  const soql = `SELECT ${CASE_FIELDS} FROM Case WHERE ${ownerClause()}IsClosed = false ORDER BY CreatedDate ASC LIMIT 500`;
+  return soqlQueryAll<SalesforceCase>(soql);
+}
+
+/**
+ * Delta pull: every owned case touched since the watermark, open or closed.
+ * `since` is a Salesforce datetime literal (ISO 8601 with offset).
+ */
+export async function listCasesModifiedSince(since: string | null): Promise<SalesforceCase[]> {
+  const filters: string[] = [];
+  if (config.salesforce.ownerName) {
+    filters.push(`Owner.Name = '${escapeSoqlString(config.salesforce.ownerName)}'`);
+  }
+  if (since) {
+    filters.push(`LastModifiedDate > ${since}`);
+  } else {
+    // First run: everything open, plus the closed window metrics need.
+    const days = Number(process.env.QVIEW_CLOSED_WINDOW_DAYS || 120);
+    const cutoff = new Date(Date.now() - days * 24 * 3600_000).toISOString();
+    filters.push(`(IsClosed = false OR ClosedDate >= ${cutoff})`);
+  }
+  const where = filters.length ? `WHERE ${filters.join(" AND ")} ` : "";
+  const soql = `SELECT ${CASE_FIELDS} FROM Case ${where}ORDER BY LastModifiedDate ASC`;
+  return soqlQueryAll<SalesforceCase>(soql);
+}
+
+/** Owned cases closed inside the metrics window, for TTR and volume trends. */
+export async function listClosedCasesSince(days: number): Promise<SalesforceCase[]> {
+  const cutoff = new Date(Date.now() - days * 24 * 3600_000).toISOString();
+  const soql = `SELECT ${CASE_FIELDS} FROM Case WHERE ${ownerClause()}IsClosed = true AND ClosedDate >= ${cutoff} ORDER BY ClosedDate ASC`;
+  return soqlQueryAll<SalesforceCase>(soql);
 }
 
 export async function getCaseByNumber(caseNumber: string): Promise<SalesforceCase | null> {
@@ -143,18 +216,123 @@ export async function searchCases(q: string): Promise<SalesforceCase[]> {
   return data.records as SalesforceCase[];
 }
 
+/* ------------------------------------------------------------- case comments */
+
 export interface SalesforceCaseComment {
   Id: string;
+  ParentId: string;
   CommentBody: string | null;
   IsPublished: boolean;
   CreatedDate: string;
-  CreatedBy: { Name: string } | null;
+  LastModifiedDate: string;
+  CreatedBy: { Name: string; Email: string | null } | null;
 }
 
+const COMMENT_FIELDS =
+  "Id, ParentId, CommentBody, IsPublished, CreatedDate, LastModifiedDate, CreatedBy.Name, CreatedBy.Email";
+
+/**
+ * Comments for one case.
+ *
+ * Internal (unpublished) comments are included: the timeline needs the full
+ * history to be a real substitute for opening Salesforce. They carry
+ * `IsPublished` through so the UI can mark them internal, and the AI drafting
+ * path continues to request public comments only.
+ */
 export async function getCaseComments(caseId: string): Promise<SalesforceCaseComment[]> {
-  const soql = `SELECT Id, CommentBody, IsPublished, CreatedDate, CreatedBy.Name FROM CaseComment WHERE ParentId = '${escapeSoqlString(
-    caseId
-  )}' AND IsPublished = true ORDER BY CreatedDate ASC`;
-  const data = await soqlQuery(soql);
-  return data.records as SalesforceCaseComment[];
+  const soql = `SELECT ${COMMENT_FIELDS} FROM CaseComment WHERE ParentId = '${escapeSoqlString(
+    caseId,
+  )}' ORDER BY CreatedDate ASC`;
+  return soqlQueryAll<SalesforceCaseComment>(soql);
+}
+
+/** Public comments only — the customer-facing draft path must never see internals. */
+export async function getPublicCaseComments(caseId: string): Promise<SalesforceCaseComment[]> {
+  const all = await getCaseComments(caseId);
+  return all.filter((c) => c.IsPublished);
+}
+
+/** Comments for many cases in one round trip per chunk. */
+export async function getCommentsForCases(
+  caseIds: string[],
+  since: string | null = null,
+): Promise<SalesforceCaseComment[]> {
+  const out: SalesforceCaseComment[] = [];
+  for (const group of chunk(caseIds, 150)) {
+    const sinceClause = since ? ` AND LastModifiedDate > ${since}` : "";
+    const soql = `SELECT ${COMMENT_FIELDS} FROM CaseComment WHERE ParentId IN (${idList(
+      group,
+    )})${sinceClause} ORDER BY CreatedDate ASC`;
+    out.push(...(await soqlQueryAll<SalesforceCaseComment>(soql)));
+  }
+  return out;
+}
+
+/* -------------------------------------------------------------- email messages */
+
+export interface SalesforceEmail {
+  Id: string;
+  ParentId: string;
+  Subject: string | null;
+  TextBody: string | null;
+  FromName: string | null;
+  FromAddress: string | null;
+  ToAddress: string | null;
+  Incoming: boolean;
+  MessageDate: string | null;
+  CreatedDate: string;
+  LastModifiedDate: string;
+}
+
+const EMAIL_FIELDS =
+  "Id, ParentId, Subject, TextBody, FromName, FromAddress, ToAddress, Incoming, MessageDate, CreatedDate, LastModifiedDate";
+
+/** Set once EmailMessage has been shown to be unreadable for this connection. */
+let emailAccessDenied = false;
+
+export function isEmailAccessDenied(): boolean {
+  return emailAccessDenied;
+}
+
+/**
+ * Emails on a set of cases.
+ *
+ * EmailMessage is not readable on every Salesforce configuration. If it is
+ * denied, that is recorded once and an empty list is returned — the UI then
+ * says emails are unavailable rather than implying there were none.
+ */
+export async function getEmailsForCases(
+  caseIds: string[],
+  since: string | null = null,
+): Promise<SalesforceEmail[]> {
+  if (emailAccessDenied || !caseIds.length) return [];
+
+  const out: SalesforceEmail[] = [];
+  for (const group of chunk(caseIds, 150)) {
+    const sinceClause = since ? ` AND LastModifiedDate > ${since}` : "";
+    const soql = `SELECT ${EMAIL_FIELDS} FROM EmailMessage WHERE ParentId IN (${idList(
+      group,
+    )})${sinceClause} ORDER BY MessageDate ASC`;
+    try {
+      out.push(...(await soqlQueryAll<SalesforceEmail>(soql)));
+    } catch (e) {
+      const status = (e as { status?: number }).status;
+      if (status === 400 || status === 403) {
+        emailAccessDenied = true;
+        log.warn("salesforce.email_access_denied", {
+          detail: "EmailMessage is not readable; timelines will show case comments only",
+          error: errText(e),
+        });
+        return out;
+      }
+      throw e;
+    }
+  }
+  return out;
+}
+
+/** A datetime literal SOQL accepts, from an epoch or ISO input. */
+export function soqlDatetime(at: Date | number | string): string {
+  const d = at instanceof Date ? at : new Date(at);
+  return d.toISOString();
 }

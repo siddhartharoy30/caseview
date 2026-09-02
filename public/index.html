@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>QView</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%234285f4'/><text x='16' y='23' font-family='sans-serif' font-size='19' font-weight='700' fill='white' text-anchor='middle'>Q</text></svg>">
+</head>
+<body class="dark">
+
+<!-- Sign in. Shown until /api/auth/me says otherwise, then removed from the DOM. -->
+<div class="login-screen" id="loginScreen" hidden>
+  <form class="login-card" id="loginForm">
+    <div class="brand-mark">Q</div>
+    <h1>QView</h1>
+    <p>Sign in with your Rubrik email address.</p>
+    <input class="input" id="loginEmail" type="email" autocomplete="email"
+           placeholder="you@rubrik.com" required autofocus>
+    <button class="btn primary" type="submit" id="loginSubmit">Sign in</button>
+    <div class="login-error" id="loginError"></div>
+  </form>
+</div>
+
+<!-- The shell. Sidebar and top bar are built once and never re-rendered. -->
+<div id="app" hidden>
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">Q</div>
+      <div class="brand-name">QView</div>
+    </div>
+
+    <nav class="nav" id="nav"><!-- built by app.js --></nav>
+
+    <div class="sidebar-foot">
+      <div class="nav-item" id="toggleSidebar" title="Collapse sidebar">
+        <span class="nav-icon">
+          <svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        <span class="nav-label">Collapse</span>
+      </div>
+      <div class="sidebar-foot-text" id="whoami"></div>
+    </div>
+  </aside>
+
+  <header class="topbar">
+    <div class="search-wrap">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5" stroke-linecap="round"/></svg>
+      <input id="globalSearch" type="search" autocomplete="off" spellcheck="false"
+             placeholder="Search cases, comments, error signatures…">
+      <span class="search-kbd">/</span>
+    </div>
+
+    <div class="topbar-spacer"></div>
+
+    <button class="risk-badge" id="riskBadge" title="Commitments needing attention">
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/>
+      </svg>
+      <span id="riskBadgeText"></span>
+    </button>
+
+    <div class="clocks">
+      <div class="clock"><span>EST</span> <b id="clockEst">--:--</b></div>
+      <div class="clock"><span>UTC</span> <b id="clockUtc">--:--</b></div>
+    </div>
+
+    <div class="sync-chip" id="syncChip" title="Connection health">
+      <span class="health-dot" id="healthDot"></span>
+      <span id="syncText">connecting…</span>
+    </div>
+
+    <button class="icon-btn" id="refreshBtn" title="Sync now (r)">
+      <svg viewBox="0 0 24 24">
+        <path d="M20 11a8 8 0 10-.6 4" stroke-linecap="round"/><path d="M20 4v7h-7" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+
+    <button class="icon-btn" id="themeBtn" title="Toggle theme">
+      <svg viewBox="0 0 24 24"><path d="M20 14a8 8 0 01-10-10 8 8 0 1010 10z" stroke-linejoin="round"/></svg>
+    </button>
+
+    <button class="icon-btn" id="helpBtn" title="Keyboard shortcuts (?)">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 113.2 2.4c-.8.3-1.2 1-1.2 1.8v.3" stroke-linecap="round"/><path d="M12 17.2v.01" stroke-linecap="round" stroke-width="2.4"/></svg>
+    </button>
+  </header>
+
+  <main class="main" id="main"></main>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>
