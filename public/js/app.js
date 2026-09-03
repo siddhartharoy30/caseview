@@ -80,7 +80,17 @@ async function boot() {
   wireKeyboard();
   startClocks();
 
-  onUnauthorized(() => showLogin());
+  // A 401 once the shell is already running is a different animal from being
+  // signed out: it means the browser held a session the server would not
+  // accept. Bouncing silently back to a form that then looks like it did
+  // nothing is the worst possible way to report that, so say it plainly.
+  onUnauthorized(() =>
+    showLogin(
+      state.email
+        ? "Your session was rejected. Clear this site's cookies, then sign in again."
+        : ""
+    )
+  );
 
   try {
     const me = await api.me();
@@ -93,11 +103,13 @@ async function boot() {
 
 /* ----------------------------------------------------------------- login */
 
-function showLogin() {
+function showLogin(message) {
+  state.email = null;
   $("#app").hidden = true;
   const screen = $("#loginScreen");
   screen.hidden = false;
   $("#loginEmail").focus();
+  if (message) $("#loginError").textContent = message;
 
   const form = $("#loginForm");
   if (form.dataset.wired) return;

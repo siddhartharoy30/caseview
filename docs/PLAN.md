@@ -580,3 +580,55 @@ it. Querying the database directly confirms the data agrees: on all twelve open
 cases `last_my_touch` is at or after `last_customer_touch`. Nobody is waiting on
 a reply right now. Recording this because a future reader will otherwise see a
 column of zeroes and go looking for a bug that is not there.
+
+---
+
+## The sign-in loop, and why curl could never reproduce it
+
+Reported as "I can't log in, it loops back to the login page". Everything
+measurable from the outside said the server was fine: the login endpoint
+returned 200, set a cookie with no `Secure` flag over plain HTTP, and all ten
+guarded endpoints answered 200 over the external address with that cookie. A
+fresh curl jar could not reproduce the failure no matter how it was pointed at
+the box.
+
+That gap is the whole story. `cookie.parse` keeps the **first** value when a
+header carries the same cookie name twice — measured, not assumed:
+
+```
+header sent: qview_session=STALE; qview_session=FRESH
+cookie.parse picks: STALE
+```
+
+Browsers send same-name cookies most-specific-path first. So a `qview_session`
+left at a narrower path by an earlier build — or one minted before commit
+`c13c1a9` changed the token format, which is now unparseable — is offered ahead
+of the good one and wins. Re-issuing at `/` cannot displace a cookie scoped to
+`/api`, so signing in again never cleared it. The resulting behaviour is exactly
+what was reported and exactly what no fresh client reproduces: login returns
+200, the next request 401s, the shell drops to the sign-in form, forever.
+
+Three changes, because the failure had three separate defects behind it.
+
+**Any valid cookie now authenticates.** `sessionEmail` reads the raw header,
+collects every value under the cookie name and accepts the request if one of
+them verifies. Forgery, expiry and the no-cookie case are all still refused,
+and two invalid cookies are still 401 — tolerance of duplicates is not
+tolerance of bad signatures.
+
+**Sign-in expires the narrower paths.** Login now clears `/api` and `/api/auth`
+before setting the real cookie, so a wedged browser heals itself by signing in
+rather than needing its cookies cleared by hand.
+
+**The server logs requests.** It previously logged nothing about traffic, which
+is why this took measurement rather than reading: a browser that never arrived,
+one that sent no cookie, and one whose cookie was rejected produced identical
+silence. Each request now records method, path, status, duration and a `session`
+field reading `none`, `invalid`, `valid`, or `valid (+1 stale)`. Only the path
+is logged, never the query string, because case numbers and account names travel
+there.
+
+The client also stops lying about what happened. A 401 arriving after the shell
+is already running now says "Your session was rejected. Clear this site's
+cookies, then sign in again." instead of silently re-rendering a form that looks
+like it did nothing.

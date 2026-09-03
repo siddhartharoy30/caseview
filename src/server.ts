@@ -2,7 +2,7 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import path from "path";
 import { config } from "./config";
-import { COOKIE_NAME, makeSessionToken, requireAuth, verifySessionToken } from "./auth";
+import { COOKIE_NAME, makeSessionToken, requireAuth, sessionEmail, sessionDiagnostic } from "./auth";
 import { getCaseByNumber, isEmailAccessDenied } from "./salesforce";
 import { computeSla, deriveQueue, deriveNextAction } from "./sla";
 import {
@@ -45,6 +45,36 @@ const app = express();
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 
+/** Static assets are noise in the log unless they actually failed. */
+const STATIC_PATH = /^\/(css|js|img|fonts|favicon)/;
+
+/**
+ * One line per request.
+ *
+ * The server used to say nothing at all about traffic, which made a
+ * user-reported "signing in bounces me straight back" impossible to
+ * investigate: the logs looked identical whether the browser never reached the
+ * box, sent no cookie, or sent one the server rejected. `session` separates
+ * those three.
+ *
+ * Only the path is recorded, never the query string -- case numbers, account
+ * names and search terms travel there, and this log is customer data.
+ */
+app.use((req, res, next) => {
+  const started = Date.now();
+  res.on("finish", () => {
+    if (STATIC_PATH.test(req.path) && res.statusCode < 400) return;
+    log.info("http.request", {
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      ms: Date.now() - started,
+      session: sessionDiagnostic(req),
+    });
+  });
+  next();
+});
+
 const SESSION_COOKIE_OPTS = {
   httpOnly: true,
   sameSite: "lax" as const,
@@ -59,22 +89,41 @@ function noStore(_req: express.Request, res: express.Response, next: express.Nex
 
 /* -------------------------------------------------------------------- auth */
 
+/**
+ * Paths a session cookie may have been scoped to by an earlier build.
+ *
+ * A cookie at a narrower path is offered ahead of the one at "/" and cannot be
+ * overwritten by re-issuing at "/", so signing in again would never displace
+ * it. Expiring these explicitly is what stops a bad cookie from wedging the
+ * app permanently. The cookie at "/" needs no entry here: the Set-Cookie
+ * issued just below replaces it.
+ */
+const LEGACY_COOKIE_PATHS = ["/api", "/api/auth"];
+
+function clearLegacyCookies(res: express.Response) {
+  for (const p of LEGACY_COOKIE_PATHS) res.clearCookie(COOKIE_NAME, { path: p });
+}
+
 app.post("/api/auth/login", (req, res) => {
   const email = String(req.body?.email || "").trim();
   if (!email || email.toLowerCase() !== config.auth.allowedEmail.toLowerCase()) {
+    log.warn("auth.rejected", { reason: email ? "address not allowed" : "empty address" });
     return res.status(401).json({ error: "Not an authorised email address" });
   }
+  clearLegacyCookies(res);
   res.cookie(COOKIE_NAME, makeSessionToken(email), SESSION_COOKIE_OPTS);
+  log.info("auth.login");
   res.json({ ok: true, email });
 });
 
 app.post("/api/auth/logout", (_req, res) => {
+  clearLegacyCookies(res);
   res.clearCookie(COOKIE_NAME);
   res.json({ ok: true });
 });
 
 app.get("/api/auth/me", (req, res) => {
-  const email = verifySessionToken(req.cookies?.[COOKIE_NAME]);
+  const email = sessionEmail(req);
   res.json({ authenticated: !!email, email: email || null });
 });
 
