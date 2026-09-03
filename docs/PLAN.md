@@ -632,3 +632,62 @@ The client also stops lying about what happened. A 401 arriving after the shell
 is already running now says "Your session was rejected. Clear this site's
 cookies, then sign in again." instead of silently re-rendering a form that looks
 like it did nothing.
+
+---
+
+## The real sign-in bug: `hidden` never hid anything
+
+The previous section fixed a genuine cookie defect, but a HAR capture from the
+browser showed it was not what the user was hitting. Their trace is eight
+entries and every one of them is a success:
+
+```
+POST /api/auth/login                200  {"ok":true,...}
+GET  /js/pages/queue.js             200
+GET  /api/counts                    200
+GET  /api/sync/status               200
+GET  /js/pages/_shared.js           200
+GET  /api/cases?status=open         200
+GET  /api/facets                    200
+```
+
+No 401 anywhere. The app signed in, lazy-loaded the queue page, fetched its
+data and rendered it. And the user saw the login form, unchanged.
+
+`index.html` starts both panels with the `hidden` attribute and `app.js`
+toggles it:
+
+```js
+$("#loginScreen").hidden = true;
+$("#app").hidden = false;
+```
+
+The browser implements `hidden` as `[hidden] { display: none }` in its
+**user-agent** stylesheet, and in the cascade an author declaration outranks the
+entire user-agent origin regardless of selector strength. `#app { display: grid }`
+and `.login-screen { display: grid }` therefore both beat it. Setting
+`el.hidden = true` did nothing at all.
+
+The login screen is `position: fixed; inset: 0; z-index: 600`. So it stayed
+stretched across the viewport after a successful sign-in, with the fully loaded
+application sitting behind it. Nothing on screen changed when the user signed
+in, which is indistinguishable from being bounced back to the form — which is
+how it was reported, twice.
+
+The fix restores the browser default so it cannot be outranked:
+
+```css
+[hidden] { display: none !important; }
+```
+
+`!important` is the correct instrument here rather than a workaround: the rule
+is re-asserting a platform default, and it has to survive any `display` a
+component sets on itself at any specificity.
+
+Two lessons worth keeping. First, no amount of server-side probing could have
+found this — every request was already returning 200, and the bug lived
+entirely in the cascade. The HAR was the first browser-side evidence in the
+whole investigation and it settled the question in one read. Second, an
+attribute toggle is only as good as the stylesheet underneath it; a codebase
+that toggles `hidden` needs that one rule at the top or the toggle is a no-op
+waiting for someone to give the element a `display`.

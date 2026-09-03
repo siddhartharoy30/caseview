@@ -86,6 +86,26 @@ body.roomy   { --row-h: 52px; }
 
 * { box-sizing: border-box; }
 
+/* The `hidden` attribute has to actually hide things.
+ *
+ * The browser's own rule for it is `[hidden] { display: none }`, which lives in
+ * the user-agent stylesheet -- and every author declaration outranks the whole
+ * user-agent origin no matter how weak its selector. So `#app { display: grid }`
+ * and `.login-screen { display: grid }` below both quietly beat it, and
+ * `el.hidden = true` did nothing at all.
+ *
+ * What that produced was a sign-in that looked broken and wasn't: the login
+ * overlay is `position: fixed; inset: 0; z-index: 600`, so it stayed spread
+ * across the viewport after a successful sign-in while the fully-loaded app sat
+ * behind it. Every request succeeded, the queue rendered, and the screen never
+ * changed -- which reads exactly like being bounced back to the login form.
+ *
+ * `!important` is the fix rather than a workaround: this is a browser default
+ * being restored, and it needs to outrank any `display` a component sets on
+ * itself, whatever its specificity.
+ */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   height: 100%;
