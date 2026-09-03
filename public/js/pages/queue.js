@@ -11,13 +11,13 @@
  * views and thresholds, which are preferences, not customer data.
  */
 
-import { $, $$, h, mount, on, icon, copy } from "../lib/dom.js";
+import { $, $$, h, mount, on, icon } from "../lib/dom.js";
 import { api } from "../lib/api.js";
 import * as store from "../lib/store.js";
 import * as fmt from "../lib/fmt.js";
 import {
   toast, toastError, dialog, confirmDialog,
-  skeletonRows, emptyState, banner, button,
+  skeletonRows, emptyState, banner, button, copyToast,
 } from "../lib/ui.js";
 import { pageHead, page } from "./_shared.js";
 import { navigate, setQuery } from "../router.js";
@@ -329,15 +329,6 @@ function comparator(keys) {
 function csvCell(value) {
   const s = value === null || value === undefined ? "" : String(value);
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-/**
- * copy() resolves to its label rather than announcing anything itself, so every
- * copy affordance in this page pairs it with a toast — a silent clipboard write
- * is indistinguishable from a broken button.
- */
-function copyToast(text, label) {
-  copy(text, label).then((m) => toast(m, "ok")).catch(() => toast("Could not copy", "error"));
 }
 
 function summaryBlock(c) {

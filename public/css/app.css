@@ -1064,19 +1064,20 @@ tr.row.st-breached:hover td { background: color-mix(in srgb, var(--red) 15%, tra
 .cell-num a { color: var(--text); }
 .cell-num a:hover { color: var(--blue); text-decoration: underline; }
 
-.copybtn {
-  border: none;
-  background: none;
-  color: var(--text-4);
-  cursor: pointer;
-  padding: 2px;
-  margin-left: 2px;
-  vertical-align: middle;
+/* Inside the queue table the copy affordance stays hidden until the row is
+   hovered, so a dense table is not speckled with icons. Everywhere else it is
+   always visible, and the base .copybtn rule further down owns its box.
+
+   The scoping is the whole point. This rule used to be an unscoped .copybtn
+   with opacity: 0, which made every copy button in case detail, artifacts and
+   commitments permanently invisible -- the base rule never declares opacity, so
+   nothing further down could win it back. */
+tr.row .copybtn {
   opacity: 0;
   transition: opacity var(--speed) ease;
 }
 tr.row:hover .copybtn { opacity: 1; }
-.copybtn:hover { color: var(--blue); }
+tr.row .copybtn:hover { color: var(--blue); }
 
 .cell-subject { color: var(--text); max-width: 420px; }
 .reply-flag {

@@ -465,3 +465,59 @@ after:
   have made an overnight `stale` look like a bug in the endpoint.
 - `/api/app-versions` carries no `requireAuth`, so the open-route list is the
   auth endpoints plus `/healthz` plus that one — not just `/healthz` and login.
+
+---
+
+## Deploy gap: four pages that were written but never shipped
+
+Found while doing the end-to-end pass after the operational commit, not by
+looking for it: `/js/pages/triage.js` was serving 169 bytes. So were
+escalations, search and patterns — all four still the Phase 1 `notBuiltYet`
+placeholders, on the VM, in the container, and in git. HEAD's copies dated back
+to `f684105`; nothing since had touched them.
+
+The pages themselves were real and finished. They had been built in local
+staging during Phases 4–6 and simply never made it into a transfer set. Every
+subsequent tar named the files that phase had changed, and these were never on
+one of those lists, so nothing ever failed — the deploy just quietly kept
+shipping the placeholder.
+
+That also means the Phase 6 stylesheet had been styling markup nothing rendered:
+the `.tri-`, `.esc-`, `.sr-` and `.pt-` families, 77 of the 128 classes that
+commit added, had no DOM to attach to in the running app.
+
+Fixed by transferring the four modules, syntax-checking each, rebuilding, and
+verifying against the *served* bundle rather than the working tree:
+
+- all four now serve 12–15 KB instead of ~165 bytes
+- no served page module contains `notBuiltYet` any more
+- 286 classes used across all nine pages, 0 unstyled
+
+**Worth keeping as a lesson:** every verification up to this point had checked
+files on disk in staging, or byte counts of the specific files a phase touched.
+None of them asked the running server what it was actually serving for pages
+that phase had not changed. A size check across every page module would have
+caught this three phases earlier, which is why the final probe now does exactly
+that.
+
+### Also in this commit
+
+**The copy button was invisible everywhere except the queue table.** `.copybtn`
+was defined twice. The first block set `opacity: 0` with a
+`tr.row:hover .copybtn { opacity: 1 }` companion, meant to keep a dense table
+from being speckled with icons. The second block, 650 lines later, defines the
+button's box but never declares `opacity` — so it could not win the property
+back, and all eight `copyBtn` call sites outside a table row (case detail
+header, description, timeline entries, artifact values, commitment text, ticket
+keys) rendered fully transparent. Scoped the first block to `tr.row .copybtn` so
+the reveal-on-hover behaviour stays in the table where it was wanted.
+
+**A failed copy in the queue looked like a successful one.** `queue.js` carried
+its own `copyToast` that called `toast(msg, "error")`, but `toast()` only
+special-cases `"err"` — anything else renders as the neutral/success style. The
+identical helper in `lib/ui.js` gets this right, so the local copy is gone and
+the page imports the shared one. The now-unused `copy` import went with it.
+
+**Removed `public/dashboard.html`**, the last file of the pre-rebuild UI. Its
+stylesheet and script were already deleted, so it had been a broken page
+reachable only by typing its name; the SPA fallback now handles that path.
