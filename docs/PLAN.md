@@ -407,3 +407,61 @@ number that drills approximately. Nothing outside the Scorecard consumed the fie
   seconds. Fixed on both ends.
 - Health-dot staleness now respects the active window instead of going amber
   every night.
+
+---
+
+## Cross-cutting: operational files
+
+Not a phase — the three files someone needs to run this repo without already
+knowing how it was deployed.
+
+**`.env.example`** — rewritten. The old one listed twelve variables copied from
+a working `.env`; the code reads eighteen. The seven that were missing are the
+ones you only discover by grepping `process.env`: `QVIEW_DB_PATH`,
+`QVIEW_LOG_FILE`, `LOG_LEVEL`, `QVIEW_CLOSED_WINDOW_DAYS`, `IQS_COVERAGE_HOURS`,
+`IQS_OWNER_TZ`, and `ANTHROPIC_API_KEY` as a fallback name for
+`ANTHROPIC_AUTH_TOKEN`. Every variable now says what it does, whether it is
+required, and what the default is. Required means `config.ts` throws at startup,
+which is worth stating because the failure is loud and immediate rather than a
+mystery 401 later.
+
+Two content changes beyond documentation: `SALESFORCE_OWNER_NAME` no longer
+ships a real person's name as the example value, and `SESSION_SECRET` no longer
+suggests `change-me` — it names the command that generates a real one, because a
+placeholder that boots is a placeholder that stays.
+
+**`docker-compose.yml`** — new, and standalone. QView is deployed as one service
+inside the sibling salesforce-case-tracker stack, so the repo had no way to be
+brought up on its own. This is the equivalent definition with repo-relative
+paths.
+
+Three deliberate differences from the deployed copy:
+
+- The port binds to `127.0.0.1:3001`, not `0.0.0.0`. Auth is one email address
+  with no password. Anything that makes it easy to accidentally expose that to a
+  network is a mistake, and a default is exactly that kind of easy.
+- A healthcheck that only asks whether the process answers. `/healthz` reports
+  `stale` whenever a sync is overdue, which includes every night, so wiring the
+  container's health to the endpoint's status would restart-loop it by design.
+- Log rotation, because the container also writes to `/data/qview.log` and
+  nothing was capping the json-file driver.
+
+`NODE_EXTRA_CA_CERTS` is kept but the comment now says what it is for and that
+it is harmless when absent, which is the actual behaviour — Node warns once and
+continues, and only AI reply suggestions depend on that trust chain.
+
+**`README.md`** — rewritten from thirteen lines. Covers what each page is for,
+the sync-to-SQLite-to-API data flow and why reads never touch Salesforce, the
+file layout, both ways to run it, the security posture, the route table, and the
+keyboard map.
+
+Three claims were corrected against the source before shipping rather than
+after:
+
+- `/healthz` returns `ok` / `stale` / `degraded`, not `warming` / `error`, and
+  503s only when stale *and* the error count is above three.
+- `/healthz` does **not** consult the active window. The in-app health dot does,
+  via the fields Phase 6 added to `/api/sync/status`. Writing that it did would
+  have made an overnight `stale` look like a bug in the endpoint.
+- `/api/app-versions` carries no `requireAuth`, so the open-route list is the
+  auth endpoints plus `/healthz` plus that one — not just `/healthz` and login.

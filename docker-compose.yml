@@ -1,0 +1,57 @@
+# Standalone QView stack.
+#
+# This file runs QView on its own, from this repo:
+#
+#   cp .env.example .env      # then fill it in
+#   docker compose up -d --build
+#
+# On the deployed VM QView instead runs as one service inside the sibling
+# salesforce-case-tracker compose stack, which shares a network with the other
+# internal tools. That definition is equivalent to this one; this file exists so
+# the repo can be brought up by itself without that stack present.
+
+services:
+  qview:
+    build: .
+    image: qview
+    container_name: qview
+    restart: unless-stopped
+
+    ports:
+      # Bound to loopback on purpose. Login is email-only with no password, so
+      # QView must not be reachable from an untrusted network. Put it behind a
+      # reverse proxy that does real authentication before changing this.
+      - "127.0.0.1:3001:3001"
+
+    env_file:
+      - .env
+
+    environment:
+      # Only needed when ANTHROPIC_BASE_URL points at a gateway whose TLS chain
+      # is signed by a private CA. Drop the bundle at certs/ca-bundle.pem.
+      # Harmless if the file is absent — Node warns once and carries on, and
+      # everything except AI reply suggestions works regardless.
+      NODE_EXTRA_CA_CERTS: /app/certs/ca-bundle.pem
+
+    volumes:
+      # SQLite cache and the log file. This is the only state that matters;
+      # everything in it can be rebuilt from Salesforce.
+      - ./data:/data
+      # Private CA bundle, if you need one. Read-only.
+      - ./certs:/app/certs:ro
+
+    healthcheck:
+      # /healthz reports degraded when a sync is overdue, which is a real
+      # condition but not a reason to restart the container, so this only
+      # checks that the process is answering.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
