@@ -1,5 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { addBusinessDays, TZ } from "./businessHours";
 import { config } from "./config";
+import { CORE_RULES, TEMPLATE_RULES } from "./iqs/rubric";
+import type { Keyword } from "./iqs/rubric";
 import type { SalesforceCase, SalesforceCaseComment } from "./salesforce";
 import { getPublicCaseComments } from "./salesforce";
 
@@ -15,8 +18,6 @@ export interface DraftResult {
   internalNote: string | null;
   selfCheck: string | null;
 }
-
-type Keyword = "INTRO" | "UPDATE" | "FOLLOWUP" | "CLOSURE";
 
 interface Detection {
   keyword: Keyword;
@@ -52,25 +53,24 @@ function detectKeyword(c: SalesforceCase, comments: SalesforceCaseComment[]): De
   return { keyword: "FOLLOWUP", attempt: trailingOwnerCount === 2 ? 2 : 1 };
 }
 
-function addBusinessDays(date: Date, days: number): Date {
-  const result = new Date(date);
-  let added = 0;
-  while (added < days) {
-    result.setDate(result.getDate() + 1);
-    const day = result.getDay();
-    if (day !== 0 && day !== 6) added++;
-  }
-  return result;
-}
-
 function addCalendarDays(date: Date, days: number): Date {
   const result = new Date(date);
   result.setDate(result.getDate() + days);
   return result;
 }
 
+// The container clock is UTC. Without an explicit zone this renders tomorrow's
+// date after 8 PM Eastern, and commitments.ts then parses those dates back out
+// of the posted comment and measures them in America/New_York. Same zone on
+// both sides or the reliability numbers are quietly wrong one evening in three.
 function formatLongDate(d: Date): string {
-  return d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+  return d.toLocaleDateString("en-US", {
+    timeZone: TZ,
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 function formatComments(comments: SalesforceCaseComment[], ownerName: string): string {
@@ -84,136 +84,6 @@ function formatComments(comments: SalesforceCaseComment[], ownerName: string): s
     .join("\n\n");
 }
 
-const CORE_RULES = `You are drafting a Rubrik Salesforce case comment that must pass Rubrik's Internal
-Quality Standards (IQS) scoring rubric. Follow every rule below exactly.
-
-OUTPUT CONTRACT (follow this order, nothing else):
-1. The customer-facing message, in its own fenced code block.
-2. Only for CLOSURE: a second fenced code block containing the internal resolution note
-   (never sent to the customer).
-3. An IQS self-check estimate, as plain text, outside of any code block.
-Do not add any preamble, narration, or sign-off of your own outside this contract.
-
-FORMATTING RULES (customer-facing text only):
-- No subject line. No em-dashes, ever (use periods, commas, or parentheses instead).
-- No bold, no markdown headers, no bullet lists. Numbered steps (1., 2., 3.) are allowed.
-- Keep it short and concise. Never copy-paste the case Subject or Description verbatim;
-  restate the problem in your own words, naming the specific artifacts involved.
-- First-person, definitive language throughout ("I will", "I confirmed") — no hedging.
-- Greet the customer by first name only, never full name.
-
-BANNED PHRASES (customer-facing text; each one auto-deducts IQS score — replace as shown):
-- "engage our engineering team" -> "I will escalate internally and drive [specific action]"
-- "we will keep you posted/updated" -> give an absolute deadline instead
-- "as soon as Engineering provides" -> give an absolute deliverable date instead
-- "promptly / shortly / ASAP / soon" -> give an absolute time instead
-- "known issue / known behavior" -> "a transient backend state that has been mitigated"
-- "Jira / Jira ID / internal ticket" -> omit entirely from customer text
-- "appears to have been" -> "was confirmed to be"
-- "should work / should resolve" -> "will [action] because [evidence]"
-- "checking on this" -> "I am reviewing [specific artifact]"
-
-VOICE RULES: sound like a real engineer writing naturally, not an AI template. Vary
-sentence length. Use plain, direct words. Lead with facts and named artifacts, not
-pleasantries. Avoid AI-sounding openers ("I wanted to reach out", "I hope this message
-finds you well", "just following up to let you know") and filler ("please don't hesitate",
-"at your earliest convenience", "kindly", "rest assured", "as per our conversation").
-Never loosen the deadline, WWW, first-person, or banned-phrase rules for the sake of voice.
-
-BUSINESS IMPACT: state impact proactively, never ask the customer for it, using the
-formula "Until [issue] is resolved, [Rubrik capability] is impaired, which means
-[business consequence in operational terms]." Use these mappings when applicable:
-backup job failing -> extends recovery point exposure, risking RPO targets; archive
-upload failing -> data not protected offsite, weakening data protection posture;
-encryption rekey stuck -> compliance posture around key rotation at risk; node add
-failure -> cluster at reduced capacity, weakening redundancy/recovery objectives; restore
-failure -> cannot validate end-to-end recovery, business continuity risk; M365 backup
-failure -> affected data not recoverable to latest scheduled point, potential compliance
-exposure; GCS bucket creation failing -> cloud retention/cost-optimization workflows
-blocked; cluster upgrade failing -> blocked from security patches/feature updates, aging
-code line; download/checksum mismatch on upgrade -> blocked from deploying validated
-release, holding cluster on current version.
-
-SIGNATURE BLOCK (exact format, each line on its own line, one blank line before
-"Coverage hours", first name only):
-Best regards,
-[Owner First Name]
-[Owner Title], Rubrik Support
-
-Coverage hours (Mon-Fri): [Coverage Hours]
-Out-of-hours support: https://www.rubrik.com/support/#contact-numbers
-
-IQS SELF-CHECK (append after the customer text, outside any code block): label it as an
-estimate, not an official score. Only assess metrics applicable to this response type.
-Thresholds: Meeting >= 80%, Partially Meeting 50-79%, Not Meeting < 50%. If a metric
-would fall below Meeting, name the one concrete signal to add rather than rewriting the
-draft. Format example:
-IQS self-check (INTRO, estimate)
-Business Impact 10/10 Meeting - all 4 signals
-Technical Definition 7.5/10 Meeting - 6/8 signals (add repro step + scope)
-WWW this comment 3/3 - What+Why+When present
-Reliability - 1 valid commitment (follow-up line), on track
-Clear Resolution - N/A at intro`;
-
-const TEMPLATE_RULES: Record<Keyword, string> = {
-  INTRO: `TEMPLATE: INTRO
-Steps: greet by first name; state "I am [Owner Name] and I have taken full ownership of
-this case"; restate the problem in your own words with named artifacts; state business
-impact proactively; ask only for any additional impact context you still need; numbered
-investigation steps (WHAT the step is + WHY it matters, no per-step deadlines); exactly
-one follow-up commitment line before the signature using the same-day 6 PM commitment
-reference date below; blank line; then the signature block.
-Applicable self-check metrics: Business Impact, Technical Definition, WWW Quality,
-Reliability. Clear Resolution is N/A.`,
-  UPDATE: `TEMPLATE: UPDATE
-Base this on the most recent comment, not the original Description. Steps: one-sentence
-progress anchor (what changed since the last update — do not restate the original
-issue); WHAT (action taken, named artifacts); WHY (technical reasoning tied to evidence);
-one sentence on ongoing business risk; never restate a deadline that has already passed;
-exactly one follow-up commitment line before the signature using the two-business-day
-6 PM commitment reference date below; blank line; then the signature block.
-Applicable self-check metrics: WWW Quality, Reliability, plus Business Impact and
-Technical Definition only if still within the case's first 3 comments.`,
-  FOLLOWUP: `TEMPLATE: FOLLOWUP (attempt {ATTEMPT} of 2)
-Steps: greet by first name; one sentence naming exactly what is still outstanding, with
-the named artifact; one sentence on why it matters now; then:
-{ATTEMPT_BODY}
-Exactly one follow-up commitment line before the signature; blank line; then the
-signature block.
-Applicable self-check metrics: WWW Quality, Reliability (the next-attempt commitment).
-On attempt 2, note in the self-check whether a documented phone attempt exists anywhere
-in the comment history — the 3-Strikes close requires at least one phone attempt before
-a noresponse closure, and if none is logged, flag internally (not in the customer text)
-that a phone call is still needed.`,
-  CLOSURE: `TEMPLATE: CLOSURE ({PATH})
-This is FINAL. Never ask the customer to confirm, never write "once confirmed I will
-close." Base this on the FULL case comment history provided below, oldest to newest.
-Produce TWO fenced code blocks: first the customer email, second the internal
-resolution note (for the Salesforce Resolution field, never sent to the customer).
-Customer email steps: greet by first name; state the root cause definitively ("was
-confirmed to be", never "appears to have been"); numbered resolution steps with named
-artifacts; quantified validation evidence; {PATH_LINE}; state the 30-day reopen window as
-the absolute date given below; no follow-up commitment line and no confirmation
-request — the close statement and reopen date replace them (closing comments are scored
-on What+Why only, no When required); blank line; then the signature block.
-Internal resolution note (plain text, light labels are fine, do not use this structure
-in the customer email):
-Root cause: [definitive, one to two lines]
-Affected environment: [cluster ID, CDM/RSC version, workload, account]
-Resolution steps:
-1. [technical action with named artifact]
-2. [technical action with named artifact]
-Validation: [timestamps, consecutive success counts, cluster IDs]
-Internal tracking reference: [if any; omit if none]
-KB / documentation used: [links]
-Prevention / follow-up: [recommended action, product feedback logged, or "none"]
-Never put internal tracking references or identifiers in the customer email — only in
-the internal note.
-Applicable self-check metrics: Clear Resolution (4 signals), WWW Quality (What+Why
-only). Business Impact and Technical Definition are already locked from earlier
-comments (N/A here).`,
-};
-
 function buildFollowupBody(attempt: 1 | 2): string {
   if (attempt === 1) {
     return "This is the first follow-up. Ask again for what's outstanding and commit to a specific next-attempt date/time.";
@@ -225,7 +95,6 @@ export async function draftSuggestedReply(c: SalesforceCase): Promise<DraftResul
   const comments = await getPublicCaseComments(c.Id);
   const detection = detectKeyword(c, comments);
   const ownerName = c.Owner?.Name || "the case owner";
-  const ownerFirstName = ownerName.split(" ")[0];
   const ownerTitle = c.Owner?.Title || "Support Engineer";
 
   const scaledComments =

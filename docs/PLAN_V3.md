@@ -333,7 +333,7 @@ already lives.
 | Phase | Scope | Gate |
 |---|---|---|
 | 0 | Discovery, this document | done |
-| 1 | `src/iqs/rubric.ts`, `claude.ts` imports it, no behaviour change | drafts generate identically |
+| 1 | `src/iqs/rubric.ts`, `claude.ts` imports it, no behaviour change | done, byte-identical |
 | 2 | Layer 1 scorer, queue column, Quality tab | scores appear with zero API calls |
 | 3 | Layer 2 scorer, hash cache, `/iqs` page | cost and hit rate visible |
 | 4 | `src/nextAction.ts`, both callers delegate, queue column | `sla.ts` and `claude.ts` agree |
@@ -345,3 +345,115 @@ already lives.
 
 Phase 8's gate cannot be met today and that is a credential problem, not a code
 problem. It ships complete and dormant; the dry-run path is what gets verified.
+
+---
+
+## Phase 1 as built
+
+### What moved
+
+`src/iqs/rubric.ts` is new and is now the only place the IQS rules exist.
+`src/claude.ts` went from 329 lines to 199 and imports `CORE_RULES`,
+`TEMPLATE_RULES` and the `Keyword` type from it. 8,226 bytes of rule text left
+`claude.ts` and nothing was copied.
+
+Alongside the prose, the module exports the machine-readable form the scorer in
+phase 2 needs: `RUBRIC_VERSION` (`fy27.1.5.0`), `BANNED_PHRASES` (9 entries,
+each with a compiled pattern and the required replacement), `BUSINESS_IMPACT_MAP`
+(9 symptom-to-consequence pairs), `DIMENSIONS` (5, with per-dimension max,
+signal list and scope), `BANDS`, `bandFor()`, `applicableDimensions()` and
+`overallScore()`.
+
+### How the gate was met
+
+The gate is "existing drafts still generate identically". That was verified
+mechanically rather than by eye:
+
+1. `git show HEAD:src/claude.ts` yields the pre-refactor file. The two template
+   literals were scanned out of it directly, after asserting neither contains
+   `${` interpolation so a scan to the closing backtick is exact. No byte in the
+   comparison passed through a human transcription.
+2. Inside the container, the **compiled** `dist/iqs/rubric.js` was compared
+   against those bytes: `CORE_RULES`, all four `TEMPLATE_RULES`, and the four
+   composed system prompts (`core + blank line + template`, which is what
+   `draftSuggestedReply()` actually sends).
+
+All nine are byte-identical:
+
+```
+CORE_RULES           4379 chars    TEMPLATE INTRO      633
+TEMPLATE UPDATE       680          TEMPLATE FOLLOWUP   692
+TEMPLATE CLOSURE     1707
+systemPrompt INTRO   5014          systemPrompt UPDATE   5061
+systemPrompt FOLLOWUP 5073         systemPrompt CLOSURE  6088
+em-dashes preserved: 2 in core, 4 across templates
+```
+
+The em-dash count matters because the rubric bans em-dashes in customer-facing
+text while the rules themselves use them. A well-meaning cleanup would have
+changed what the model is told without changing what it is told to do.
+
+### Two shapes, one truth
+
+Constraint 10 says the rubric lives in exactly one file. It does, but not every
+part of it is single-sourced the same way, and the difference is deliberate.
+
+- **Rendered from data.** The nine banned-phrase prose lines are generated from
+  `BANNED_PHRASES`; the threshold sentence interpolates `BANDS` and
+  `BAND_LABELS`; the self-check worked example interpolates the dimension maxima
+  and signal counts. These have regular shapes, so generating them means the
+  prose cannot drift from the data the scorer reads.
+- **Verbatim, with an assertion.** The business-impact block is stored as-is
+  beside `BUSINESS_IMPACT_MAP`. Its line breaks are hand-set, not the output of
+  any wrapper: its lines measure 83/80/82/89/85/88/84/88/84 characters, which
+  bounds a wrap width at 89, and one 81-character line is followed by a 6-character
+  word that would have fitted at 88. No generic wrapper reproduces it. Generating
+  it would have failed the byte-identity gate for a cosmetic win.
+  `assertRubricConsistency()` closes the gap instead: it whitespace-normalises the
+  prose and asserts every map entry appears in it, and asserts every dimension
+  applicable to a keyword is named in that keyword's template. It runs at import,
+  so drift is a boot failure, not a silent divergence. Verified live: the
+  container came up with zero restarts.
+
+### The one intentional behaviour change
+
+`claude.ts` carried its own `addBusinessDays()` next to the one in
+`businessHours.ts`. They are not the same function. Starting from a Saturday and
+adding two business days, the local one returned **Tuesday** (it skipped Sunday,
+counted Monday and Tuesday) while `businessHours.addBusinessDays` returns
+**Wednesday** (it first advances to the next business instant, Monday 9:00 AM,
+then adds two). Consolidating onto the shared one changes the date QView writes
+into a draft when a draft is generated on a weekend.
+
+That change is worth making because the duplicate was hiding a live defect. The
+container clock is UTC, measured directly:
+
+```
+container TZ resolved: UTC        TZ env: undefined
+local : Thu Sep 03 2026 14:21:21 GMT+0000
+NY    : 9/3/2026, 10:21:21 AM
+```
+
+`formatLongDate()` called `toLocaleDateString("en-US", ...)` with no `timeZone`,
+so between 8:00 PM and midnight Eastern the drafter wrote **tomorrow's** date
+into the `Today:` line and into every same-day 6:00 PM commitment. It went
+unnoticed because at any normal working hour the two renderings agree.
+
+This is not cosmetic. `commitments.ts` parses those dates back out of the posted
+comment and measures met-versus-breached through `businessHours.ts` in
+`America/New_York`. A drafter computing in UTC and a tracker measuring in
+Eastern disagree by up to a day, and the Reliability dimension being built in
+phase 2 is derived from exactly those rows. Fixed by passing `timeZone: TZ`.
+
+So the gate reads as: the rule text the model receives is byte-identical, proven
+above. Reference dates are now correct where they were previously wrong after
+8:00 PM Eastern, and weekend arithmetic follows the shared helper. Both are
+disclosed rather than absorbed.
+
+### Left alone on purpose
+
+`detectKeyword()` still hardcodes its own 3-Strikes thresholds
+(`trailingOwnerCount >= 3`, `=== 2 ? 2 : 1`). That is the same duplication
+problem as `addBusinessDays`, but its counterpart is `deriveNextAction()` in
+`sla.ts` and unifying them is phase 4's entire scope. Widening phase 1 to reach
+it would have put an untested behaviour change under a no-behaviour-change gate.
