@@ -521,3 +521,62 @@ the page imports the shared one. The now-unused `copy` import went with it.
 **Removed `public/dashboard.html`**, the last file of the pre-rebuild UI. Its
 stylesheet and script were already deleted, so it had been a broken page
 reachable only by typing its name; the SPA fallback now handles that path.
+
+---
+
+## Acceptance pass, and the one criterion that actually failed
+
+Checked all ten acceptance criteria against the running app rather than against
+the source. Nine passed on the first honest look. Some appeared to fail at first
+only because the probe guessed field names — the queue exposes `activeTtrDays`,
+`lastCustomerTouch`, `needsMyReply` and `nextCommitment`, not the names guessed,
+and the multi-commitment flag is the `duplicates` array in the commitments
+envelope rather than a per-row field. Worth recording so the next check does not
+re-derive it.
+
+Notable measurements: search returns in 0.02–0.27s across 6,355 cached comments;
+the metrics page defines 15 distinct drill-through targets, all built through
+`queueHref` so every number lands on a filtered queue; 6 responsive breakpoints;
+and a scan of all 21 files the browser downloads — 365 KB — found zero
+occurrences of any value from `.env`, no credential-shaped strings, and no
+Salesforce instance host.
+
+**Criterion 9 genuinely failed.** `docker compose up` from a clean checkout died
+before creating a container:
+
+```
+failed to create network cleanco_default: all predefined address pools
+have been fully subnetted
+```
+
+Not a transient error and not this host being unusual in a way the repo can
+ignore. This daemon declares exactly one address pool, `192.168.0.0/16`, and
+`docker0` claims that entire range as its `bip`, so there is nothing left for
+Compose to carve a project network out of. The sibling salesforce-case-tracker
+stack only works because it pins `172.28.0.0/16` explicitly; the compose file
+added in the previous commit declared no network at all and inherited the
+failure. Anyone cloning onto a host with a constrained pool would have hit the
+same wall on their first command.
+
+Fixed by pinning `172.29.0.0/24` — clear of the host's own `10.26.112.0/20`, of
+`docker0`, and of the sibling stack — with a comment explaining why the block
+exists, since an unexplained subnet is the kind of thing a later reader deletes
+as noise.
+
+Re-verified end to end: clean clone, `.env` copied in, nothing else touched,
+`docker compose up -d`. It answered `/healthz` in about two seconds, served the
+login page and the real 14 KB `triage.js`, returned 401 on a guarded endpoint,
+logged structured JSON to stdout, and reported an empty cache — correct for a
+fresh database. Torn down afterwards; the live service stayed at 258 cases
+throughout, because the test ran on port 3002 against a scratch `/data`.
+
+### On `needsMyReply` reading zero
+
+Every open case shows `needs_my_reply = 0`, which looks like a dead flag. It is
+not. `sync.ts` walks each case's timeline and sets it when the last inbound
+comment is newer than the last one of mine, `notify.ts` fires on the 0 to 1
+transition, and the queue renders a REPLY pill and a "Needs Reply" filter for
+it. Querying the database directly confirms the data agrees: on all twelve open
+cases `last_my_touch` is at or after `last_customer_touch`. Nobody is waiting on
+a reply right now. Recording this because a future reader will otherwise see a
+column of zeroes and go looking for a bug that is not there.
