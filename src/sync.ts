@@ -9,6 +9,7 @@
  */
 
 import { config } from "./config";
+import { runEvents, SyncDelta, DeltaCase } from "./notify";
 import {
   db,
   newId,
@@ -398,6 +399,8 @@ async function runSync(full: boolean): Promise<SyncResult> {
     const cases = await listCasesModifiedSince(since);
 
     if (!cases.length) {
+      // Nothing moved in Salesforce, but a deadline can arrive on its own.
+      await runEvents(null, false);
       const durationMs = Date.now() - started;
       patchSyncState({
         running: 0,
@@ -422,6 +425,18 @@ async function runSync(full: boolean): Promise<SyncResult> {
     const syncedAt = now();
     let newCommitments = 0;
 
+    // A row cannot tell you it moved, so the before-state is read while it is
+    // still the before-state. Only the cases in this batch are looked at.
+    const priorRows = db
+      .prepare(
+        "SELECT case_number, needs_my_reply FROM cases WHERE id IN (" +
+          caseIds.map(() => "?").join(",") +
+          ")",
+      )
+      .all(...caseIds) as Array<{ case_number: string; needs_my_reply: number }>;
+    const priorSeen = new Set(priorRows.map((r) => r.case_number));
+    const priorNeedsReply = new Map(priorRows.map((r) => [r.case_number, !!r.needs_my_reply]));
+
     const write = db.transaction(() => {
       for (const c of cases) upsertCase.run(caseRow(c, syncedAt));
 
@@ -445,6 +460,43 @@ async function runSync(full: boolean): Promise<SyncResult> {
 
     write();
     reconcileCommitments();
+
+    const afterRows = db
+      .prepare(
+        "SELECT case_number, subject, priority, account, created_date, last_customer_touch," +
+          " is_closed, needs_my_reply FROM cases WHERE id IN (" +
+          caseIds.map(() => "?").join(",") +
+          ")",
+      )
+      .all(...caseIds) as Array<{
+      case_number: string;
+      subject: string | null;
+      priority: string | null;
+      account: string | null;
+      created_date: string | null;
+      last_customer_touch: string | null;
+      is_closed: number;
+      needs_my_reply: number;
+    }>;
+
+    const delta: SyncDelta = { created: [], replied: [] };
+    for (const r of afterRows) {
+      const d: DeltaCase = {
+        caseNumber: r.case_number,
+        subject: r.subject,
+        priority: r.priority,
+        account: r.account,
+        createdDate: r.created_date,
+        lastCustomerTouch: r.last_customer_touch,
+        isClosed: !!r.is_closed,
+      };
+      if (!priorSeen.has(r.case_number)) delta.created.push(d);
+      if (r.needs_my_reply && !priorNeedsReply.get(r.case_number)) delta.replied.push(d);
+    }
+
+    // A full resync repopulates an empty cache, where every case looks new.
+    // Announcing all of them would be indistinguishable from a malfunction.
+    await runEvents(delta, full || since === null);
 
     // Watermark from the data, not the clock: a case modified during the run
     // must not be skipped next time.

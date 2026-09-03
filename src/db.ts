@@ -162,6 +162,19 @@ CREATE TABLE IF NOT EXISTS manual_metrics (
   updated_at INTEGER NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_manual_metrics ON manual_metrics(period, metric);
+
+CREATE TABLE IF NOT EXISTS events (
+  id          TEXT PRIMARY KEY,                    -- deterministic, so a repeat sync cannot re-fire
+  kind        TEXT NOT NULL,                       -- case.new | case.replied | commitment.due | commitment.breached
+  case_number TEXT,
+  title       TEXT NOT NULL,
+  detail      TEXT,
+  created_at  INTEGER NOT NULL,
+  delivered   INTEGER NOT NULL DEFAULT 0,          -- webhook delivery, 0 = pending
+  attempts    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
+CREATE INDEX IF NOT EXISTS idx_events_pending ON events(delivered, attempts);
 `);
 
 /* --------------------------------------------------------------- full text */
@@ -280,6 +293,9 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   notificationsEnabled: "false",
   webhookEnabled: "false",
   webhookUrl: "",
+  webhookIncludeSubject: "false",  // case subjects are customer data; off means IDs only
+
+  escalationUpdateHours: "24",  // how often an escalation owes the customer an update
   closedCaseWindowDays: "120",  // how far back to keep closed cases for metrics
 };
 
@@ -354,6 +370,7 @@ export function cacheCounts(): Record<string, number> {
     comments: one("SELECT COUNT(*) AS n FROM comments"),
     commitments: one("SELECT COUNT(*) AS n FROM commitments"),
     artifacts: one("SELECT COUNT(*) AS n FROM artifacts"),
+    events: one("SELECT COUNT(*) AS n FROM events"),
   };
 }
 

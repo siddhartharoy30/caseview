@@ -93,6 +93,11 @@ export const api = {
   rebuildCache: ()      => request("POST",  "/api/settings/rebuild-cache"),
   sync:         (full)  => request("POST",  "/api/sync" + (full ? "?full=1" : "")),
   syncStatus:   ()      => request("GET",   "/api/sync/status"),
+  testWebhook:  (url)   => request("POST",  "/api/settings/test-webhook", { url }),
+
+  /* events — the notification feed. sinceMs is a millisecond timestamp; omit it
+     to fetch the recent backlog, which a fresh tab uses to seed its seen-set. */
+  events: (sinceMs) => request("GET", "/api/events" + qs({ since: sinceMs || undefined })),
 
   /* AI draft (staging only — the assistant that writes replies lives elsewhere) */
   suggestReply: (caseNumber, regenerate) =>

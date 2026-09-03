@@ -11,6 +11,7 @@ import { api, onUnauthorized } from "./lib/api.js";
 import * as store from "./lib/store.js";
 import * as fmt from "./lib/fmt.js";
 import { toast, toastError, dialog, emptyState } from "./lib/ui.js";
+import { startNotifications } from "./lib/notify.js";
 import { route, setNotFound, onRouteChange, navigate, start, resolve, currentRoute } from "./router.js";
 
 /* ------------------------------------------------------------- navigation */
@@ -134,6 +135,11 @@ function showApp(email) {
   refreshSync();
   setInterval(refreshCounts, 60_000);
   setInterval(refreshSync, 30_000);
+
+  // Started unconditionally: the module itself checks the preference and the
+  // browser permission on every tick, so a toggle in Settings takes effect
+  // without anything here needing to know about it.
+  startNotifications(navigate);
 }
 
 /* ------------------------------------------------------------------- nav */
@@ -191,6 +197,9 @@ function wireTopbar() {
     const next = document.body.classList.contains("light") ? "dark" : "light";
     applyTheme(next);
     store.set("theme", next);
+    // localStorage is what applyTheme reads; the server copy exists only so
+    // Settings can show a stored value that matches what is on screen.
+    api.saveSettings({ theme: next }).catch(() => {});
   });
   $("#helpBtn").addEventListener("click", showShortcuts);
   $("#riskBadge").addEventListener("click", () => navigate("/commitments?state=at-risk"));
@@ -286,20 +295,53 @@ function paintSync() {
   $("#refreshBtn").classList.toggle("spinning", running);
   $("#healthDot").classList.toggle("busy", running);
 
-  if (!s.last_success) {
+  // The route speaks camelCase and hands back epoch milliseconds, not an ISO
+  // string. Reading the snake_case names left this permanently on "never
+  // synced" with an amber dot, which is worse than no indicator at all: it
+  // reported a problem that did not exist and would have hidden a real one.
+  const lastSuccess = s.lastSuccess;
+  const errorCount = Number(s.errorCount || 0);
+
+  if (!lastSuccess) {
     setHealth("warn");
     chipText.textContent = running ? "first sync running…" : "never synced";
     return;
   }
 
-  const ageMin = (Date.now() - Date.parse(s.last_success)) / 60000;
+  const ageMin = (Date.now() - lastSuccess) / 60000;
   const interval = Number(s.intervalMinutes || 5);
-  chipText.textContent = `synced ${fmt.relative(s.last_success)} · ${fmt.dateTimeShort(s.last_success)}`;
+  chipText.textContent = `synced ${fmt.relative(lastSuccess)} · ${fmt.dateTimeShort(lastSuccess)}`;
 
-  // Amber once we have missed a cycle, red once errors are stacking up.
-  if (s.error_count > 3) setHealth("error");
-  else if (ageMin > interval * 3 || s.error_count > 0) setHealth("warn");
+  // Amber once we have missed a cycle, red once errors are stacking up. The
+  // sync only runs inside the active window, so an overnight gap is expected
+  // rather than a fault — three intervals of slack absorbs a skipped cycle
+  // without absorbing a night, which is what the window check below handles.
+  if (errorCount > 3) setHealth("error");
+  else if (errorCount > 0) setHealth("warn");
+  else if (ageMin > interval * 3 && withinActiveWindow()) setHealth("warn");
   else setHealth("ok");
+}
+
+/**
+ * Whether a sync is due right now. Outside the configured window nothing is
+ * scheduled, so a five-hour-old sync at 3am is the system working correctly,
+ * and colouring it amber would train me to ignore the dot.
+ */
+function withinActiveWindow() {
+  const s = state.sync;
+  if (!s || s.activeWindowStart == null) return true; // unknown: do not excuse staleness
+  const now = new Date();
+  const hour = Number(fmt.clockEastern(now).slice(0, 2));
+  const start = Number(s.activeWindowStart);
+  const end = Number(s.activeWindowEnd);
+  if (Number.isFinite(hour) && (hour < start || hour >= end)) return false;
+  if (s.activeWindowWeekdaysOnly) {
+    // getDay() is local, but no timezone puts a weekday on a different side of
+    // the weekend from Eastern by more than the window's own edges.
+    const day = now.getDay();
+    if (day === 0 || day === 6) return false;
+  }
+  return true;
 }
 
 function setHealth(level) {

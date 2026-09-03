@@ -2510,3 +2510,1179 @@ a.bar-row:focus-visible {
 }
 
 a.link:hover { color: var(--blue); }
+
+/* ==========================================================================
+   Phase 6 — the styles for every page built in phases 2 through 6.
+
+   Written in one pass at the end rather than page by page, because five
+   card layouts written independently drift: three border radii, four
+   heading sizes, two ideas of what a metadata row looks like. Everything
+   below shares one set of measurements, and the per-page classes exist to
+   position things, not to re-decide them.
+
+   Everything is expressed in the palette variables so light mode comes for
+   free. The handful of places with a literal colour have a body.light rule
+   immediately after, never further down the file.
+   ========================================================================== */
+
+/* --- shared card geometry -------------------------------------------------
+   The five families below are all "a card in a vertical list". This is the
+   agreement they keep. */
+
+.tri-list,
+.esc-list,
+.sr-list,
+.pt-list,
+.set-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tri-card,
+.esc-card,
+.sr-card,
+.pt-card,
+.set-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+
+.tri-card:hover,
+.esc-card:hover,
+.sr-card:hover,
+.pt-card:hover {
+  border-color: var(--border-2);
+}
+
+/* --- toolbar bits shared by Triage, Search and Patterns ------------------ */
+
+/* The word before a control group. Deliberately quiet: it labels the thing
+   next to it and should never compete with it. */
+.tb-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-4);
+  white-space: nowrap;
+}
+
+/* A checkbox and its word, aligned on the same baseline and clickable as
+   one target. */
+.checkline {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.checkline input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--blue-2);
+  cursor: pointer;
+  margin: 0;
+}
+
+.checkline:hover { color: var(--text); }
+
+/* --- band headings (Triage) ---------------------------------------------- */
+
+/* A coloured dot carrying the band's severity, so the section can be found
+   by colour while scrolling without reading a word of it. */
+.band-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-4);
+  margin-right: 9px;
+  vertical-align: 1px;
+  flex: none;
+}
+
+/* The tones are the priority classes the chips already use, so a band header
+   and the chips inside it agree on what red means. */
+.band-dot.p0,
+.band-dot.p1      { background: var(--red); }
+.band-dot.p2      { background: var(--amber); }
+.band-dot.p3      { background: var(--blue); }
+.band-dot.p4      { background: var(--text-4); }
+.band-dot.ok      { background: var(--green); }
+.band-dot.purple  { background: var(--purple); }
+.band-dot.neutral { background: var(--text-4); }
+
+.band-count {
+  display: inline-block;
+  margin-left: 9px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  vertical-align: 1px;
+}
+
+/* ==========================================================================
+   Triage
+   ========================================================================== */
+
+.tri-bands {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+
+/* One band = one reason a case is in front of me. Kept as a plain block so
+   the bands stack with a wider gap than the cards inside them do; the visual
+   grouping comes from that rhythm rather than from a box around each band. */
+.tri-band { display: block; }
+
+.tri-band-head { margin-bottom: 10px; }
+
+.tri-band-head h2 {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+
+/* One line saying why this band exists. Every band has a rule behind it and
+   the rule is worth stating, because a queue that sorts by an invisible
+   policy is a queue you second-guess. */
+.tri-band-note {
+  margin: 5px 0 0 17px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-4);
+}
+
+.tri-card {
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+}
+
+/* The urgent flag is a left edge rather than a background wash: it survives
+   both themes, it does not fight the priority chip for attention, and a
+   column of them reads as a single ruler down the page. */
+.tri-card.urgent {
+  border-left: 3px solid var(--red);
+  padding-left: 13px;
+}
+
+.tri-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.tri-line1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.tri-num {
+  color: var(--blue);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.tri-num:hover { text-decoration: underline; }
+
+.tri-account {
+  color: var(--text-2);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 320px;
+}
+
+.tri-subject {
+  display: block;
+  margin: 6px 0 0;
+  font-size: 14.5px;
+  line-height: 1.4;
+  color: var(--text);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.tri-subject:hover { color: var(--blue); }
+
+.tri-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 9px;
+}
+
+.tri-meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 9px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.tri-meta strong {
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+/* The recommended next action. Given a left rule rather than a chip because
+   it is a sentence, not a label, and it needs to be readable at a glance
+   without being mistaken for a status. */
+.tri-next {
+  padding-left: 10px;
+  border-left: 2px solid var(--border-2);
+  color: var(--text-2);
+}
+
+.tri-next strong { color: var(--text); }
+
+/* The SLA column: the countdown (.tri-left) over what it counts down to
+   (.tri-target), right-aligned so the numbers line up vertically down a list
+   of cards. */
+.tri-clock {
+  flex: none;
+  width: 138px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 4px;
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
+  text-align: right;
+}
+
+.tri-left {
+  font-size: 17px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--text);
+}
+
+/* Only two tones, and both mean act. Everything else is deliberately the
+   plain text colour: a clock that is always coloured is a clock nobody
+   looks at. */
+.tri-left.red   { color: var(--red); }
+.tri-left.amber { color: var(--amber); }
+.tri-left.dim   { color: var(--text-4); }
+
+.tri-target {
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--text-4);
+}
+
+.tri-target span { color: var(--text-3); font-weight: 600; }
+
+@media (max-width: 760px) {
+  .tri-card { flex-direction: column; gap: 12px; }
+  .tri-clock {
+    width: auto;
+    align-items: baseline;
+    text-align: left;
+    padding: 10px 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    flex-direction: row;
+    gap: 10px;
+  }
+  .tri-account { max-width: 100%; }
+}
+
+/* ==========================================================================
+   Escalations
+   ========================================================================== */
+
+.esc-summary { margin-bottom: 12px; }
+
+.esc-card { padding: 15px 17px; }
+
+/* Overdue is the whole point of this page, so unlike Triage it earns a tinted
+   surface as well as an edge. Two escalations in a list of ten should be
+   findable without reading the clocks. */
+.esc-card.overdue {
+  border-color: rgba(242, 139, 130, 0.45);
+  background:
+    linear-gradient(0deg, rgba(242, 139, 130, 0.05), rgba(242, 139, 130, 0.05)),
+    var(--surface);
+}
+
+body.light .esc-card.overdue {
+  border-color: rgba(234, 67, 53, 0.35);
+  background:
+    linear-gradient(0deg, rgba(234, 67, 53, 0.045), rgba(234, 67, 53, 0.045)),
+    var(--surface);
+}
+
+.esc-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.esc-head-l {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.esc-head-r {
+  flex: none;
+  text-align: right;
+}
+
+.esc-num {
+  color: var(--blue);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.esc-num:hover { text-decoration: underline; }
+
+/* The update clock. The largest number on the card because it is the only
+   one that decides what to do next. */
+.esc-due {
+  font-size: 19px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--text);
+}
+
+.esc-due.red   { color: var(--red); }
+.esc-due.amber { color: var(--amber); }
+.esc-due.green { color: var(--green); }
+.esc-due.dim   { color: var(--text-4); }
+
+.esc-due-label {
+  margin-top: 2px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-4);
+  white-space: nowrap;
+}
+
+.esc-subject {
+  display: block;
+  margin: 11px 0 0;
+  font-size: 15px;
+  line-height: 1.4;
+  font-weight: 500;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.esc-subject:hover { color: var(--blue); }
+
+.esc-account {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+/* Facts, not metrics: each one is a value plus the sentence explaining where
+   it came from. The hint is what stops this page from being a set of numbers
+   you have to take on faith. */
+.esc-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px 18px;
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px solid var(--border);
+}
+
+.esc-fact { min-width: 0; }
+
+.esc-fact-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+  color: var(--text-4);
+}
+
+.esc-fact-value {
+  margin-top: 3px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.esc-fact-value strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.esc-fact-hint {
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-4);
+}
+
+/* The last thing the customer actually saw from us, quoted verbatim. */
+.esc-quote {
+  margin: 12px 0 0;
+  padding: 10px 13px;
+  border-left: 2px solid var(--border-2);
+  border-radius: 0 8px 8px 0;
+  background: var(--surface-2);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.esc-quote-subject {
+  margin-bottom: 5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: normal;
+}
+
+@media (max-width: 700px) {
+  .esc-head { flex-direction: column; gap: 10px; }
+  .esc-head-r { text-align: left; }
+}
+
+/* ==========================================================================
+   Search
+   ========================================================================== */
+
+.sr-toolbar { align-items: center; }
+
+/* The input owns the row. A search page whose search box is one control among
+   several reads as a filter panel, which is not what this is. */
+.sr-field {
+  position: relative;
+  flex: 1 1 340px;
+  min-width: 220px;
+  display: flex;
+  align-items: center;
+}
+
+.sr-icon {
+  position: absolute;
+  left: 11px;
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: var(--text-4);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.sr-input {
+  width: 100%;
+  padding: 9px 32px 9px 34px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  font-size: 13.5px;
+  font-family: inherit;
+  outline: none;
+}
+
+.sr-input::placeholder { color: var(--text-4); }
+
+.sr-input:focus {
+  border-color: var(--blue-2);
+  box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.18);
+}
+
+.sr-field:focus-within .sr-icon { stroke: var(--blue); }
+
+.sr-clear {
+  position: absolute;
+  right: 8px;
+  width: 19px;
+  height: 19px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface-3);
+  color: var(--text-3);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.sr-clear:hover { background: var(--border-2); color: var(--text); }
+
+/* Closed cases still match, and hiding them would be wrong — the answer to
+   "have we seen this before" is usually in a closed case. They are dimmed
+   instead, so they read as history rather than as work. */
+.sr-card.closed { opacity: 0.68; }
+.sr-card.closed:hover { opacity: 1; }
+
+.sr-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sr-num {
+  color: var(--blue);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.sr-num:hover { text-decoration: underline; }
+
+.sr-count {
+  margin-left: auto;
+  flex: none;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-4);
+  white-space: nowrap;
+}
+
+.sr-subject {
+  display: block;
+  margin: 7px 0 0;
+  font-size: 14.5px;
+  line-height: 1.4;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.sr-subject:hover { color: var(--blue); }
+
+.sr-account {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.sr-matches {
+  margin-top: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Each hit is its own link into the case. Padded rather than bordered so a
+   card with four matches does not turn into a table. */
+.sr-match {
+  display: block;
+  padding: 8px 11px;
+  border-radius: 8px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.sr-match:hover { background: var(--surface-2); }
+
+.sr-match-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--text-4);
+}
+
+.sr-author {
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+.sr-when { margin-left: auto; white-space: nowrap; }
+
+.sr-snippet {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.sr-more {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+a.sr-more:hover { color: var(--blue); }
+
+/* ==========================================================================
+   Patterns
+   ========================================================================== */
+
+.pt-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.pt-tabs::-webkit-scrollbar { display: none; }
+
+.pt-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pt-tab:hover { color: var(--text); }
+
+.pt-tab.on {
+  color: var(--blue);
+  border-bottom-color: var(--blue-2);
+}
+
+.pt-tab-count {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+
+.pt-tab.on .pt-tab-count {
+  background: rgba(66, 133, 244, 0.18);
+  color: var(--blue);
+}
+
+.pt-toolbar { align-items: center; }
+
+/* What this tab groups on and why it might be wrong. Clustering is a
+   heuristic, and a heuristic presented without its caveat gets trusted
+   like a fact. */
+.pt-note {
+  margin: 0 0 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-4);
+  max-width: 78ch;
+}
+
+/* More than one case still open on the same signature is the whole reason to
+   look at this page, so those cards are marked. */
+.pt-card.live { border-left: 3px solid var(--purple); padding-left: 13px; }
+
+.pt-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.pt-key {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.pt-sig {
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 7px;
+  overflow-wrap: anywhere;
+}
+
+.pt-counts {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.pt-total {
+  font-size: 19px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.pt-total-label {
+  font-size: 11px;
+  color: var(--text-4);
+}
+
+/* Total as the track, open as the overlay: the ratio is the interesting part,
+   and two stacked bars read it faster than two numbers do. */
+.pt-bar {
+  position: relative;
+  height: 5px;
+  margin: 11px 0 0;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.pt-bar-fill,
+.pt-bar-open {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.pt-bar-fill { background: var(--border-2); }
+.pt-bar-open { background: var(--purple); }
+
+.pt-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.pt-member {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 11.5px;
+  color: var(--text-2);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.pt-member:hover {
+  border-color: var(--blue-2);
+  color: var(--text);
+}
+
+.pt-member.closed {
+  opacity: 0.55;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.pt-member-p {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-4);
+}
+
+.pt-foot {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: var(--text-4);
+}
+
+@media (max-width: 700px) {
+  .pt-head { flex-direction: column; gap: 8px; }
+}
+
+/* ==========================================================================
+   Settings
+
+   Note the prefix: .st- was already the commitment/case status family, so
+   these are .set-. Reusing .st- would have silently restyled every status
+   chip in the app.
+   ========================================================================== */
+
+.set-list {
+  gap: 16px;
+  max-width: 880px;
+}
+
+.set-card { padding: 0; }
+
+.set-head {
+  padding: 15px 18px 13px;
+  border-bottom: 1px solid var(--border);
+}
+
+.set-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+
+/* Every section says what it is for. These settings change how the app
+   behaves rather than how it looks, and a number with no sentence attached
+   is a number nobody dares touch. */
+.set-sub {
+  margin: 5px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-4);
+  max-width: 74ch;
+}
+
+.set-body {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+/* --- read-only fact rows -------------------------------------------------- */
+
+.set-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.set-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 7px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+
+.set-row:last-child { border-bottom: 0; }
+
+.set-row-label {
+  flex: none;
+  color: var(--text-3);
+}
+
+.set-row-value {
+  flex: 1 1 auto;
+  text-align: right;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.set-row-value code {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.set-error-text {
+  color: var(--red);
+  font-size: 12.5px;
+}
+
+.set-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+/* --- numeric fields ------------------------------------------------------- */
+
+.set-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+  gap: 16px 20px;
+}
+
+.set-field { min-width: 0; }
+
+.set-field-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.set-unit {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-4);
+  white-space: nowrap;
+}
+
+.set-num {
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+.set-field-hint {
+  margin: 5px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-4);
+}
+
+/* The validation message replaces nothing and pushes nothing: it appears
+   under the field it belongs to, in the colour of the border that just
+   turned red. */
+.set-err {
+  margin-top: 5px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--red);
+}
+
+.input.bad,
+.set-num.bad {
+  border-color: var(--red-2);
+  box-shadow: 0 0 0 3px rgba(234, 67, 53, 0.16);
+}
+
+/* --- toggles -------------------------------------------------------------- */
+
+.set-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.set-toggle input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 2px 0 0;
+  accent-color: var(--blue-2);
+  cursor: pointer;
+  flex: none;
+}
+
+.set-toggle input[type="checkbox"]:disabled { cursor: progress; opacity: 0.5; }
+
+.set-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.set-toggle-label {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.set-toggle-hint {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-4);
+  max-width: 72ch;
+}
+
+.set-toggle:hover .set-toggle-label { color: var(--blue); }
+
+.set-subgroup {
+  margin-left: 25px;
+  padding-left: 13px;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.set-subgroup-label {
+  margin: 0;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+  color: var(--text-4);
+}
+
+/* --- inline label + control rows ------------------------------------------ */
+
+.set-inline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.set-inline .spacer { flex: 1 1 auto; }
+
+.set-inline-label {
+  font-size: 13px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.set-url {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.set-url .input {
+  flex: 1 1 300px;
+  min-width: 200px;
+  font-size: 12.5px;
+}
+
+/* --- cache counts --------------------------------------------------------- */
+
+.set-counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 10px;
+}
+
+.set-count {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.set-count-n {
+  font-size: 17px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.set-count-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-4);
+}
+
+/* --- the destructive corner ------------------------------------------------
+   Separated by a rule and tinted, because it is the only control in the app
+   that deletes anything. It should not look like the controls above it. */
+
+.set-danger {
+  margin-top: 4px;
+  padding: 13px 14px;
+  border: 1px solid rgba(242, 139, 130, 0.32);
+  border-radius: 11px;
+  background: rgba(242, 139, 130, 0.045);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 11px;
+}
+
+body.light .set-danger {
+  border-color: rgba(234, 67, 53, 0.28);
+  background: rgba(234, 67, 53, 0.04);
+}
+
+.set-danger-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-3);
+  max-width: 76ch;
+}
+
+@media (max-width: 620px) {
+  .set-row { flex-direction: column; gap: 2px; }
+  .set-row-value { text-align: left; }
+  .set-grid { grid-template-columns: 1fr; }
+}
+
+/* ==========================================================================
+   Skeleton variants used by Search
+   ========================================================================== */
+
+/* A skeleton shaped like the card it stands in for, rather than a grey block.
+   The point of a placeholder is that the layout does not jump when the real
+   thing arrives. */
+.skeleton-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  pointer-events: none;
+}
+
+.sk-line {
+  height: 11px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.sk-line.w40 { width: 40%; }
+.sk-line.w60 { width: 60%; }
+.sk-line.w70 { width: 70%; }
+.sk-line.w80 { width: 80%; }

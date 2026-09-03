@@ -11,6 +11,7 @@ import {
   allSettings,
   setSetting,
   SETTING_DEFAULTS,
+  getSetting,
   getSettingNumber,
   getSyncState,
   cacheCounts,
@@ -37,6 +38,7 @@ import {
 } from "./queries";
 import { resolveRange, scorecard, saveManualMetric, deleteManualMetric } from "./metrics";
 import { syncOnce, startSync, reconcileCommitments } from "./sync";
+import { listEvents, sendWebhookTest } from "./notify";
 import { log, errText } from "./log";
 
 const app = express();
@@ -313,6 +315,31 @@ app.post("/api/settings/rebuild-cache", requireAuth, async (_req, res) => {
   res.json({ ok: result.ok, result });
 });
 
+/**
+ * The browser polls this to decide what deserves a notification. It reads the
+ * same rows the webhook sends, so the two cannot disagree about what happened.
+ * The since parameter is a millisecond timestamp; without it the caller gets
+ * the recent backlog, which is what a freshly opened tab uses to seed its
+ * seen-set rather than replaying a week of history as new.
+ */
+app.get("/api/events", requireAuth, noStore, (req, res) => {
+  const since = Number(req.query.since);
+  const events = listEvents(Number.isFinite(since) && since > 0 ? since : null);
+  res.json({ events, now: Date.now() });
+});
+
+/**
+ * Proving a webhook URL works should not mean waiting for a real event to fire
+ * at it. The body is a fixed string with no case data in it, so a mistyped URL
+ * leaks nothing. This is the only outbound call in the app and it happens only
+ * on an explicit button press.
+ */
+app.post("/api/settings/test-webhook", requireAuth, async (req, res) => {
+  const url = String((req.body && req.body.url) || getSetting("webhookUrl") || "");
+  const result = await sendWebhookTest(url);
+  res.status(result.ok ? 200 : 502).json(result);
+});
+
 /* -------------------------------------------------------------------- sync */
 
 app.post("/api/sync", requireAuth, async (req, res) => {
@@ -331,6 +358,10 @@ app.get("/api/sync/status", requireAuth, noStore, (_req, res) => {
     apiCalls: state.api_calls,
     running: !!state.running,
     lastDurationMs: state.last_duration_ms,
+    intervalMinutes: getSettingNumber("syncIntervalMinutes"),
+    activeWindowStart: getSettingNumber("activeWindowStart"),
+    activeWindowEnd: getSettingNumber("activeWindowEnd"),
+    activeWindowWeekdaysOnly: getSetting("activeWindowWeekdaysOnly") === "true",
     cache: cacheCounts(),
     emailsUnavailable: isEmailAccessDenied(),
   });

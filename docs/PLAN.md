@@ -325,3 +325,85 @@ flag and it can filter on priority, but it cannot express the union of the two, 
 only drill-through available for that tile would have landed on a different population
 than the tile had counted. Two numbers that each drill exactly are worth more than one
 number that drills approximately. Nothing outside the Scorecard consumed the field.
+
+---
+
+## Phase 6 — Settings, notifications and the event stream
+
+### What landed
+
+**Server**
+
+- `src/db.ts` — two new rows in `SETTING_DEFAULTS`: `escalationUpdateHours`
+  (how long an escalated case may sit without an update before Escalations
+  calls it overdue, default 24) and `webhookIncludeSubject` (default
+  `"false"`). Added the `events` table plus its indexes, and taught
+  `cacheCounts()` to report `events` alongside the other five counts.
+- `src/notify.ts` (new) — turns sync results into rows in `events`. One row
+  per thing worth telling the user about: a new case assigned, a customer
+  reply, a case going stale, an SLA clock going red, a commitment coming due
+  or breaching, an escalation aging past `escalationUpdateHours`. Dedupes on
+  `(kind, caseId, dayKey)` so a case that is still stale tomorrow produces one
+  row tomorrow, not one row per sync. Also owns the outbound webhook: off by
+  default, https only, and it sends a case number and an event kind — the
+  subject line goes only if `webhookIncludeSubject` is on.
+- `src/sync.ts` — calls `runEvents` at the end of a successful sync, inside
+  the same try so a notification bug can never fail a sync.
+- `src/server.ts` — `GET /api/events?since=<ms>` (returns rows plus a server
+  `now` so the client never has to trust its own clock for the next cursor)
+  and `POST /api/settings/test-webhook`. `/api/sync/status` now also returns
+  `intervalMinutes` and the three active-window fields, because the shell
+  colours its health dot by how late a sync is and "late" only means anything
+  inside the window — overnight there is nothing to be late for.
+
+**Client**
+
+- `public/js/lib/notify.js` (new) — polls `/api/events` once a minute, holds
+  the cursor, and raises at most three desktop notifications per poll so a
+  backlog cannot produce a wall of them. Per-kind preferences live in
+  localStorage. Clicking a notification navigates to the case.
+- `public/js/pages/settings.js` — the real page, replacing the placeholder.
+  Seven sections: connection, schedule, thresholds, notifications, webhook,
+  appearance, cache.
+- `public/js/app.js` — starts the notification poller after login, and the
+  header theme toggle now mirrors to the server the same way Settings does.
+- `public/css/app.css` — styles for every class the Phase 2–6 pages use. The
+  settings family is `.set-`, not `.st-`: `.st-` was already the
+  commitment/case *status* family, and reusing it would have silently
+  restyled every status chip in the app.
+
+### Decisions worth recording
+
+1. **Theme and density are browser state, not server state.** `app.js` reads
+   localStorage and toggles a body class; nothing consults the server's
+   `theme` row. So the Appearance controls drive the same localStorage keys
+   `app.js` reads, mirror them to the server so the two cannot drift, and the
+   section says where the value actually lives rather than pretending the
+   server is in charge.
+
+2. **Numeric settings save on blur, not behind one Save button.** A single
+   Save invites the half-typed-then-navigated-away failure. Per-field commit
+   with per-field validation means an invalid interval never leaves the field,
+   and a valid one is stored before you can lose it. Ranges are enforced
+   client-side because the server stores every setting as an opaque string.
+
+3. **The saved state is the server's echo, never the typed value.** After a
+   successful `PATCH /api/settings` the page adopts `res.settings`, so what
+   the page shows is what the server actually holds.
+
+4. **Rebuilding the cache is the only destructive control in the app**, so it
+   is the only one behind a confirmation, and the confirmation names the exact
+   counts about to be deleted rather than saying "all data".
+
+5. **The webhook is the only thing in QView that sends anything off the
+   machine**, so its section leads with a banner saying exactly that and
+   exactly what is in the payload. Off by default; https enforced before both
+   Save and Send test; the subject line is behind a second, separate toggle.
+
+### Fixed along the way
+
+- The sync chip had been stuck on "never synced" since Phase 1: `paintSync()`
+  read snake_case keys from a camelCase payload and treated epoch-ms as
+  seconds. Fixed on both ends.
+- Health-dot staleness now respects the active window instead of going amber
+  every night.
