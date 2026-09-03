@@ -1,0 +1,347 @@
+# QView v3 — Plan
+
+Three features: live IQS scoring, next-action-driven reply drafting, and time-off
+coverage automation. This document records what Phase 0 discovery actually found,
+what each integration can and cannot do, and the decisions that follow from that.
+
+Everything below was measured from the VM and from inside the running container,
+not assumed. Where a finding contradicts the spec, the finding wins and the
+contradiction is called out.
+
+---
+
+## Phase 0 — discovery
+
+### Summary
+
+| Integration | Spec hoped for | Reality | Tier we ship |
+|---|---|---|---|
+| SentryAI | Tier 1 REST API | Vue SPA behind an nginx catch-all, session-cookie auth | **Tier 3 (paste/CSV) working, Tier 2 wired but dormant** |
+| Slack | Bot token | Reachable, no credential exists anywhere | **Composer + dry run working, delivery dormant** |
+| Glean | API token | No Rubrik Glean host resolves at all | **Replaced by Salesforce Knowledge, which is better** |
+
+The headline: **the knowledge tier came out stronger than the spec expected and the
+official-score tier came out weaker.** Neither blocks the build. Features A, B and
+C all reach acceptance with `SENTRYAI_TOKEN`, `SLACK_BOT_TOKEN` and `GLEAN_API_TOKEN`
+all empty, which is acceptance criterion 19.
+
+### Section 0 — the blanks in the prompt, filled in
+
+```
+SENTRYAI_URL        = https://sentryai.rubrik.com/analytics/iqs   (route confirmed in the bundle)
+SLACK_TEAM_CHANNEL  = unset — configurable at runtime, no default invented
+SLACK_AUTH          = no. Neither a bot token nor a webhook URL exists.
+GLEAN_ACCESS        = no. Superseded by Salesforce Knowledge (see 0.3).
+MY_SLACK_HANDLE     = unset — a Settings field, not a hardcoded value
+```
+
+`SLACK_TEAM_CHANNEL` and `MY_SLACK_HANDLE` are deliberately left unset rather than
+guessed. A wrong channel is worse than an empty one: it means the first real
+coverage post goes somewhere unintended. Both are Settings fields, and coverage
+stays disabled until they are filled.
+
+---
+
+### 0.1 SentryAI — what it is, and why Tier 1 is not available
+
+`https://sentryai.rubrik.com` is a Vue 3 / Vite single-page application. The server
+is an nginx catch-all: **every** path returns the same 1822-byte SPA shell with
+`200 text/html`, including `/api`, `/api/health`, `/openapi.json`, `/system/metrics`
+and every other path probed. Routing is entirely client-side. There is no SSO
+redirect when unauthenticated — just the shell.
+
+This matters because it means **unauthenticated path probing can never discover the
+API.** A wrong guess and a right guess return byte-identical responses.
+
+So the entry bundle was read instead — 4,699,435 bytes, `assets/index-DVKaGUCe.js`.
+It carries a 136-entry Vite chunk manifest. The IQS routes
+(`IQS_OVERVIEW`, `IQS_METRICS`, `IQS_DISPUTES`, `IQS_COMMITTEE`, `IQS_REDIRECT`)
+resolve to `assets/CaseAuditDashboard-C29d4Wy1.js`. That chunk is 16 KB and it
+gave up the real endpoints:
+
+```
+case/audit/detail/
+case/audit/visibility/
+case/audit/dispute/render/table/
+case/audit/committee/dispute/render/table/
+```
+
+Note they are **relative** — no leading slash — so they are appended to an axios
+`baseURL` resolved at runtime. The entry bundle contains no `baseURL` literal and no
+`VITE_*` names, but does carry `"Authorization"`, `"X-CSRFToken"` and `"X-XSRF-TOKEN"`.
+That combination is a Django-style session backend, not a bearer-token API.
+
+Two other things the chunk told us, both useful:
+
+- **IQS stands for "Internal Quality Standards."** The dashboard renders an
+  `Overall Score` and an `IqsMetricXRayTooltip`.
+- The band threshold is in the code:
+  ```js
+  const f = m.value / m.max * 100; return f >= 80 ? ...
+  ```
+  **80% is the Meeting threshold, which matches the rubric already in `claude.ts`
+  exactly.** That is the first independent confirmation that our local rubric is
+  calibrated to the real system, and it is worth more than it looks: it means a
+  predicted score is comparable to an official one on the same scale.
+
+What is still unknown without an authenticated session: the dimension list, the
+per-dimension weights, and the period granularity. The spec is right that comparing
+without them is theatre — so the comparison UI labels our number **predicted** and
+the imported number **official**, and never averages them.
+
+**Decision.** `src/iqs/sentryai.ts` exports one function:
+
+```ts
+export async function fetchOfficialScores(range: Range): Promise<OfficialScore[]>
+```
+
+with three implementations selected at runtime, best available first:
+
+- **Tier 1** — not implemented. No API to call.
+- **Tier 2** — `SENTRYAI_TOKEN` + `SENTRYAI_BASE_URL` set: server-side fetch against
+  the four discovered `case/audit/*` paths with the session cookie and
+  `X-CSRFToken`. Written, dormant, untestable until a session token exists. It will
+  need one round of correction against a real response, which is expected.
+- **Tier 3** — **the working floor.** `POST /api/iqs/official/import` takes a CSV or
+  a pasted table from the IQS Report page. This is what actually runs.
+
+Unreachable is an error state, never mock data (constraint 4). With no token the
+Quality tab shows the predicted score alone and says the official score has not been
+imported, rather than inventing one.
+
+### 0.2 Slack — reachable, uncredentialed
+
+`https://slack.com/api/auth.test` from the VM returns `{"ok":false,"error":"not_authed"}`.
+Reachable, no token. `hooks.slack.com` and `api.slack.com` are both open on 443.
+None of `SLACK_BOT_TOKEN`, `SLACK_USER_TOKEN`, `SLACK_COVERAGE_CHANNEL` exist in `.env`.
+
+**Decision.** Build for the bot token, because it is what threading requires, and
+degrade cleanly:
+
+| Capability | Bot token | Webhook only | Neither (today) |
+|---|---|---|---|
+| Post to a channel | yes | one fixed channel | composed, stored, not sent |
+| Thread follow-ups (`thread_ts`) | yes | **no** | n/a |
+| Detect a reply or reaction | yes (`reactions:read`) | **no** | n/a |
+| Escalation ping after N minutes | yes | **no** | n/a |
+
+With no credential the whole of Feature C still works end to end except the final
+HTTP call: transitions are detected, posts are composed and stored in
+`coverage_posts`, and QView renders them under a "would have posted" banner. That is
+exactly the `coverageDryRun` path, so **dry run is not a special mode we bolt on —
+it is the honest default state of the system today.**
+
+Per the spec, the existing `webhookUrl` setting is **not** reused. Coverage gets its
+own `coverageSlackChannel` and its own token. The existing notify webhook stays what
+it is.
+
+One find worth carrying into Feature C: the Salesforce `Case` object has a
+**`Slack_channel__c`** field, and one of the twelve open cases populates it —
+`01273803` → `rrt-saber-health-01273803`. When a case carries its own channel, that
+is a better destination than the team channel. Compose will prefer it and fall back
+to `coverageSlackChannel`.
+
+### 0.3 Knowledge — Glean is gone, Salesforce Knowledge replaces it
+
+No Rubrik Glean host resolves from the VM or the container: `rubrik.glean.com`,
+`glean.rubrik.com`, `rubrik-be.glean.com`, `rubrik-be-prod.glean.com`,
+`rubrik-prod-be.glean.com`, `search.rubrik.com` — all NXDOMAIN. Only the public
+`glean.com` and `app.glean.com` resolve, which are the vendor's own sites and no use
+to us. `docs.rubrik.com` redirects to Okta (`onepassport.rubrik.com`) and is
+unusable without an interactive login.
+
+Curiously the Salesforce `Case` object does have a `Glean_Escalate__c` field, so
+Glean exists somewhere in Rubrik. It is simply not reachable from this box under any
+hostname we can find.
+
+**But the search that matters turned out to be available all along.** The Salesforce
+connection QView already holds can run SOSL against `KnowledgeArticleVersion`, and it
+returns the real Rubrik KB:
+
+```
+FIND {backup job failed} IN ALL FIELDS RETURNING KnowledgeArticleVersion(...)
+  000007469  A VMware backup job failed with error "Too many open external files: 12902"
+  000004510  Rubrik Backup Service (RBS) Troubleshooting
+  000009075  Oracle backup job failed during mount operation with error "mount.nfs: Address alr..."
+  000006849  VMware Backup job failing with error "Failed to get current vSphere session..."
+
+FIND {archive upload} ...
+  000002669  [INTERNAL] How to Force full archive upload for snapshot
+  000006724  Archive Upload jobs are stuck in "CANCELING" status
+  000004881  Archive Full Upload Heuristics Explained.
+  000011098  [INTERNAL] An Upload (to archive) job fails with error "Failed to upload snapshot..."
+
+FIND {cluster upgrade} ...
+  000012398  A Rubrik CDM upgrade check fails with "CDM API Token / Service Account Depre..."
+  000012576  [INTERNAL] Cluster upgrade fails with 'Setup low privilege db user rk_reader'
+  000014078  False "Upgrade failed" notifications appear in RSC after a successful cluster upgrade
+  000010645  RSC-P initiated cluster upgrade using NFS for package download
+```
+
+Four relevant hits on every term, including internal-only articles. This is a
+genuinely better source than Glean would have been: it is first-party, it is scoped
+to Rubrik support content, and it costs no new credential, no new dependency and no
+new egress path — the Salesforce connection is already open and already trusted.
+
+**Decision.** `src/knowledge/index.ts` exports:
+
+```ts
+export async function findGuidance(query: string, context: Ctx): Promise<Source[]>
+```
+
+with tiers, best first, each `Source` carrying `{ title, url, snippet, tier }`:
+
+1. **My own resolved cases.** 246 closed cases in the local cache, FTS5-indexed,
+   reusing `getRelated()` and `patterns()` from `queries.ts`. Free, offline, and the
+   most specific thing available — a case I already solved beats a generic article.
+2. **Salesforce Knowledge** via SOSL. Live, first-party, no new credential.
+   Article URL is `https://support.rubrik.com/s/article/<ArticleNumber>`.
+3. **Glean**, behind `GLEAN_API_URL` + `GLEAN_API_TOKEN`. Written, dormant, skipped
+   when unset. Kept because the field in Salesforce says it exists somewhere.
+4. **Model reasoning alone**, explicitly labelled unsourced.
+
+The spec's rule holds and is enforced in the composer: **never let tier 4 look like
+tier 1.** Every rendered next-action names its tier, and an unsourced suggestion says
+so in the Slack post and in the UI.
+
+`knowledge_cache` memoises by `query_hash` so a repeated lookup during a sync storm
+does not re-hit Salesforce.
+
+### 0.4 Case status — the spec's example status does not exist
+
+The spec says to source `coverageTriggerStatuses` from the cache via `facets()`. That
+would have shipped a broken default, so this was checked against the Salesforce
+`Case` describe instead.
+
+The local cache holds **three** distinct statuses, because it is one engineer's 258
+cases:
+
+```
+  11  Waiting for Customer Input      (open)
+   1  Resolved - Pending Customer     (open)
+ 246  Closed
+```
+
+The real picklist has **49 active values**. And the spec's own worked example —
+*"Waiting on Rubrik Support"* — **is not one of them.** The real value is
+**"Waiting for Rubrik Support"** (*for*, not *on*). Sourcing the trigger list from
+the cache would have produced a multi-select that could not express the single most
+important trigger in the feature.
+
+**Decision.** The `coverageTriggerStatuses` multi-select is populated from the
+**describe picklist**, cached in `settings` and refreshed on sync. The cache is used
+only to annotate each option with observed frequency, which is genuinely useful — it
+tells you which triggers would actually fire. Defaults, being the statuses that mean
+the ball is in our court:
+
+```
+Waiting for Rubrik Support   (primary)
+Reopen
+New
+Assigned
+```
+
+The other 45 are selectable. The live backtest the spec asks for
+("over the last 30 days, this configuration would have fired N posts") makes a wrong
+selection visible before it costs anything.
+
+### 0.5 Environment — no new dependencies needed
+
+- Node **v22.23.2** in the container, global `fetch` available. Every new outbound
+  call (Slack, SentryAI, Salesforce Knowledge) uses it. **Zero new dependencies**,
+  so constraint 3 needs no exercise.
+- The corporate CA is already wired: `certs/rubrik-ca-bundle.pem` mounted read-only
+  at `/app/certs`, `NODE_EXTRA_CA_CERTS` set in compose. From inside the container
+  `sentryai.rubrik.com` returns 200 in 312 ms and `slack.com` 200 in 421 ms.
+- **`.env` reaches the container through compose `env_file:`, not a bind mount.**
+  There is no `/app/.env`. Anything needing a secret reads `process.env`.
+- Disk: 4.7 GB free of 19 GB. The new tables are small; `iqs_scores` is the only one
+  that grows per-comment and it is bounded by comment volume (2,087 of my comments
+  total, 68 on open cases).
+
+### 0.6 Baseline the features will run against
+
+```
+open cases                12   (1 escalated, 1 with a Slack channel, 10× P2, 1× P3, 1× P4)
+my comments               2,087 total, 68 on open cases, avg 2,063 chars
+commitments               612 met, 90 breached, 13 unparsed, 10 active
+closed cases for tier 1   246
+```
+
+Twelve open cases is a small enough queue that Layer 2 model scoring is cheap: 68
+comments to score once, then only on change. The hash cache means steady-state cost
+is near zero.
+
+---
+
+## Decisions carried into the build
+
+1. **The rubric moves to `src/iqs/rubric.ts` and `claude.ts` imports it.** Not
+   copied — imported. Constraint 10 makes duplication a bug regardless of output.
+   `claude.ts` also has its own `addBusinessDays()` duplicating `businessHours.ts`;
+   that gets consolidated in the same pass for the same reason.
+2. **Layer 1 must be able to stand alone.** Acceptance criterion 2 requires a score
+   with the Anthropic token unset. Layer 1 is pure functions over cached rows: no
+   network, no API key, runs on every sync.
+3. **Layer 2 is cached by content hash, not by time.** `sha256(comment bodies +
+   RUBRIC_VERSION + model)`. Unchanged content is never re-scored. Bumping
+   `RUBRIC_VERSION` invalidates and schedules a rate-limited background re-score,
+   newest first.
+4. **One next-action derivation.** `sla.ts:deriveNextAction()` and
+   `claude.ts:detectKeyword()` currently answer the same question from different
+   fields and will disagree. Both become thin wrappers over `src/nextAction.ts`.
+5. **The coverage trigger is a status transition, full stop.** Not a customer reply,
+   not a commitment deadline, not case age. `runSync()` already snapshots prior state
+   for `needsReply`; that query gains `status` and `is_escalated`:
+   ```sql
+   SELECT case_number, needs_my_reply, status, is_escalated FROM cases WHERE id IN (...)
+   ```
+   Commitments appear in a post as a context line only, and never affect whether it
+   fires, where it sits, or its severity.
+6. **Deterministic post ids, following `notify.ts`.** `UNIQUE(case_number,
+   trigger_kind, trigger_at)` with `INSERT OR IGNORE` turns "have I already posted
+   this" into a primary-key constraint rather than a heuristic — the same trick that
+   makes the five-minute event loop safe.
+7. **`coverageDryRun` starts true and nothing reaches Slack while it is.** Tested
+   explicitly, per constraint 11. Today it is also the only thing that can happen,
+   since no token exists.
+8. **Still read-only against Salesforce.** No writes, no auto-send. Drafts are staged
+   and copied by hand. The Draft tab keeps its warning.
+
+## Data egress
+
+Constraint 6 says customer data leaves the box only through Slack coverage posts.
+After discovery the full outbound list is:
+
+| Destination | Direction | Carries case data | Default |
+|---|---|---|---|
+| Salesforce | in and out | yes (it is the source) | on |
+| Anthropic gateway | out | comment text for Layer 2 | on, disableable |
+| Salesforce Knowledge (SOSL) | out | a search phrase derived from the case | on |
+| Slack coverage | out | case number, account, brief | **off** |
+| SentryAI | out | nothing (read-only fetch) | off |
+| Glean | out | a search phrase | off, unreachable |
+
+The Knowledge search is the one addition worth flagging, and it is the mildest
+possible: it sends a derived query string to Salesforce, which is where the case
+already lives.
+
+---
+
+## Build order
+
+| Phase | Scope | Gate |
+|---|---|---|
+| 0 | Discovery, this document | done |
+| 1 | `src/iqs/rubric.ts`, `claude.ts` imports it, no behaviour change | drafts generate identically |
+| 2 | Layer 1 scorer, queue column, Quality tab | scores appear with zero API calls |
+| 3 | Layer 2 scorer, hash cache, `/iqs` page | cost and hit rate visible |
+| 4 | `src/nextAction.ts`, both callers delegate, queue column | `sla.ts` and `claude.ts` agree |
+| 5 | Draft pre-flight, auto-repair, keyword override, artifacts | predicted score before copy |
+| 6 | Time-off calendar, commitment pre-flight | range surfaces its commitments |
+| 7 | Status-transition watcher, compose, dry run, sweep | 30-day backtest shows volume |
+| 8 | Slack delivery, threading, approval queue, escalation ping | dormant until a token exists |
+| 9 | Recap, batch drafting, SentryAI import | — |
+
+Phase 8's gate cannot be met today and that is a credential problem, not a code
+problem. It ships complete and dormant; the dry-run path is what gets verified.
