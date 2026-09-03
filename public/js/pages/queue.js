@@ -27,6 +27,7 @@ import { navigate, setQuery } from "../router.js";
 const KEY_COLS  = "queue.columns";
 const KEY_VIEWS = "queue.views";
 const KEY_STALE = "queue.staleDays";
+const KEY_ORDER = "queue.order";
 
 const DEFAULT_STALE_DAYS = 5;
 
@@ -488,6 +489,14 @@ export async function render(ctx, host, shell) {
     const rows = filterRows(state.all, state).sort(comparator(state.sort));
     state.rows = rows;
     if (state.cursor >= rows.length) state.cursor = rows.length - 1;
+
+    /**
+     * The case page's prev/next has to walk the queue in the order you are
+     * actually looking at, not some canonical order the server would pick. The
+     * ordering only exists in this browser, so hand it over here — case numbers
+     * only, no case content.
+     */
+    store.set(KEY_ORDER, { at: Date.now(), numbers: rows.map((r) => r.caseNumber) });
 
     paintResultLine(rows);
 

@@ -252,3 +252,13 @@ optional webhook, `.env.example`, `docker-compose.yml`, `README.md`.
 - **Commitment parsing false negatives.** Mitigated by the `unparsed` state: anything that
   looks like a commitment but does not yield a datetime is surfaced for manual fixing
   rather than dropped.
+
+## Changes to existing behaviour
+
+**Phase 3 → `public/js/pages/queue.js`.** The case page's prev/next has to walk the queue
+in the order you are actually looking at — your filters, your sort, your grouping — and
+that ordering only ever exists in the browser. `paint()` now writes the visible case
+numbers to `localStorage` under `qview.queue.order` on every repaint. Case numbers only;
+no case content leaves the table. Nothing else about the Queue changed, and the case page
+degrades to disabled prev/next controls when the key is absent, so a direct URL visit
+without having opened the Queue first still works.

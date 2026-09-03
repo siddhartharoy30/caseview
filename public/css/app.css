@@ -1210,3 +1210,536 @@ tr.row:hover .copybtn { opacity: 1; }
   .queue-find { width: 100%; }
   .filter-select { max-width: none; flex: 1 1 140px; }
 }
+
+/* ============================================================================
+   Phase 3 — case detail
+
+   The page is a sticky identity header, a tab strip, and one scrolling body.
+   Only the header is pinned: the timeline is the thing you actually read, and
+   pinning anything else steals the height it needs.
+   ========================================================================= */
+
+.cd-head {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding: 14px 0 10px;
+  margin-bottom: 2px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.cd-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cd-num {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: .02em;
+}
+
+.cd-subject {
+  flex: 1 1 320px;
+  min-width: 0;
+  margin: 0;
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.cd-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.cd-stepper {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+}
+
+.cd-stepper-pos {
+  padding: 0 7px;
+  font-size: 11px;
+  color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The meta grid. Fixed-width columns would wrap badly on a long account name,
+   so the columns size to content and the grid reflows instead. */
+.cd-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+  gap: 10px 22px;
+  margin-top: 12px;
+}
+
+.cd-meta-item { min-width: 0; }
+
+.cd-meta-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-4);
+  margin-bottom: 3px;
+}
+
+.cd-meta-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--text-2);
+  min-width: 0;
+}
+
+.cd-meta-value > span { min-width: 0; overflow-wrap: anywhere; }
+
+.cd-mail {
+  font-size: 12px;
+  color: var(--text-3);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.cd-mail:hover { color: var(--blue); text-decoration: underline; }
+
+/* Live countdowns share the queue's tone vocabulary so a deadline reads the
+   same colour wherever you meet it. */
+.cd { font-variant-numeric: tabular-nums; }
+.cd.red { color: var(--red); font-weight: 600; }
+.cd.amber { color: var(--amber); font-weight: 600; }
+
+.abs { color: var(--text-4); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+.age-red { color: var(--red); }
+.age-amber { color: var(--amber); }
+
+/* --- tabs ---------------------------------------------------------------- */
+
+.cd-tabs {
+  display: flex;
+  gap: 2px;
+  padding-top: 10px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.cd-tabs::-webkit-scrollbar { display: none; }
+
+.cd-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 13px;
+  border: 0;
+  border-radius: 7px 7px 0 0;
+  background: none;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cd-tab:hover { background: var(--surface-2); color: var(--text-2); }
+
+.cd-tab.active { color: var(--blue); }
+.cd-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--blue-2);
+}
+
+.cd-tab-count {
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: var(--surface-3);
+  color: var(--text-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.cd-tab.active .cd-tab-count { background: rgba(66, 133, 244, .18); color: var(--blue); }
+
+.cd-body { padding-bottom: 40px; }
+
+/* --- timeline ------------------------------------------------------------ */
+
+.tl { display: flex; flex-direction: column; gap: 10px; }
+
+/* The rail is the fastest read on the page: colour tells you public vs
+   internal before you have read a word, so it is a solid bar and not a dot. */
+.tl-entry {
+  display: grid;
+  grid-template-columns: 3px 1fr;
+  gap: 0 12px;
+  padding: 11px 13px 11px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.tl-rail { background: var(--border-2); border-radius: 8px 0 0 8px; }
+.tl-entry.is-public .tl-rail { background: var(--blue-2); }
+.tl-entry.is-internal .tl-rail { background: var(--purple); }
+.tl-entry.is-internal { background: var(--surface-2); }
+.tl-entry.is-mine .tl-rail { background: var(--green-2); }
+
+.tl-main { min-width: 0; padding-left: 12px; }
+
+.tl-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 5px;
+}
+
+.tl-author { font-size: 13px; font-weight: 600; color: var(--text); }
+
+.tl-badge {
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: var(--surface-3);
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.tl-badge.internal { background: rgba(197, 138, 249, .16); color: var(--purple); }
+.tl-badge.email { background: rgba(120, 217, 236, .14); color: var(--cyan); }
+.tl-badge.inbound { background: rgba(251, 188, 4, .14); color: var(--amber); }
+
+.tl-when {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tl-subject {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-bottom: 5px;
+  overflow-wrap: anywhere;
+}
+
+/* pre-wrap, not a <pre>: customer text keeps its own line breaks and indented
+   log paste, but still wraps rather than forcing a horizontal scrollbar. */
+.tl-text {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tl-link { color: var(--blue); text-decoration: none; }
+.tl-link:hover { text-decoration: underline; }
+
+.tl-folded { position: relative; }
+.tl-folded::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 22px;
+  height: 44px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--surface));
+}
+.tl-entry.is-internal .tl-folded::after {
+  background: linear-gradient(to bottom, transparent, var(--surface-2));
+}
+
+.tl-more {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.tl-quote { margin-top: 8px; }
+
+.tl-quoted {
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-2);
+  color: var(--text-4);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tl-empty { font-size: 12px; color: var(--text-4); font-style: italic; }
+
+/* The description is the start of the story, so it sits at the top of the
+   timeline permanently rather than sorting away under 140 comments. */
+.tl-desc {
+  padding: 12px 14px;
+  border: 1px dashed var(--border-2);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.tl-desc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+.tl-desc-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-4);
+}
+
+@keyframes tl-flash-kf {
+  from { border-color: var(--blue-2); box-shadow: 0 0 0 3px rgba(66, 133, 244, .22); }
+  to   { border-color: var(--border); box-shadow: 0 0 0 0 rgba(66, 133, 244, 0); }
+}
+.tl-flash { animation: tl-flash-kf 1.6s ease-out; }
+
+mark {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: rgba(251, 188, 4, .32);
+  color: inherit;
+}
+
+/* --- artifacts ----------------------------------------------------------- */
+
+.art-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 12px;
+}
+
+.art-card {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.art-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 9px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.art-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.art-head .btn { margin-left: auto; }
+
+.art-rows { display: flex; flex-direction: column; gap: 7px; }
+
+.art-row {
+  display: grid;
+  grid-template-columns: minmax(88px, 34%) 1fr auto;
+  align-items: baseline;
+  gap: 10px;
+}
+.art-row.wide { grid-template-columns: 1fr auto; }
+
+.art-key { font-size: 12px; color: var(--text-4); overflow-wrap: anywhere; }
+
+/* Cluster IDs and versions get copied into CLI commands constantly — monospace
+   so a transposed character is visible before it is pasted. */
+.art-val {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.art-none { font-size: 12px; color: var(--text-4); font-style: italic; }
+
+/* --- commitments on a case ------------------------------------------------ */
+
+.cm-list { display: flex; flex-direction: column; gap: 9px; }
+
+.cm-card {
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-2);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.cm-card.st-active { border-left-color: var(--blue-2); }
+.cm-card.st-met { border-left-color: var(--green-2); }
+.cm-card.st-breached { border-left-color: var(--red-2); }
+.cm-card.st-unparsed { border-left-color: var(--purple); }
+.cm-card.st-superseded,
+.cm-card.st-dismissed { border-left-color: var(--border-2); opacity: .68; }
+
+.cm-top {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.cm-top .btn { margin-left: auto; }
+
+/* The sentence the customer was actually given. Quoted, because the exact
+   wording is what you are held to. */
+.cm-raw {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-3);
+  padding-left: 9px;
+  border-left: 2px solid var(--border-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cm-note { margin-top: 6px; font-size: 12px; color: var(--text-4); }
+
+/* --- related -------------------------------------------------------------- */
+
+.rel-card {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 13px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: inherit;
+  text-decoration: none;
+}
+.rel-card:hover { border-color: var(--border-2); background: var(--surface-2); }
+.rel-card .cname {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--blue);
+}
+.rel-card .rsubject { flex: 1 1 240px; min-width: 0; font-size: 13px; color: var(--text-2); }
+
+.jira-warn { margin-top: 8px; }
+
+/* --- draft ---------------------------------------------------------------- */
+
+.draft-card {
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.draft-area {
+  display: block;
+  width: 100%;
+  min-height: 320px;
+  padding: 11px 12px;
+  border: 1px solid var(--border-2);
+  border-radius: 7px;
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+}
+.draft-area:focus { outline: none; border-color: var(--blue-2); }
+
+.draft-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-4);
+}
+
+.draft-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-bottom: 11px;
+}
+
+/* --- small shared controls ------------------------------------------------ */
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.icon-btn:hover:not(:disabled) { background: var(--surface-2); color: var(--text); border-color: var(--border-2); }
+.icon-btn:disabled { opacity: .38; cursor: default; }
+
+/* Copy buttons sit next to values and must not push them around, so they hold
+   their box and only gain contrast on hover. */
+.copybtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--text-4);
+  cursor: pointer;
+}
+.copybtn:hover { background: var(--surface-3); color: var(--text-2); }
+
+@media (max-width: 820px) {
+  .cd-head { position: static; }
+  .cd-title-actions { margin-left: 0; width: 100%; }
+  .cd-meta { grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 9px 14px; }
+  .cd-tab { padding: 8px 10px; }
+  .art-grid { grid-template-columns: 1fr; }
+  .art-row { grid-template-columns: 1fr auto; }
+  .tl-when { margin-left: 0; width: 100%; }
+  .draft-area { min-height: 240px; }
+}
