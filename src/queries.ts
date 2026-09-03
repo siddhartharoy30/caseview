@@ -309,13 +309,32 @@ export interface CommitmentRow {
   updated_at: number;
 }
 
-function toApiCommitment(r: CommitmentRow, subject: string | null, account: string | null) {
+/**
+ * The case columns a commitment carries with it.
+ *
+ * A deadline is only meaningful next to the case it was made on, and the
+ * Commitments page has to be able to hide the ones on closed cases without a
+ * second round-trip: 89 of the 90 breaches in this cache are on cases that
+ * shipped months ago, and a page that opens on those is a page nobody reads.
+ */
+interface CommitmentCase {
+  subject: string | null;
+  account: string | null;
+  priority: string | null;
+  status: string | null;
+  isClosed: boolean;
+}
+
+function toApiCommitment(r: CommitmentRow, c: CommitmentCase | null) {
   return {
     id: r.id,
     caseId: r.case_id,
     caseNumber: r.case_number,
-    subject,
-    account,
+    subject: c ? c.subject : null,
+    account: c ? c.account : null,
+    priority: c ? c.priority : null,
+    status: c ? c.status : null,
+    isClosed: c ? c.isClosed : false,
     dueAt: r.due_at,
     rawText: r.raw_text,
     source: r.source,
@@ -335,21 +354,45 @@ export function listCommitments(states?: string[]) {
     : "";
   const rows = db
     .prepare(
-      `SELECT cm.*, c.subject AS c_subject, c.account AS c_account
+      `SELECT cm.*,
+              c.subject   AS c_subject,
+              c.account   AS c_account,
+              c.priority  AS c_priority,
+              c.status    AS c_status,
+              c.is_closed AS c_is_closed
        FROM commitments cm LEFT JOIN cases c ON c.id = cm.case_id
        ${filter}
        ORDER BY cm.due_at IS NULL, cm.due_at ASC`,
     )
-    .all(...(states || [])) as Array<CommitmentRow & { c_subject: string | null; c_account: string | null }>;
+    .all(...(states || [])) as Array<
+      CommitmentRow & {
+        c_subject: string | null;
+        c_account: string | null;
+        c_priority: string | null;
+        c_status: string | null;
+        c_is_closed: number | null;
+      }
+    >;
 
-  return rows.map((r) => toApiCommitment(r, r.c_subject, r.c_account));
+  return rows.map((r) =>
+    toApiCommitment(r, {
+      subject: r.c_subject,
+      account: r.c_account,
+      priority: r.c_priority,
+      status: r.c_status,
+      // LEFT JOIN: a commitment whose case fell out of the cache is not closed,
+      // it is unknown. Treating it as open keeps it visible rather than hiding
+      // an orphan behind the default filter.
+      isClosed: r.c_is_closed === 1,
+    }),
+  );
 }
 
 export function listCommitmentsForCase(caseNumber: string) {
   const rows = db
     .prepare("SELECT * FROM commitments WHERE case_number = ? ORDER BY due_at IS NULL, due_at ASC")
     .all(caseNumber) as CommitmentRow[];
-  return rows.map((r) => toApiCommitment(r, null, null));
+  return rows.map((r) => toApiCommitment(r, null));
 }
 
 /**

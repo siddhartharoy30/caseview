@@ -5,7 +5,7 @@
  * replaces it — the page should not jump once data arrives.
  */
 
-import { h, icon, mount } from "./dom.js";
+import { copy, h, icon, mount } from "./dom.js";
 
 /* ------------------------------------------------------------------ toasts */
 
@@ -168,3 +168,27 @@ export function button(label, opts = {}) {
     title: title || null,
   }, iconPaths ? icon(iconPaths, small ? 13 : 15) : null, label);
 }
+
+/* -------------------------------------------------------------------- copy */
+
+const ICON_COPY = ["M9 9h10v10H9z", "M5 15V5h10"];
+
+/**
+ * copy() resolves to its label and says nothing on screen. A clipboard write
+ * with no feedback is indistinguishable from a broken button, so every caller
+ * wants the toast — which makes it the helper's job, not the caller's.
+ */
+export function copyToast(text, label) {
+  copy(text, label)
+    .then((m) => toast(m, "ok"))
+    .catch(() => toast("Could not copy", "err"));
+}
+
+/** The small inline copy affordance used beside IDs, values and quoted text. */
+export const copyBtn = (text, label, title) =>
+  h("button", {
+    class: "copybtn",
+    type: "button",
+    title: title || "Copy",
+    onclick: (e) => { e.stopPropagation(); copyToast(text, label); },
+  }, icon(ICON_COPY, 13));

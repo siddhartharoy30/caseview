@@ -262,3 +262,28 @@ numbers to `localStorage` under `qview.queue.order` on every repaint. Case numbe
 no case content leaves the table. Nothing else about the Queue changed, and the case page
 degrades to disabled prev/next controls when the key is absent, so a direct URL visit
 without having opened the Queue first still works.
+
+**Phase 4 → `src/queries.ts`.** `listCommitments` now LEFT JOINs `cases`, so every row
+returned by `GET /api/commitments` also carries `subject`, `account`, `priority`, `status`
+and `isClosed`. Purely additive — no field was renamed or removed, and existing consumers
+see the same keys they saw before. The join is a LEFT one on purpose: a commitment whose
+case has fallen out of the cache reports `isClosed: false`, because that case is not
+closed, it is unknown, and defaulting it to closed would hide a live deadline.
+`listCommitmentsForCase` still passes `null` and is byte-for-byte unchanged in behaviour —
+the case page already has the case.
+
+**Phase 4 → `public/js/pages/caseDetail.js`.** The HTML-to-text sanitizers
+(`decodeEntities`, `htmlToText`, `splitQuoted`, `highlightInto`, `textNodes`, `oneLine`)
+moved out to `public/js/lib/text.js`, and the copy affordance (`copyToast`, `copyBtn`)
+moved to `public/js/lib/ui.js`. Both are lifts, not rewrites: the case page imports the
+same functions and renders identically. One behaviour did change — the copy failure toast
+passed `"error"`, which `toast()` does not recognise, so it displayed for 2.2s with no
+error styling; it now passes `"err"`. The extraction is the point: Commitments and, later,
+Search have to escape customer-authored HTML by exactly the same rules the case page does,
+and two copies of an escaping routine drift.
+
+**Phase 4 → `public/js/app.js` contract.** The sidebar risk badge has linked to
+`/commitments?state=at-risk` since Phase 1, but nothing read that parameter, so clicking it
+landed on an unfiltered page that looked like the filter had applied. The Commitments page
+now honours `?state=`, accepting both the band ids it emits itself and the spellings the
+rest of the app already uses. `app.js` was not modified.

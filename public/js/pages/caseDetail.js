@@ -13,11 +13,14 @@
  * term, and that mark is a DOM node, not a string.
  */
 
-import { $, $$, h, mount, on, icon, copy, debounce } from "../lib/dom.js";
+import { $, $$, h, mount, on, icon, debounce } from "../lib/dom.js";
 import { api, ApiError } from "../lib/api.js";
 import * as store from "../lib/store.js";
 import * as fmt from "../lib/fmt.js";
-import { toast, emptyState, banner, button, skeletonRows } from "../lib/ui.js";
+import {
+  toast, emptyState, banner, button, skeletonRows, copyBtn, copyToast,
+} from "../lib/ui.js";
+import { htmlToText, splitQuoted, textNodes } from "../lib/text.js";
 import { page } from "./_shared.js";
 import { navigate, setQuery } from "../router.js";
 
@@ -30,7 +33,6 @@ const KEY_TLPREF = "case.timelinePrefs";
 const FOLD_LINES = 14;    // bodies longer than this fold, with the line count shown
 const FOLD_CHARS = 1100;
 
-const ICON_COPY = ["M9 9h10v10H9z", "M5 15V5h10"];
 const ICON_OUT  = ["M14 4h6v6", "M20 4l-8 8", "M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"];
 const ICON_PREV = ["M15 5l-7 7 7 7"];
 const ICON_NEXT = ["M9 5l7 7-7 7"];
@@ -52,139 +54,7 @@ const COMMITMENT_TONE = {
   dismissed: "neutral",
 };
 
-/* -------------------------------------------------- HTML body → plain text */
-
-/**
- * Only these names count as markup.
- *
- * That distinction matters: real comment bodies contain angle-bracketed URLs
- * and addresses — <https://support.rubrik.com/...> and <support@rubrik.com> —
- * and a blanket /<[^>]*>/ strip eats them, quietly deleting the exact link the
- * customer sent. The \b after the alternation is what stops <support@...> from
- * matching the "sup" in this list.
- */
-const TAG_NAMES = [
-  "a", "b", "blockquote", "body", "br", "caption", "center", "code", "col",
-  "colgroup", "dd", "div", "dl", "dt", "em", "font", "h[1-6]", "head", "hr",
-  "html", "i", "img", "label", "li", "meta", "ol", "p", "pre", "s", "small",
-  "span", "strike", "strong", "sub", "sup", "table", "tbody", "td", "tfoot",
-  "th", "thead", "title", "tr", "u", "ul", "o:p", "v:\\w+", "w:\\w+",
-].join("|");
-
-const TAG_RE = new RegExp(`<\\s*/?\\s*(?:${TAG_NAMES})\\b[^>]*>`, "gi");
-
-const ENTITIES = {
-  nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'",
-  ldquo: "\u201c", rdquo: "\u201d", lsquo: "\u2018", rsquo: "\u2019",
-  mdash: "\u2014", ndash: "\u2013", hellip: "\u2026", bull: "\u2022",
-  copy: "\u00a9", reg: "\u00ae", trade: "\u2122", deg: "\u00b0",
-  middot: "\u00b7", laquo: "\u00ab", raquo: "\u00bb",
-};
-
-function decodeEntities(input) {
-  return input.replace(/&(#x?[0-9a-f]+|[a-z][a-z0-9]*);/gi, (whole, body) => {
-    if (body[0] === "#") {
-      const hex = body[1] === "x" || body[1] === "X";
-      const code = parseInt(hex ? body.slice(2) : body.slice(1), hex ? 16 : 10);
-      if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) return whole;
-      try { return String.fromCodePoint(code); } catch { return whole; }
-    }
-    const hit = ENTITIES[body.toLowerCase()];
-    return hit === undefined ? whole : hit;
-  });
-}
-
-/** Salesforce HTML in, readable plain text out. Never parsed into the DOM. */
-function htmlToText(input) {
-  if (!input) return "";
-  let s = String(input).replace(/\r\n?/g, "\n");
-  s = s.replace(/<(style|script)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "");
-  s = s.replace(/<\s*br\s*\/?\s*>/gi, "\n");
-  s = s.replace(/<\s*hr\s*\/?\s*>/gi, "\n\u2014\u2014\u2014\n");
-  s = s.replace(/<\s*li\b[^>]*>/gi, "\n\u2022 ");
-  s = s.replace(/<\s*\/\s*(?:p|div|tr|li|ul|ol|table|h[1-6]|blockquote|pre|dd|dt)\s*>/gi, "\n");
-  s = s.replace(TAG_RE, "");
-  s = decodeEntities(s);
-  s = s.replace(/\u00a0/g, " ");
-  s = s.split("\n").map((line) => line.replace(/[ \t]+$/, "")).join("\n");
-  return s.replace(/\n{3,}/g, "\n\n").trim();
-}
-
-/**
- * Email replies carry the whole prior thread underneath them. Splitting at the
- * quote marker keeps the new content open while the history stays one click
- * away — which is not the same as truncating it, because the control below says
- * exactly how much is down there.
- */
-const QUOTE_RE = /^[ \t>]*(?:On\s.{4,160}\bwrote:\s*$|-{2,}\s*Original Message\s*-*\s*$|_{5,}\s*$|-{3,}\s*Forwarded message\s*-*\s*$|From:\s*\S)/i;
-
-function splitQuoted(text) {
-  const lines = text.split("\n");
-  for (let i = 1; i < lines.length; i++) {
-    if (!QUOTE_RE.test(lines[i])) continue;
-    const head = lines.slice(0, i).join("\n").trimEnd();
-    const tail = lines.slice(i).join("\n").trim();
-    if (head.length >= 40 && tail.length > 0) return { body: head, quoted: tail };
-    return { body: text, quoted: "" };
-  }
-  return { body: text, quoted: "" };
-}
-
-/* ------------------------------------------------------- text → safe nodes */
-
-const URL_RE = /\bhttps?:\/\/[^\s<>()[\]"']+/gi;
-
-function highlightInto(target, text, needle) {
-  if (!needle) { target.append(document.createTextNode(text)); return; }
-  const hay = text.toLowerCase();
-  const find = needle.toLowerCase();
-  let at = 0;
-  for (;;) {
-    const idx = hay.indexOf(find, at);
-    if (idx === -1) break;
-    if (idx > at) target.append(document.createTextNode(text.slice(at, idx)));
-    target.append(h("mark", { text: text.slice(idx, idx + find.length) }));
-    at = idx + find.length;
-  }
-  if (at < text.length) target.append(document.createTextNode(text.slice(at)));
-}
-
-/**
- * Text in, nodes out. URLs become real anchors so a KB link inside a comment is
- * one click away rather than something to select and paste, and the search term
- * is marked wherever it lands.
- */
-function textNodes(text, needle, className = "tl-text") {
-  const out = h("div", { class: className });
-  let at = 0;
-  URL_RE.lastIndex = 0;
-  for (let m; (m = URL_RE.exec(text)); ) {
-    if (m.index > at) highlightInto(out, text.slice(at, m.index), needle);
-    const url = m[0].replace(/[.,;:!?)\]]+$/, "");
-    const a = h("a", { class: "tl-link", href: url, target: "_blank", rel: "noopener noreferrer" });
-    highlightInto(a, url, needle);
-    out.append(a);
-    at = m.index + url.length;
-    URL_RE.lastIndex = at;
-  }
-  if (at < text.length) highlightInto(out, text.slice(at), needle);
-  return out;
-}
-
 /* ----------------------------------------------------------------- helpers */
-
-/** copy() resolves to its label; a clipboard write with no toast looks broken. */
-function copyToast(text, label) {
-  copy(text, label).then((m) => toast(m, "ok")).catch(() => toast("Could not copy", "error"));
-}
-
-const copyBtn = (text, label, title) =>
-  h("button", {
-    class: "copybtn",
-    type: "button",
-    title: title || "Copy",
-    onclick: (e) => { e.stopPropagation(); copyToast(text, label); },
-  }, icon(ICON_COPY, 13));
 
 function lastActivity(c) {
   const stamps = [c.lastCustomerTouch, c.lastMyTouch, c.lastModifiedDate]
