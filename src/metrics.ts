@@ -183,12 +183,31 @@ export function scorecard(range: Range) {
   };
   const openedByDay = tally(opened.map((c) => dayKey(c.created_date)));
   const closedByDay = tally(closed.filter((c) => c.closed_date).map((c) => dayKey(c.closed_date!)));
+
+  // Resolution time per day, from the same rows the closed count comes from.
+  // The alternative was to let the page fetch cases and compute this itself,
+  // which would put two answers to one question on one screen; one extra field
+  // on a query that is already running is cheaper than that drift.
+  const ttrByDay = new Map<string, number[]>();
+  for (const c of closed) {
+    if (!c.closed_date) continue;
+    const d = dayKey(c.closed_date);
+    if (!ttrByDay.has(d)) ttrByDay.set(d, []);
+    ttrByDay.get(d)!.push(hoursBetween(c.created_date, c.closed_date));
+  }
+
   const days = Array.from(new Set([...openedByDay, ...closedByDay].map((d) => d.key))).sort();
-  const volume = days.map((d) => ({
-    day: d,
-    opened: openedByDay.find((x) => x.key === d)?.count || 0,
-    closed: closedByDay.find((x) => x.key === d)?.count || 0,
-  }));
+  const volume = days.map((d) => {
+    const ttrs = ttrByDay.get(d) || [];
+    return {
+      day: d,
+      opened: openedByDay.find((x) => x.key === d)?.count || 0,
+      closed: closedByDay.find((x) => x.key === d)?.count || 0,
+      // null, not 0, on a day that closed nothing — a gap in the trend line is
+      // honest, a zero is a claim that cases were resolved instantly.
+      meanTtrHours: ttrs.length ? ttrs.reduce((a, b) => a + b, 0) / ttrs.length : null,
+    };
+  });
 
   /* ---- manual entries ---------------------------------------------------- */
 
@@ -219,7 +238,14 @@ export function scorecard(range: Range) {
     aging,
     byProductArea: tally(open.map((c) => c.product_area || "Unclassified")),
     byAccount: tally(open.map((c) => c.account || "Unknown")).slice(0, 10),
-    escalations: open.filter((c) => c.is_escalated || c.priority === "P1" || c.priority === "P0").length,
+    // Two numbers rather than one. The queue can filter on the escalation flag
+    // and it can filter on priority, but it cannot express the union of the
+    // two, and a tile whose drill-through lands on a different population than
+    // the tile counted is worse than having no tile at all.
+    escalations: {
+      flagged: open.filter((c) => c.is_escalated).length,
+      p1: open.filter((c) => c.priority === "P0" || c.priority === "P1").length,
+    },
     volume,
     manual,
   };

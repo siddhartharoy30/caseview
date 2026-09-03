@@ -168,13 +168,66 @@ const GROUPS = [
 ];
 
 const STATE_LABEL = {
-  reply:    "Needs my reply",
-  breached: "Commitment breached",
-  due:      "Commitment due today",
-  stale:    "Stale",
-  waiting:  "Waiting on customer",
+  reply:     "Needs my reply",
+  breached:  "Commitment breached",
+  due:       "Commitment due today",
+  stale:     "Stale",
+  waiting:   "Waiting on customer",
+  escalated: "Escalated",
 };
 const STATE_RANK = { reply: 0, breached: 1, due: 2, stale: 3, waiting: 4, "": 5 };
+
+/**
+ * Drill-through parameters.
+ *
+ * The Scorecard's promise is that every number on it can be clicked into and
+ * checked. That only holds if the Queue can express the same population the
+ * number was counted over, and the toolbar filters cannot: they have no notion
+ * of a date window, of an explicit set of cases, or of an exact status string.
+ * These four fill that gap. They are deliberately not in the toolbar — they
+ * arrive by link, from a tile, and the only affordance they need is a chip
+ * saying what is being shown and a way to drop it.
+ *
+ *   cases=01302660,01303334      exactly these case numbers
+ *   opened=<iso>..<iso>          created inside the window; either end may be blank
+ *   closed=<iso>..<iso>          closed inside the window
+ *   caseStatus=Waiting for ...   exact status string, not a substring match
+ *
+ * Windows are half-open — from inclusive, to exclusive — which is what the
+ * server's own range maths does, so a case never lands in two adjacent buckets.
+ */
+const DRILL_KEYS = ["cases", "opened", "closed", "caseStatus"];
+
+function parseCaseSet(spec) {
+  const ids = String(spec || "").split(",").map((s) => s.trim()).filter(Boolean);
+  return ids.length ? new Set(ids) : null;
+}
+
+function parseRange(spec) {
+  const raw = String(spec || "");
+  if (!raw.includes("..")) return null;
+  const [a, b] = raw.split("..");
+  const from = a ? Date.parse(a) : NaN;
+  const to   = b ? Date.parse(b) : NaN;
+  if (!Number.isFinite(from) && !Number.isFinite(to)) return null;
+  return { from: Number.isFinite(from) ? from : null, to: Number.isFinite(to) ? to : null };
+}
+
+function inRange(value, range) {
+  if (!value) return false;
+  const t = Date.parse(value);
+  if (!Number.isFinite(t)) return false;
+  if (range.from !== null && t < range.from) return false;
+  if (range.to !== null && t >= range.to) return false;
+  return true;
+}
+
+function rangeLabel(range) {
+  const d = (ms) => fmt.dateShort(new Date(ms).toISOString());
+  if (range.from === null) return `before ${d(range.to)}`;
+  if (range.to === null) return `after ${d(range.from)}`;
+  return `${d(range.from)} – ${d(range.to - 1)}`;
+}
 
 /* ----------------------------------------------------------------- helpers */
 
@@ -221,6 +274,7 @@ function decorate(cases, staleDays, now = Date.now()) {
     if (!c.needsMyReply && /wait|pending|customer/i.test(c.status || "")) flags.add("waiting");
     const touch = c.lastMyTouch ? Date.parse(c.lastMyTouch) : null;
     if (!c.isClosed && (touch === null || now - touch > staleDays * 86400000)) flags.add("stale");
+    if (c.isEscalated) flags.add("escalated");
 
     c._flags = flags;
     c._state = ["reply", "breached", "due", "stale", "waiting"].find((k) => flags.has(k)) || "";
@@ -316,6 +370,11 @@ export async function render(ctx, host, shell) {
     sort:     parseSort(q.sort),
     group:    q.group || "",
     view:     q.view || "",
+    // Set by a Scorecard tile rather than by the toolbar — see DRILL_KEYS.
+    caseSet:  parseCaseSet(q.cases),
+    opened:   parseRange(q.opened),
+    closed:   parseRange(q.closed),
+    cstatus:  q.caseStatus || "",
     all:      [],
     rows:     [],
     cursor:   -1,
@@ -372,6 +431,9 @@ export async function render(ctx, host, shell) {
   function applyView(view) {
     setQuery({
       view: null, priority: null, status: null, account: null, area: null, flag: null, sort: null, group: null,
+      // A saved view describes a standing slice of the queue; a drill describes
+      // one trip in from a Scorecard tile. Picking a view ends the trip.
+      cases: null, opened: null, closed: null, caseStatus: null,
       ...(view ? { ...view.params, view: view.id } : {}),
     }, { replace: false });
   }
@@ -460,6 +522,7 @@ export async function render(ctx, host, shell) {
         onclick: () => setQuery({
           priority: null, account: null, area: null, flag: null,
           q: null, sort: null, view: null, group: null,
+          cases: null, opened: null, closed: null, caseStatus: null,
         }, { replace: false }),
       }),
     );
@@ -473,6 +536,13 @@ export async function render(ctx, host, shell) {
       if (s.account && c.account !== s.account) return false;
       if (s.area && c.productArea !== s.area) return false;
       if (s.flag && !c._flags.has(s.flag)) return false;
+      // Drill-through predicates. These narrow to exactly the population a
+      // Scorecard tile counted, which is the whole point of the tile being a
+      // link — the number and the list have to be the same set of cases.
+      if (s.caseSet && !s.caseSet.has(c.caseNumber)) return false;
+      if (s.opened && !inRange(c.createdDate, s.opened)) return false;
+      if (s.closed && !inRange(c.closedDate, s.closed)) return false;
+      if (s.cstatus && c.status !== s.cstatus) return false;
       if (needle) {
         const hay = `${c.caseNumber} ${c.subject} ${c.account} ${c.contactName} ${c.status} ${c.productArea}`.toLowerCase();
         if (!hay.includes(needle)) return false;
@@ -534,12 +604,36 @@ export async function render(ctx, host, shell) {
     el.setSelectionRange(el.value.length, el.value.length);
   }
 
+  /**
+   * A drill arrives by link with no toolbar control behind it, so without this
+   * the page would silently be showing a subset and look like the whole queue.
+   * Each chip says what narrowed the list and offers the way back out.
+   */
+  function drillChips() {
+    const chips = [];
+    const chip = (label, key) => chips.push(
+      h("span", { class: "drill-chip" },
+        h("span", { text: label }),
+        h("button", {
+          class: "drill-x", type: "button", title: "Remove this filter",
+          "aria-label": `Remove filter: ${label}`,
+          text: "×", onclick: () => setQuery({ [key]: null, view: null }, { replace: false }),
+        })));
+
+    if (state.caseSet) chip(`${state.caseSet.size} specific case${state.caseSet.size === 1 ? "" : "s"}`, "cases");
+    if (state.opened)  chip(`opened ${rangeLabel(state.opened)}`, "opened");
+    if (state.closed)  chip(`closed ${rangeLabel(state.closed)}`, "closed");
+    if (state.cstatus) chip(`status is “${state.cstatus}”`, "caseStatus");
+    return chips;
+  }
+
   function paintResultLine(rows) {
     const legend = [...new Set(rows.map((r) => r._state).filter(Boolean))]
       .sort((a, b) => STATE_RANK[a] - STATE_RANK[b]);
 
     mount(resultLine,
       h("span", { text: `${rows.length} of ${state.all.length} ${state.scope === "open" ? "open " : ""}case${rows.length === 1 ? "" : "s"}` }),
+      ...drillChips(),
       state.sort.length
         ? h("button", {
             class: "linkbtn", onclick: () => setQuery({ sort: null }),
@@ -591,6 +685,26 @@ export async function render(ctx, host, shell) {
   }
 
   function emptyFor() {
+    // A drill that comes up empty is worth its own message: the tile it came
+    // from claimed a count, so zero rows here means something disagrees —
+    // almost always the scope, since a closed-case drill needs more than the
+    // open scope the queue defaults to.
+    if (state.caseSet || state.opened || state.closed || state.cstatus) {
+      const scoped = state.scope === "open";
+      return {
+        title: "Nothing here in this scope",
+        message: scoped
+          ? "This link came from the Scorecard, which counts closed cases too. Widen the scope to see them."
+          : "The cache does not hold any case matching this link. It may have been counted before the last sync.",
+        iconName: "search",
+        action: scoped
+          ? button("Include closed cases", { small: true, onclick: () => setQuery({ status: "all" }) })
+          : button("Clear this link", {
+              small: true,
+              onclick: () => setQuery({ cases: null, opened: null, closed: null, caseStatus: null }),
+            }),
+      };
+    }
     if (state.find || state.priority || state.account || state.area || state.flag) {
       return {
         title: "Nothing matches these filters",
@@ -598,7 +712,10 @@ export async function render(ctx, host, shell) {
         iconName: "search",
         action: button("Reset filters", {
           small: true,
-          onclick: () => setQuery({ priority: null, account: null, area: null, flag: null, q: null, view: null }),
+          onclick: () => setQuery({
+            priority: null, account: null, area: null, flag: null, q: null, view: null,
+            cases: null, opened: null, closed: null, caseStatus: null,
+          }),
         }),
       };
     }

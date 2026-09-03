@@ -287,3 +287,41 @@ and two copies of an escaping routine drift.
 landed on an unfiltered page that looked like the filter had applied. The Commitments page
 now honours `?state=`, accepting both the band ids it emits itself and the spellings the
 rest of the app already uses. `app.js` was not modified.
+
+**Phase 5 → `public/js/pages/queue.js`.** The Queue learned four new URL parameters —
+`cases`, `opened`, `closed` and `caseStatus` — and one new derived flag, `escalated`.
+This is additive: no existing parameter changed meaning, and a URL that worked before
+Phase 5 produces the same rows after it. The four exist because the Scorecard has to be
+able to name the exact population behind every number it prints, and the toolbar filters
+could not express three of those populations: a set of specific cases (the initial-response
+misses), a date window (everything opened or closed inside the period), and an exact status
+string (the open-by-status breakdown). Windows are half-open — `from` inclusive, `to`
+exclusive — matching the arithmetic the server already does in `resolveRange`, so a tile
+and its drill-through count the same rows rather than nearly the same rows. Either end may
+be blank, which is what lets the aging chart's open-ended `30d+` bucket drill through
+without a fifth parameter. `escalated` is deliberately absent from the `_state` precedence
+list, because escalation is a property of a case, not a state of my queue, and letting it
+outrank "customer is waiting on me" would bury the thing the Queue exists to surface.
+
+Two supporting changes came with it. Because these parameters arrive from a link rather
+than from a control the user can see, `drillChips()` renders one dismissable chip per
+active drill in the result line — a filter with no visible affordance is a filter the user
+blames on the data. And the empty state now recognises a drill that came up empty only
+because the Queue defaults to open cases while the Scorecard counts closed ones too, and
+offers "Include closed cases" instead of the generic nothing-here message.
+
+**Phase 5 → `src/metrics.ts`, `volume[].meanTtrHours`.** One extra field on a query that
+was already running, computed from the same rows the daily `closed` count comes from.
+Additive; nothing else in the payload moved. It is `null`, not `0`, on a day that closed
+nothing: a gap in the resolution-time trend is honest, whereas a zero is a claim that
+cases were resolved instantly. The chart honours that by splitting its polyline into
+separate runs at each null rather than drawing through the gap.
+
+**Phase 5 → `src/metrics.ts`, `escalations`.** This is the one breaking change in the
+phase. The field was a single number counting cases that are either flagged escalated or
+sitting at P0/P1; it is now `{ flagged, p1 }`. The old scalar was unusable on a page whose
+whole premise is that every number can be clicked: the Queue can filter on the escalation
+flag and it can filter on priority, but it cannot express the union of the two, so the
+only drill-through available for that tile would have landed on a different population
+than the tile had counted. Two numbers that each drill exactly are worth more than one
+number that drills approximately. Nothing outside the Scorecard consumed the field.
