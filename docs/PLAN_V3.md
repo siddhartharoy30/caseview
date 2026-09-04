@@ -339,7 +339,7 @@ already lives.
 | 4 | `src/nextAction.ts`, both callers delegate, queue column | done, `sla.ts` and `claude.ts` agree |
 | 5 | Draft pre-flight, auto-repair, keyword override, artifacts | predicted score before copy |
 | 6 | Time-off calendar, commitment pre-flight | done, range surfaces its commitments |
-| 7 | Status-transition watcher, compose, dry run, sweep | 30-day backtest shows volume |
+| 7 | Status-transition watcher, compose, dry run, sweep | done, 30-day backtest shows volume (701 checked, 6 would fire) |
 | 8 | Slack delivery, threading, approval queue, escalation ping | dormant until a token exists |
 | 9 | Recap, batch drafting, SentryAI import | — |
 
@@ -636,3 +636,53 @@ coverage-trigger settings block, a dry-run banner, and an approval queue —
 real screen area this page doesn't have yet but will. `/iqs` went through the
 same reasoning in phase 3: give the feature its own room now rather than
 migrate it out of a denser page later.
+
+---
+
+## Phase 7 — discovery and decisions
+
+**Reopened decision: webhook, not bot token.** Phase 0 picked a bot token
+specifically because threading and reaction-based escalation need one. Asked
+directly, the owner declined to stand up a Slack app with bot scopes at all —
+"no need of bot." So delivery now goes through Slack Incoming Webhooks
+instead: a JSON `POST {"text": ...}` to a per-channel URL, no OAuth, no bot
+user. This app already has that exact primitive, built for the general
+event webhook (`notify.ts:sendWebhookTest`) — coverage delivery reuses it
+rather than adding a second HTTP client.
+
+**What this costs, disclosed rather than absorbed:** a webhook URL is locked
+to one channel at creation time, so `Case.Slack_channel__c` (case `01273803`
+carries its own channel, found in phase 0) can no longer be preferred per
+case the way phase 0 planned — every coverage post now goes to whichever one
+channel is currently active. Escalation pings and reaction-detection (phase
+8) are also off the table without a bot token; if that turns out to matter
+later, the webhook and bot approaches can coexist; nothing here forecloses
+adding a token afterward.
+
+**The channel picker the owner asked for:** `coverage_channels` is a table,
+not a single setting — a short list of `{label, webhookUrl}` (e.g. "Test
+channel", "Team channel"), one marked active via `coverageActiveChannelId`.
+Adding the real team channel later is "add a row and switch the active one,"
+not "overwrite the test URL and lose it." Every channel gets its own "Send
+test" action, not only the active one, so a new channel can be proven before
+it goes live.
+
+**The 30-day backtest is real, not aspirational.** Phase 0 named it as
+something the spec wanted without confirming it was possible. Checked before
+building anything: `CaseHistory` has `Status` in its tracked-fields picklist,
+and a live query against the org confirmed real transition rows exist
+(`Waiting for Customer Input` → `Waiting for Rubrik Support` and similar, for
+this owner's own cases, timestamped). So the backtest queries real history —
+`salesforce.ts:getRecentStatusHistory()` — rather than simulating from
+current state, and it checks each transition's timestamp against declared
+`time_off` ranges the same way the live sweep does, so a backtest and the
+real thing agree on what counts.
+
+**The trigger is still a status transition into a configured list, checked
+only while time off is active** — unchanged from phase 0's decision 5.
+`coverage_posts` keeps phase 0's `UNIQUE(case_number, trigger_status,
+trigger_at)` dedup (decision 6, the same `INSERT OR IGNORE` trick
+`notify.ts`'s events already use), and `coverageDryRun` still starts `true`
+(decision 7) — nothing this phase does is any different from what a real
+delivery would compose and record, except the one `fetch()` call, which
+dry-run skips.

@@ -195,6 +195,40 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
 CREATE INDEX IF NOT EXISTS idx_events_pending ON events(delivered, attempts);
 
+-- Phase 7: coverage delivery targets. A short list rather than one setting,
+-- so adding the real team channel later is "add a row and switch the active
+-- one," not "overwrite the test URL and lose it." webhook_url is a Slack
+-- Incoming Webhook (one channel per URL, no bot token) -- see PLAN_V3.md's
+-- phase 7 section for why this replaced phase 0's original bot-token plan.
+CREATE TABLE IF NOT EXISTS coverage_channels (
+  id         TEXT PRIMARY KEY,
+  label      TEXT NOT NULL,
+  webhook_url TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+-- One row per status-transition-during-time-off that qualified, whether or
+-- not it was actually delivered. The UNIQUE constraint is phase 0's decision
+-- 6, the same INSERT-OR-IGNORE dedup trick the events table already uses:
+-- "have I already posted this" becomes a primary-key check, not a
+-- heuristic re-run of the whole detection logic.
+CREATE TABLE IF NOT EXISTS coverage_posts (
+  id             TEXT PRIMARY KEY,
+  case_id        TEXT NOT NULL,
+  case_number    TEXT NOT NULL,
+  trigger_status TEXT NOT NULL,
+  trigger_at     TEXT NOT NULL,             -- ISO, the transition's own timestamp
+  body           TEXT NOT NULL,
+  channel_id     TEXT,                      -- NULL if no channel was active when composed
+  dry_run        INTEGER NOT NULL,
+  delivered      INTEGER NOT NULL DEFAULT 0,
+  error          TEXT,
+  created_at     INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_coverage_posts_dedupe
+  ON coverage_posts(case_number, trigger_status, trigger_at);
+CREATE INDEX IF NOT EXISTS idx_coverage_posts_created ON coverage_posts(created_at);
+
 CREATE TABLE IF NOT EXISTS iqs_scores (
   case_id        TEXT NOT NULL,
   layer          TEXT NOT NULL,                    -- 'layer1' (deterministic) | 'layer2' (model)
@@ -370,6 +404,14 @@ export const SETTING_DEFAULTS: Record<string, string> = {
 
   escalationUpdateHours: "24",  // how often an escalation owes the customer an update
   closedCaseWindowDays: "120",  // how far back to keep closed cases for metrics
+
+  // Phase 7 coverage automation. Starts inert on both axes: no channel is
+  // active until one is added, and dry run starts true regardless -- the
+  // combination means nothing can reach Slack until a person does two
+  // separate deliberate things.
+  coverageDryRun: "true",
+  coverageActiveChannelId: "",
+  coverageTriggerStatuses: "Waiting for Rubrik Support,Reopen,New,Assigned",
 };
 
 export function getSetting(key: string): string {

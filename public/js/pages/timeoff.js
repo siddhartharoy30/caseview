@@ -232,12 +232,268 @@ export function render(ctx, host, shell) {
           }));
   }
 
+  /* ============================================================== coverage */
+
+  /**
+   * Phase 7: who covers a case while I'm out.
+   *
+   * Delivery is a Slack Incoming Webhook, not a bot -- one channel per URL,
+   * no OAuth. So "choose which channel" is a short list with one marked
+   * active, not a single field: adding the real team channel later is "add
+   * a row and switch the active one," and any channel can be tested
+   * whether or not it's the one live coverage would actually use.
+   *
+   * Dry run starts on and stays on until switched off here explicitly --
+   * this section always shows which state it's in, in a color a glance
+   * catches, because "silently posting for real" is the one failure mode
+   * worth over-communicating against.
+   */
+
+  const covState = {
+    channels: null, activeChannelId: null,
+    dryRun: true, triggerStatuses: "",
+    posts: null,
+    loading: true, error: null,
+  };
+
+  const coverageHost = h("div", {});
+  const backtestHost = h("div", {});
+
+  async function loadCoverage() {
+    covState.loading = true;
+    paintCoverage();
+    try {
+      const [chRes, settingsRes, postsRes] = await Promise.all([
+        api.coverageChannels(),
+        api.settings(),
+        api.coveragePosts(),
+      ]);
+      if (disposed) return;
+      covState.channels = chRes.channels;
+      covState.activeChannelId = chRes.activeChannelId;
+      covState.dryRun = (settingsRes.settings.coverageDryRun ?? "true") !== "false";
+      covState.triggerStatuses = settingsRes.settings.coverageTriggerStatuses || "";
+      covState.posts = postsRes.posts;
+      covState.error = null;
+    } catch (err) {
+      covState.error = err;
+    }
+    covState.loading = false;
+    paintCoverage();
+  }
+
+  function maskWebhook(url) {
+    try {
+      const u = new URL(url);
+      return u.origin + u.pathname.slice(0, 24) + "…";
+    } catch {
+      return url.slice(0, 40) + "…";
+    }
+  }
+
+  function channelRow(ch) {
+    const isActive = ch.id === covState.activeChannelId;
+
+    const testBtn = button("Send test", {
+      small: true,
+      onclick: async () => {
+        testBtn.disabled = true;
+        testBtn.textContent = "Sending…";
+        try {
+          const res = await api.testCoverageChannel(ch.id);
+          toast(res.ok ? `Test message sent to "${ch.label}"` : (res.error || "Failed to send"), res.ok ? "ok" : "error");
+        } catch (err) {
+          toast(err.message || "Could not send test message", "error");
+        }
+        testBtn.disabled = false;
+        testBtn.textContent = "Send test";
+      },
+    });
+
+    return h("div", { class: `cov-channel-row${isActive ? " is-active" : ""}` },
+      h("span", { class: `chip ${isActive ? "ok" : "neutral"}`, text: isActive ? "Active" : "Inactive" }),
+      h("span", { class: "cov-channel-label", text: ch.label }),
+      h("code", { class: "cov-channel-url dim", text: maskWebhook(ch.webhookUrl) }),
+      h("div", { class: "spacer" }),
+      testBtn,
+      !isActive ? button("Make active", {
+        small: true, kind: "primary",
+        onclick: async () => {
+          try {
+            await api.activateCoverageChannel(ch.id);
+            toast(`"${ch.label}" is now the active coverage channel`, "ok");
+            loadCoverage();
+          } catch (err) {
+            toast(err.message || "Could not activate", "error");
+          }
+        },
+      }) : null,
+      button("Remove", {
+        small: true, kind: "danger",
+        onclick: async () => {
+          const ok = await confirmDialog({
+            title: "Remove this channel?", message: ch.label, confirmLabel: "Remove", danger: true,
+          });
+          if (!ok) return;
+          await api.deleteCoverageChannel(ch.id);
+          toast("Removed", "ok");
+          loadCoverage();
+        },
+      }));
+  }
+
+  const newChannelLabel = h("input", { class: "input", type: "text", placeholder: "e.g. Test channel (personal)" });
+  const newChannelUrl = h("input", { class: "input", type: "url", placeholder: "https://hooks.slack.com/services/…" });
+
+  const addChannelBtn = button("Add channel", {
+    small: true, kind: "primary",
+    onclick: async () => {
+      const label = newChannelLabel.value.trim();
+      const url = newChannelUrl.value.trim();
+      if (!label || !url) { toast("A label and a webhook URL are both required", "error"); return; }
+      if (!/^https:\/\//i.test(url)) { toast("Webhook URL must start with https://", "error"); return; }
+      addChannelBtn.disabled = true;
+      try {
+        await api.addCoverageChannel(label, url);
+        newChannelLabel.value = ""; newChannelUrl.value = "";
+        toast("Channel added", "ok");
+        loadCoverage();
+      } catch (err) {
+        toast(err.message || "Could not add channel", "error");
+      }
+      addChannelBtn.disabled = false;
+    },
+  });
+
+  const dryRunInput = h("input", { type: "checkbox" });
+  const triggerStatusesInput = h("input", { class: "input", type: "text" });
+
+  const saveTriggerBtn = button("Save", {
+    small: true, kind: "primary",
+    onclick: async () => {
+      saveTriggerBtn.disabled = true;
+      try {
+        await api.saveSettings({
+          coverageDryRun: String(dryRunInput.checked),
+          coverageTriggerStatuses: triggerStatusesInput.value,
+        });
+        toast("Coverage settings saved", "ok");
+        loadCoverage();
+      } catch (err) {
+        toast(err.message || "Could not save", "error");
+      }
+      saveTriggerBtn.disabled = false;
+    },
+  });
+
+  const backtestBtn = button("Run 30-day backtest", {
+    small: true,
+    onclick: async () => {
+      backtestBtn.disabled = true;
+      backtestBtn.textContent = "Checking Salesforce history…";
+      mount(backtestHost, h("div", { class: "hint", text: "Querying real Status history — this hits Salesforce, give it a moment." }));
+      try {
+        const result = await api.coverageBacktest();
+        mount(backtestHost,
+          h("div", { class: "hint" },
+            `${result.wouldHaveFired} of ${result.transitionsChecked} status changes in the last 30 days would have fired a coverage post, given the current trigger list and your declared time off.`),
+          result.sample.length
+            ? h("div", { class: "to-cm-list" }, result.sample.map((s) =>
+                h("a", { class: "to-cm-row", href: `/case/${encodeURIComponent(s.caseNumber)}` },
+                  h("span", { class: "mono to-cm-num", text: s.caseNumber }),
+                  h("span", { class: "to-cm-subject", text: `→ ${s.status}` }),
+                  h("span", { class: "dim to-cm-due", text: fmt.dateTimeShort(s.at) }))))
+            : null);
+      } catch (err) {
+        mount(backtestHost, banner("error", err.message || "Backtest failed"));
+      }
+      backtestBtn.disabled = false;
+      backtestBtn.textContent = "Run 30-day backtest";
+    },
+  });
+
+  function postRow(p) {
+    const tone = p.dryRun ? "neutral" : p.delivered ? "ok" : p.error ? "p0" : "p2";
+    const label = p.dryRun ? "Dry run" : p.delivered ? "Sent" : p.error ? "Failed" : "Pending";
+    return h("div", { class: "cov-post" },
+      h("div", { class: "cov-post-head" },
+        h("span", { class: `chip ${tone}`, text: label }),
+        h("a", { class: "mono", href: `/case/${encodeURIComponent(p.caseNumber)}`, text: p.caseNumber }),
+        h("span", { class: "dim", text: `→ ${p.triggerStatus}` }),
+        h("div", { class: "spacer" }),
+        h("span", { class: "dim", text: fmt.dateTimeShort(p.createdAt) })),
+      h("pre", { class: "cov-post-body", text: p.body }),
+      p.error ? h("div", { class: "hint", style: { color: "var(--red)" }, text: p.error }) : null);
+  }
+
+  function paintCoverage() {
+    if (covState.loading) {
+      mount(coverageHost,
+        h("div", { class: "to-sec-head" }, h("span", { class: "art-title", text: "Coverage" })),
+        skeletonRows(3, [140, 200, 100]));
+      return;
+    }
+    if (covState.error) {
+      mount(coverageHost,
+        h("div", { class: "to-sec-head" }, h("span", { class: "art-title", text: "Coverage" })),
+        banner("error", covState.error.message || "Could not load coverage settings",
+          button("Retry", { small: true, onclick: () => loadCoverage() })));
+      return;
+    }
+
+    dryRunInput.checked = covState.dryRun;
+    triggerStatusesInput.value = covState.triggerStatuses;
+
+    mount(coverageHost,
+      h("div", { class: "to-sec-head" }, h("span", { class: "art-title", text: "Coverage" })),
+
+      covState.dryRun
+        ? banner("info", "Dry run is on — coverage posts are composed and recorded, but nothing is sent to Slack.")
+        : banner("warn", "Dry run is OFF. A matching status change during declared time off will post to the active channel for real."),
+
+      h("div", { class: "card cov-card" },
+        h("div", { class: "art-head" }, h("span", { class: "art-title", text: "Channels" })),
+        h("div", { class: "hint", style: { marginBottom: "10px" } },
+          "One channel is active at a time — that's where a real, non-dry-run post goes. Any channel can be tested regardless of which one is active."),
+        covState.channels.length
+          ? h("div", { class: "cov-channels" }, covState.channels.map(channelRow))
+          : h("div", { class: "hint" }, "No channel added yet."),
+        h("div", { class: "cov-add-channel" }, newChannelLabel, newChannelUrl, addChannelBtn)),
+
+      h("div", { class: "card cov-card" },
+        h("div", { class: "art-head" }, h("span", { class: "art-title", text: "Trigger" })),
+        h("label", { class: "checkline" }, dryRunInput,
+          h("span", { text: "Dry run (recommended until you've tested a channel)" })),
+        field("Trigger statuses (comma-separated)", triggerStatusesInput,
+          "A status transition into one of these, while time off is active, is what composes a coverage post."),
+        saveTriggerBtn),
+
+      h("div", { class: "card cov-card" },
+        h("div", { class: "art-head" },
+          h("span", { class: "art-title", text: "30-day backtest" }),
+          h("div", { class: "spacer" }),
+          backtestBtn),
+        h("div", { class: "hint", style: { marginBottom: "8px" } },
+          "Checks real Salesforce Status history against the trigger list above and your declared time off — not a simulation."),
+        backtestHost),
+
+      h("div", { class: "card cov-card" },
+        h("div", { class: "art-head" },
+          h("span", { class: "art-title", text: "Recent activity" }),
+          h("span", { class: "cd-tab-count mono", text: String(covState.posts.length) })),
+        covState.posts.length
+          ? h("div", { class: "cov-posts" }, covState.posts.map(postRow))
+          : h("div", { class: "hint" }, "Nothing recorded yet.")));
+  }
+
   mount(host, page(
     pageHead("Time Off", "What's due while you're away, surfaced before you leave."),
-    bodyHost));
+    bodyHost,
+    coverageHost));
 
   paint();
   load();
+  loadCoverage();
 
   return () => { disposed = true; };
 }

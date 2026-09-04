@@ -39,6 +39,15 @@ import {
   facets,
 } from "./queries";
 import { listTimeOff, addTimeOff, deleteTimeOff, rangeBoundsMs } from "./timeOff";
+import {
+  listChannels,
+  addChannel,
+  deleteChannel,
+  setActiveChannel,
+  sendTestMessage,
+  listRecentPosts,
+  backtest30Days,
+} from "./coverage";
 import { rubricMeta } from "./iqs/rubric";
 import type { Keyword } from "./iqs/rubric";
 import {
@@ -514,6 +523,59 @@ app.post("/api/settings/rebuild-cache", requireAuth, async (_req, res) => {
   rebuildCache();
   const result = await syncOnce(true);
   res.json({ ok: result.ok, result });
+});
+
+/* -------------------------------------------------------------- coverage */
+
+app.get("/api/coverage/channels", requireAuth, noStore, (_req, res) => {
+  res.json({ channels: listChannels(), activeChannelId: getSetting("coverageActiveChannelId") || null });
+});
+
+app.post("/api/coverage/channels", requireAuth, (req, res) => {
+  try {
+    const channel = addChannel(String(req.body?.label || ""), String(req.body?.webhookUrl || ""));
+    res.json({ ok: true, channel });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete("/api/coverage/channels/:id", requireAuth, (req, res) => {
+  deleteChannel(req.params.id);
+  res.json({ ok: true });
+});
+
+app.post("/api/coverage/channels/:id/activate", requireAuth, (req, res) => {
+  try {
+    setActiveChannel(req.params.id);
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/** Proves a channel works without waiting for a real coverage trigger — same idea as the general webhook test, aimed at one coverage channel. */
+app.post("/api/coverage/channels/:id/test", requireAuth, async (req, res) => {
+  const result = await sendTestMessage(req.params.id);
+  res.status(result.ok ? 200 : 502).json(result);
+});
+
+app.get("/api/coverage/posts", requireAuth, noStore, (_req, res) => {
+  res.json({ posts: listRecentPosts() });
+});
+
+/**
+ * Reads real Status history rather than simulating from current state (see
+ * PLAN_V3.md's phase 7 section) — this can take a few seconds, it is a live
+ * Salesforce query, not a cached read.
+ */
+app.get("/api/coverage/backtest", requireAuth, async (_req, res) => {
+  try {
+    const result = await backtest30Days();
+    res.json(result);
+  } catch (err: any) {
+    res.status(502).json({ error: err.message });
+  }
 });
 
 /**

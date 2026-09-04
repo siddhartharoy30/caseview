@@ -202,6 +202,44 @@ export async function listClosedCasesSince(days: number): Promise<SalesforceCase
   return soqlQueryAll<SalesforceCase>(soql);
 }
 
+export interface StatusTransition {
+  caseNumber: string;
+  oldValue: string | null;
+  newValue: string | null;
+  createdDate: string;
+}
+
+/**
+ * Real Status field history, for phase 7's 30-day coverage backtest.
+ * Confirmed live before this was written: CaseHistory tracks Status on this
+ * org (it is in the Field picklist) and real transition rows exist for this
+ * owner's cases -- so the backtest reads what actually happened rather than
+ * simulating from current state.
+ */
+export async function getRecentStatusHistory(days: number): Promise<StatusTransition[]> {
+  const cutoff = new Date(Date.now() - days * 24 * 3600_000).toISOString();
+  const owner = config.salesforce.ownerName
+    ? `Case.Owner.Name = '${escapeSoqlString(config.salesforce.ownerName)}' AND `
+    : "";
+  const soql =
+    `SELECT Case.CaseNumber, OldValue, NewValue, CreatedDate FROM CaseHistory ` +
+    `WHERE ${owner}Field = 'Status' AND CreatedDate >= ${cutoff} ORDER BY CreatedDate ASC`;
+  const rows = await soqlQueryAll<{
+    Case: { CaseNumber: string } | null;
+    OldValue: string | null;
+    NewValue: string | null;
+    CreatedDate: string;
+  }>(soql);
+  return rows
+    .filter((r) => r.Case?.CaseNumber)
+    .map((r) => ({
+      caseNumber: r.Case!.CaseNumber,
+      oldValue: r.OldValue,
+      newValue: r.NewValue,
+      createdDate: r.CreatedDate,
+    }));
+}
+
 export async function getCaseByNumber(caseNumber: string): Promise<SalesforceCase | null> {
   const soql = `SELECT ${CASE_FIELDS} FROM Case WHERE CaseNumber = '${escapeSoqlString(caseNumber)}' LIMIT 1`;
   const data = await soqlQuery(soql);

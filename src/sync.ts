@@ -33,6 +33,7 @@ import { deriveProductArea } from "./productArea";
 import { extractArtifacts, errorSignature } from "./artifacts";
 import { parseCommitments } from "./commitments";
 import { scoreCases } from "./iqs/store";
+import { sweepTransitions } from "./coverage";
 import { zoned } from "./businessHours";
 import { log, errText } from "./log";
 
@@ -430,13 +431,14 @@ async function runSync(full: boolean): Promise<SyncResult> {
     // still the before-state. Only the cases in this batch are looked at.
     const priorRows = db
       .prepare(
-        "SELECT case_number, needs_my_reply FROM cases WHERE id IN (" +
+        "SELECT case_number, needs_my_reply, status FROM cases WHERE id IN (" +
           caseIds.map(() => "?").join(",") +
           ")",
       )
-      .all(...caseIds) as Array<{ case_number: string; needs_my_reply: number }>;
+      .all(...caseIds) as Array<{ case_number: string; needs_my_reply: number; status: string | null }>;
     const priorSeen = new Set(priorRows.map((r) => r.case_number));
     const priorNeedsReply = new Map(priorRows.map((r) => [r.case_number, !!r.needs_my_reply]));
+    const priorStatus = new Map(priorRows.map((r) => [r.case_number, r.status]));
 
     const write = db.transaction(() => {
       for (const c of cases) upsertCase.run(caseRow(c, syncedAt));
@@ -471,7 +473,7 @@ async function runSync(full: boolean): Promise<SyncResult> {
     const afterRows = db
       .prepare(
         "SELECT case_number, subject, priority, account, created_date, last_customer_touch," +
-          " is_closed, needs_my_reply FROM cases WHERE id IN (" +
+          " is_closed, needs_my_reply, status FROM cases WHERE id IN (" +
           caseIds.map(() => "?").join(",") +
           ")",
       )
@@ -484,9 +486,11 @@ async function runSync(full: boolean): Promise<SyncResult> {
       last_customer_touch: string | null;
       is_closed: number;
       needs_my_reply: number;
+      status: string | null;
     }>;
 
     const delta: SyncDelta = { created: [], replied: [] };
+    const statusTransitions: Array<{ caseNumber: string; newStatus: string | null }> = [];
     for (const r of afterRows) {
       const d: DeltaCase = {
         caseNumber: r.case_number,
@@ -499,11 +503,24 @@ async function runSync(full: boolean): Promise<SyncResult> {
       };
       if (!priorSeen.has(r.case_number)) delta.created.push(d);
       if (r.needs_my_reply && !priorNeedsReply.get(r.case_number)) delta.replied.push(d);
+      // A row cannot tell you it moved, same as needs_my_reply above -- only a
+      // case that existed before with a different status counts as a
+      // transition. A full resync would make every case look like it just
+      // transitioned, so it is suppressed the same way case.new events are.
+      if (priorSeen.has(r.case_number) && priorStatus.get(r.case_number) !== r.status) {
+        statusTransitions.push({ caseNumber: r.case_number, newStatus: r.status });
+      }
     }
 
     // A full resync repopulates an empty cache, where every case looks new.
     // Announcing all of them would be indistinguishable from a malfunction.
-    await runEvents(delta, full || since === null);
+    const suppressTransitionEvents = full || since === null;
+    await runEvents(delta, suppressTransitionEvents);
+    if (!suppressTransitionEvents) {
+      await sweepTransitions(statusTransitions).catch((err) =>
+        log.warn("coverage.sweep_failed", { error: (err as Error).message }),
+      );
+    }
 
     // Watermark from the data, not the clock: a case modified during the run
     // must not be skipped next time.

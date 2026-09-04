@@ -136,4 +136,13 @@ export const api = {
     }),
   repairDraft: (caseNumber, draftText, keyword) =>
     request("POST", "/api/intelligence/repair-reply", { case_number: caseNumber, draft_text: draftText, keyword }),
+
+  /* Phase 7 — coverage delivery (Slack Incoming Webhooks, one channel per URL) */
+  coverageChannels:      ()            => request("GET",    "/api/coverage/channels"),
+  addCoverageChannel:    (label, url)  => request("POST",   "/api/coverage/channels", { label, webhookUrl: url }),
+  deleteCoverageChannel: (id)          => request("DELETE", `/api/coverage/channels/${encodeURIComponent(id)}`),
+  activateCoverageChannel: (id)        => request("POST",   `/api/coverage/channels/${encodeURIComponent(id)}/activate`),
+  testCoverageChannel:   (id)          => request("POST",   `/api/coverage/channels/${encodeURIComponent(id)}/test`),
+  coveragePosts:         ()            => request("GET",    "/api/coverage/posts"),
+  coverageBacktest:      ()            => request("GET",    "/api/coverage/backtest"),
 };
