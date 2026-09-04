@@ -1,4 +1,7 @@
 import type { SalesforceCase } from "./salesforce";
+import { nextActionForKeyword } from "./nextAction";
+import type { Keyword } from "./iqs/rubric";
+export type { NextAction, NextActionKind } from "./nextAction";
 
 const SLA_WINDOWS_MINUTES: Record<string, number> = {
   P1: 30,
@@ -38,80 +41,26 @@ export function caseAgeDays(c: SalesforceCase): number {
   return (Date.now() - new Date(c.CreatedDate).getTime()) / (1000 * 60 * 60 * 24);
 }
 
-export type NextActionKind = "work" | "followup" | "closure";
-
-export interface NextAction {
-  kind: NextActionKind;
-  label: string;
-  reason: string;
-}
-
 function daysSince(iso: string | null | undefined): number | null {
   if (!iso) return null;
   return (Date.now() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24);
 }
 
-// Derives the recommended plan of action for a case from its status, how long
-// the customer has been quiet, and whether its NCC commitment has slipped.
-export function deriveNextAction(c: SalesforceCase): NextAction {
-  const status = (c.Status || "").toLowerCase();
-  const custQuietDays = daysSince(c.Last_Customer_Update__c);
-  const nccOverdue = c.NCC_date__c ? new Date(c.NCC_date__c).getTime() < Date.now() : false;
-
-  // Resolved and waiting on the customer to confirm the fix.
-  if (status.includes("resolved") && status.includes("pending")) {
-    if (custQuietDays !== null && custQuietDays >= 4) {
-      return {
-        kind: "closure",
-        label: "Closure",
-        reason: `Resolved; customer quiet ${Math.floor(custQuietDays)}d — close out`,
-      };
-    }
-    return {
-      kind: "followup",
-      label: "Follow up",
-      reason: "Resolved — confirm fix with customer",
-    };
-  }
-
-  // Waiting for the customer to respond with info we need.
-  if (status.includes("waiting") && status.includes("customer")) {
-    if (custQuietDays !== null && custQuietDays >= 3) {
-      return {
-        kind: "followup",
-        label: "Follow up",
-        reason: `Awaiting customer ${Math.floor(custQuietDays)}d — send reminder`,
-      };
-    }
-    return {
-      kind: "followup",
-      label: "Follow up",
-      reason: "Awaiting customer input",
-    };
-  }
-
-  // Fix is pending with engineering — keep it moving / keep the customer posted.
-  if (status.includes("pending fix") || status.includes("pending")) {
-    return {
-      kind: "work",
-      label: "Work",
-      reason: nccOverdue ? "Fix pending; NCC overdue — chase" : "Track fix, update customer",
-    };
-  }
-
-  // Actively being worked.
-  if (status.includes("progress")) {
-    return {
-      kind: "work",
-      label: "Work",
-      reason: c.IsEscalated ? "Escalated — needs active work" : "Active investigation",
-    };
-  }
-
-  return {
-    kind: "work",
-    label: "Work",
-    reason: nccOverdue ? "NCC overdue — review now" : "Needs review",
-  };
+/**
+ * The queue's Next Action column, now a thin wrapper over ./nextAction.
+ *
+ * `keyword` is the same bucket the drafter (claude.ts) and the Layer 1 scorer
+ * derive from the comment thread -- pass the one already computed for this
+ * case (`iqs.keyword` from the cache) rather than a fresh guess from status
+ * text, or this column and the drafter can disagree again.
+ */
+export function deriveNextAction(c: SalesforceCase, keyword: Keyword) {
+  return nextActionForKeyword({
+    keyword,
+    status: c.Status,
+    custQuietDays: daysSince(c.Last_Customer_Update__c),
+    nccOverdue: c.NCC_date__c ? new Date(c.NCC_date__c).getTime() < Date.now() : false,
+    isEscalated: !!c.IsEscalated,
+  });
 }
 

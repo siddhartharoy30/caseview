@@ -32,6 +32,7 @@ import {
 } from "./rubric";
 import { extractArtifacts } from "../artifacts";
 import { parseCommitments } from "../commitments";
+import { detectKeyword } from "../nextAction";
 
 /* ----------------------------------------------------------------- inputs */
 
@@ -336,37 +337,19 @@ function has(text: string, re: RegExp): boolean {
 /* ---------------------------------------------------------------- keyword */
 
 /**
- * Which response type the case's current posture calls for, decided from cached
- * rows.
+ * Which response type the case's current posture calls for, decided from
+ * cached rows.
  *
- * Deliberately mirrors detectKeyword() in claude.ts, which reads live
- * Salesforce objects and cannot be handed database rows. Phase 4 collapses the
- * two into one derivation; until then the thresholds are the same numbers on
- * purpose and any change belongs in both or neither.
+ * Phase 4 moved the actual derivation to ../nextAction, which drafting
+ * (claude.ts) and the queue's Next Action column also call, so all three can
+ * no longer disagree. This stays as the entry point cached rows go through
+ * because CommentFacts is already exactly the shape that derivation needs.
  */
 export function detectKeywordFromComments(
   status: string | null,
   comments: CommentFacts[],
 ): Keyword {
-  const s = (status || "").toLowerCase();
-  if (s.includes("pending closure") || s.includes("resolved") || s.includes("closed")) {
-    return "CLOSURE";
-  }
-
-  // claude.ts detects against public comments only; internal notes do not move
-  // the conversation with the customer forward.
-  const publicComments = comments.filter((c) => c.isPublic);
-  if (publicComments.length === 0) return "INTRO";
-
-  let trailingMine = 0;
-  for (let i = publicComments.length - 1; i >= 0; i--) {
-    if (publicComments[i].isMine) trailingMine++;
-    else break;
-  }
-
-  if (trailingMine === 0) return "UPDATE";
-  if (trailingMine >= 3) return "CLOSURE";
-  return "FOLLOWUP";
+  return detectKeyword(status, comments).keyword;
 }
 
 /* --------------------------------------------------------- banned phrases */

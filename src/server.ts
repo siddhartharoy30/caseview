@@ -44,6 +44,16 @@ import {
   rescoreStale,
   scoreAndStoreCase,
 } from "./iqs/store";
+import {
+  getComparisons,
+  getLayer2Stats,
+  getRecentActivity,
+  getStoredByNumber,
+  layer2Meta,
+  runSweep,
+  scoreLayer2ByNumber,
+  startLayer2Sweep,
+} from "./iqs/layer2Store";
 import { resolveRange, scorecard, saveManualMetric, deleteManualMetric } from "./metrics";
 import { syncOnce, startSync, reconcileCommitments } from "./sync";
 import { listEvents, sendWebhookTest } from "./notify";
@@ -163,16 +173,20 @@ app.get("/api/cases", requireAuth, noStore, (req, res) => {
         CreatedDate: c.createdDate,
         Status: c.status,
         IsClosed: c.isClosed,
+        IsEscalated: c.isEscalated,
         Origin: c.origin,
         Type: c.type,
         Last_Customer_Update__c: c.lastCustomerUpdate,
         NCC_date__c: c.ncc,
       } as any;
+      // Falls back to UPDATE (the generic "review it" bucket) on the rare
+      // case that has not been through Layer 1 scoring yet -- new since the
+      // last sync, scored moments later, never actually unscored on screen.
       return {
         ...c,
         queue: deriveQueue(legacy),
         sla: computeSla(legacy),
-        nextAction: deriveNextAction(legacy),
+        nextAction: deriveNextAction(legacy, c.iqs?.keyword ?? "UPDATE"),
       };
     });
 
@@ -250,6 +264,73 @@ app.get("/api/cases/:caseNumber/iqs", requireAuth, noStore, (req, res) => {
 
 app.get("/api/iqs/stats", requireAuth, noStore, (req, res) => {
   res.json({ stats: getIqsStats(req.query.open === "1") });
+});
+
+/* ------------------------------------------------------------- layer 2 */
+
+/**
+ * The stored model score, if there is one.
+ *
+ * Never scores on read. A GET that could spend money would make every page
+ * refresh a purchase, so this returns null and lets the UI offer the button.
+ * The meta block travels with it because "there is no score" and "there can
+ * be no score, here is why" are different answers and the page renders them
+ * differently.
+ */
+app.get("/api/cases/:caseNumber/iqs/layer2", requireAuth, noStore, (req, res) => {
+  const c = getCaseRow(req.params.caseNumber);
+  if (!c) return res.status(404).json({ error: "Case not in cache" });
+  const stored = getStoredByNumber(req.params.caseNumber);
+  res.json({ ...stored, meta: layer2Meta() });
+});
+
+/**
+ * Score on demand. POST because it costs money and is not idempotent when
+ * force is set.
+ */
+app.post("/api/cases/:caseNumber/iqs/layer2", requireAuth, noStore, async (req, res) => {
+  const c = getCaseRow(req.params.caseNumber);
+  if (!c) return res.status(404).json({ error: "Case not in cache" });
+
+  const force = req.query.force === "1" || req.body?.force === true;
+  const keyword = typeof req.body?.keyword === "string" ? req.body.keyword : undefined;
+
+  try {
+    const r = await scoreLayer2ByNumber(req.params.caseNumber, { force, keyword: keyword as never });
+    if (!r.ok) {
+      // Not an HTTP error: "the budget is spent" and "no token is configured"
+      // are answers the page shows, not failures it should retry.
+      return res.json({ ok: false, reason: r.reason, detail: r.detail, meta: layer2Meta() });
+    }
+    res.json({ ok: true, origin: r.origin, score: r.score, meta: layer2Meta() });
+  } catch (err) {
+    log.error("iqs.layer2.route_failed", { caseNumber: req.params.caseNumber, error: errText(err) });
+    res.status(500).json({ ok: false, reason: "error", detail: errText(err) });
+  }
+});
+
+/** Everything the /iqs page needs, in one round trip. */
+app.get("/api/iqs/overview", requireAuth, noStore, (req, res) => {
+  const openOnly = req.query.open === "1";
+  const windowDays = Math.min(365, Math.max(1, Number(req.query.days) || 30));
+  res.json({
+    layer1: getIqsStats(openOnly),
+    layer2: getLayer2Stats(windowDays),
+    meta: layer2Meta(),
+    rubric: rubricMeta(),
+    comparisons: getComparisons(Math.min(500, Number(req.query.limit) || 100), openOnly),
+    activity: getRecentActivity(25),
+  });
+});
+
+/** Run the sweep now rather than waiting for the timer. */
+app.post("/api/iqs/sweep", requireAuth, noStore, async (_req, res) => {
+  try {
+    const run = await runSweep();
+    res.json({ run, meta: layer2Meta() });
+  } catch (err) {
+    res.status(500).json({ error: errText(err) });
+  }
 });
 
 /**
@@ -536,6 +617,7 @@ const SPA_ROUTES = [
   "/case/:caseNumber",
   "/commitments",
   "/metrics",
+  "/iqs",
   "/triage",
   "/escalations",
   "/search",
@@ -567,5 +649,8 @@ app.listen(config.port, () => {
   // version moved, are graded here. Local regex over the cache: no Salesforce
   // call, no API key, so it is safe to do before the first sync lands.
   rescoreStale();
+  // Layer 2 is the only thing here that can spend money, so it starts last
+  // and starts itself only if a token exists.
+  startLayer2Sweep();
   startSync();
 });

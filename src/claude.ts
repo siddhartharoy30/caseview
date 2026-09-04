@@ -2,7 +2,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { addBusinessDays, TZ } from "./businessHours";
 import { config } from "./config";
 import { CORE_RULES, TEMPLATE_RULES } from "./iqs/rubric";
-import type { Keyword } from "./iqs/rubric";
+import { detectKeyword } from "./nextAction";
+import type { CommentSignal } from "./nextAction";
 import type { SalesforceCase, SalesforceCaseComment } from "./salesforce";
 import { getPublicCaseComments } from "./salesforce";
 
@@ -19,38 +20,15 @@ export interface DraftResult {
   selfCheck: string | null;
 }
 
-interface Detection {
-  keyword: Keyword;
-  path?: "confirmed" | "noresponse";
-  attempt?: 1 | 2;
-}
-
-// IQS "3-Strikes" rule: 2 unanswered owner outreach comments in a row (FOLLOWUP 1,
-// FOLLOWUP 2) exhausts follow-up attempts; a 3rd unanswered owner comment means the
-// case moves to CLOSURE noresponse instead of a 3rd FOLLOWUP.
-function detectKeyword(c: SalesforceCase, comments: SalesforceCaseComment[]): Detection {
-  const status = (c.Status || "").toLowerCase();
-  if (status.includes("pending closure") || status.includes("resolved") || status.includes("closed")) {
-    return { keyword: "CLOSURE", path: "confirmed" };
-  }
-  if (comments.length === 0) {
-    return { keyword: "INTRO" };
-  }
-
+// getPublicCaseComments already filters to published comments, oldest first --
+// exactly what detectKeyword() in ./nextAction needs. It only has to be told
+// which of them are the owner's.
+function asCommentSignals(c: SalesforceCase, comments: SalesforceCaseComment[]): CommentSignal[] {
   const ownerName = c.Owner?.Name || "";
-  let trailingOwnerCount = 0;
-  for (let i = comments.length - 1; i >= 0; i--) {
-    if (ownerName && comments[i].CreatedBy?.Name === ownerName) trailingOwnerCount++;
-    else break;
-  }
-
-  if (trailingOwnerCount === 0) {
-    return { keyword: "UPDATE" };
-  }
-  if (trailingOwnerCount >= 3) {
-    return { keyword: "CLOSURE", path: "noresponse" };
-  }
-  return { keyword: "FOLLOWUP", attempt: trailingOwnerCount === 2 ? 2 : 1 };
+  return comments.map((cm) => ({
+    isPublic: true,
+    isMine: !!ownerName && cm.CreatedBy?.Name === ownerName,
+  }));
 }
 
 function addCalendarDays(date: Date, days: number): Date {
@@ -93,7 +71,7 @@ function buildFollowupBody(attempt: 1 | 2): string {
 
 export async function draftSuggestedReply(c: SalesforceCase): Promise<DraftResult> {
   const comments = await getPublicCaseComments(c.Id);
-  const detection = detectKeyword(c, comments);
+  const detection = detectKeyword(c.Status, asCommentSignals(c, comments));
   const ownerName = c.Owner?.Name || "the case owner";
   const ownerTitle = c.Owner?.Title || "Support Engineer";
 
