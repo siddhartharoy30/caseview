@@ -196,20 +196,22 @@ const insertPost = db.prepare(
      (id, case_id, case_number, trigger_status, trigger_at, body, channel_id, dry_run, delivered, created_at)
    VALUES (@id, @case_id, @case_number, @trigger_status, @trigger_at, @body, @channel_id, @dry_run, 0, @created_at)`,
 );
-const markDelivered = db.prepare("UPDATE coverage_posts SET delivered = 1 WHERE id = ?");
+const markDelivered = db.prepare("UPDATE coverage_posts SET delivered = 1, error = NULL WHERE id = ?");
 const markError = db.prepare("UPDATE coverage_posts SET error = ? WHERE id = ?");
+const markDiscarded = db.prepare("UPDATE coverage_posts SET discarded_at = ? WHERE id = ?");
+const updateBody = db.prepare("UPDATE coverage_posts SET body = ? WHERE id = ?");
+const selectPost = db.prepare("SELECT * FROM coverage_posts WHERE id = ?");
 
 /**
- * Composes and records one qualifying transition, delivering it only if
- * dry run is off and a channel is active. Returns null when the
- * (case_number, trigger_status, trigger_at) triple was already recorded --
- * the dedup is a primary-key check, not a re-run of this function's own logic.
+ * Composes and records one qualifying transition. Never sends anything
+ * itself -- phase 8's approval queue is the only path to a real Slack post
+ * (see PLAN_V3.md's phase 8 section for why auto-send on dry-run-off was
+ * wrong: it contradicted this project's own no-autonomous-sending rule).
+ * Returns without inserting when the (case_number, trigger_status,
+ * trigger_at) triple was already recorded -- the dedup is a primary-key
+ * check, not a re-run of this function's own logic.
  */
-async function recordAndMaybeDeliver(
-  c: CaseRow,
-  triggerStatus: string,
-  triggerAtIso: string,
-): Promise<void> {
+async function recordTransition(c: CaseRow, triggerStatus: string, triggerAtIso: string): Promise<void> {
   const dryRun = getSettingBool("coverageDryRun");
   const channel = getActiveChannel();
   const id = randomUUID();
@@ -228,16 +230,52 @@ async function recordAndMaybeDeliver(
   });
   if (res.changes === 0) return; // already recorded for this exact transition
 
-  log.info("coverage.trigger", { caseNumber: c.case_number, triggerStatus, dryRun: dryRun || !channel });
+  log.info("coverage.trigger", { caseNumber: c.case_number, triggerStatus, dryRun: dryRun || !channel, queued: !dryRun && !!channel });
+}
 
-  if (dryRun || !channel) return;
+export type PostStatus = "dry_run" | "pending" | "sent" | "failed" | "discarded";
+
+function statusOf(r: { dry_run: number; delivered: number; error: string | null; discarded_at: number | null }): PostStatus {
+  if (r.discarded_at) return "discarded";
+  if (r.dry_run) return "dry_run";
+  if (r.delivered) return "sent";
+  if (r.error) return "failed";
+  return "pending";
+}
+
+/**
+ * The one path to a real Slack post. A human calls this -- from the
+ * approval queue, optionally after editing the body -- there is no
+ * automatic route here from a sync or a sweep.
+ */
+export async function approvePost(id: string, editedBody?: string): Promise<{ ok: boolean; error?: string }> {
+  const post = selectPost.get(id) as PostRow | undefined;
+  if (!post) return { ok: false, error: "Post not found" };
+  if (post.dry_run) return { ok: false, error: "Dry-run posts cannot be sent -- turn dry run off first" };
+  if (post.discarded_at) return { ok: false, error: "This post was discarded" };
+  if (post.delivered) return { ok: false, error: "Already sent" };
+
+  const channelId = post.channel_id;
+  const channel = channelId ? (db.prepare("SELECT * FROM coverage_channels WHERE id = ?").get(channelId) as ChannelRow | undefined) : undefined;
+  if (!channel) return { ok: false, error: "No channel is available for this post -- it may have been removed" };
+
+  const body = editedBody?.trim() || post.body;
+  if (editedBody?.trim()) updateBody.run(body, id);
+
   try {
-    await postToWebhook(channel.webhookUrl, body);
+    await postToWebhook(channel.webhook_url, body);
     markDelivered.run(id);
+    log.info("coverage.sent", { caseNumber: post.case_number, id });
+    return { ok: true };
   } catch (err: any) {
     markError.run(err.message, id);
-    log.warn("coverage.deliver_failed", { caseNumber: c.case_number, error: err.message });
+    log.warn("coverage.deliver_failed", { caseNumber: post.case_number, error: err.message });
+    return { ok: false, error: err.message };
   }
+}
+
+export function discardPost(id: string): void {
+  markDiscarded.run(now(), id);
 }
 
 /**
@@ -251,12 +289,18 @@ export async function sweepTransitions(
   const triggers = new Set(triggerStatuses());
   if (!triggers.size) return;
 
-  const nowIso = new Date().toISOString();
   for (const t of transitions) {
     if (!t.newStatus || !triggers.has(t.newStatus)) continue;
     const c = getCaseRow(t.caseNumber);
     if (!c) continue;
-    await recordAndMaybeDeliver(c, t.newStatus, nowIso);
+    // The case's own last-modified stamp, not wall-clock-at-detection-time.
+    // Caught by testing: using new Date() here meant re-running the sweep on
+    // an unchanged case (an overlapping or retried sync) minted a different
+    // trigger_at every time, so the UNIQUE(case_number, trigger_status,
+    // trigger_at) dedup never actually matched and silently duplicated the
+    // post. last_modified_date is stable across such a re-run and only moves
+    // when Salesforce itself records a real further change.
+    await recordTransition(c, t.newStatus, c.last_modified_date);
   }
 }
 
@@ -306,12 +350,12 @@ interface PostRow {
   dry_run: number;
   delivered: number;
   error: string | null;
+  discarded_at: number | null;
   created_at: number;
 }
 
-export function listRecentPosts(limit = 50) {
-  const rows = db.prepare("SELECT * FROM coverage_posts ORDER BY created_at DESC LIMIT ?").all(limit) as PostRow[];
-  return rows.map((r) => ({
+function toApiPost(r: PostRow) {
+  return {
     id: r.id,
     caseNumber: r.case_number,
     triggerStatus: r.trigger_status,
@@ -321,6 +365,13 @@ export function listRecentPosts(limit = 50) {
     dryRun: r.dry_run === 1,
     delivered: r.delivered === 1,
     error: r.error,
+    discardedAt: r.discarded_at,
+    status: statusOf(r),
     createdAt: r.created_at,
-  }));
+  };
+}
+
+export function listRecentPosts(limit = 50) {
+  const rows = db.prepare("SELECT * FROM coverage_posts ORDER BY created_at DESC LIMIT ?").all(limit) as PostRow[];
+  return rows.map(toApiPost);
 }

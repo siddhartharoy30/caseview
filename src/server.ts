@@ -47,6 +47,8 @@ import {
   sendTestMessage,
   listRecentPosts,
   backtest30Days,
+  approvePost,
+  discardPost,
 } from "./coverage";
 import { rubricMeta } from "./iqs/rubric";
 import type { Keyword } from "./iqs/rubric";
@@ -562,6 +564,23 @@ app.post("/api/coverage/channels/:id/test", requireAuth, async (req, res) => {
 
 app.get("/api/coverage/posts", requireAuth, noStore, (_req, res) => {
   res.json({ posts: listRecentPosts() });
+});
+
+/**
+ * Phase 8's approval queue: the only path a coverage post has to actually
+ * reaching Slack. Nothing here runs automatically from a sync or a sweep —
+ * a human calls this, optionally editing the text first, for every single
+ * post. Consistent with this project's founding no-autonomous-sending rule.
+ */
+app.post("/api/coverage/posts/:id/send", requireAuth, async (req, res) => {
+  const body = typeof req.body?.body === "string" ? req.body.body : undefined;
+  const result = await approvePost(req.params.id, body);
+  res.status(result.ok ? 200 : 502).json(result);
+});
+
+app.post("/api/coverage/posts/:id/discard", requireAuth, (req, res) => {
+  discardPost(req.params.id);
+  res.json({ ok: true });
 });
 
 /**

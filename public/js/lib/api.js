@@ -145,4 +145,9 @@ export const api = {
   testCoverageChannel:   (id)          => request("POST",   `/api/coverage/channels/${encodeURIComponent(id)}/test`),
   coveragePosts:         ()            => request("GET",    "/api/coverage/posts"),
   coverageBacktest:      ()            => request("GET",    "/api/coverage/backtest"),
+
+  /* Phase 8 — approval queue. sendCoveragePost's body param is optional: an
+     edited version of the composed text, sent instead of the original. */
+  sendCoveragePost:    (id, body) => request("POST", `/api/coverage/posts/${encodeURIComponent(id)}/send`, body ? { body } : {}),
+  discardCoveragePost: (id)       => request("POST", `/api/coverage/posts/${encodeURIComponent(id)}/discard`),
 };

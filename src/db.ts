@@ -344,6 +344,11 @@ ensureColumn("suggested_replies", "keyword", "TEXT");
 ensureColumn("suggested_replies", "internal_note", "TEXT");
 ensureColumn("suggested_replies", "self_check", "TEXT");
 
+// Phase 8: a human explicitly declined to send a pending coverage post. The
+// row stays -- it is still a record that the transition happened -- so this
+// is a timestamp, not a delete.
+ensureColumn("coverage_posts", "discarded_at", "INTEGER");
+
 /* ------------------------------------------------------- suggested replies */
 
 export interface SuggestedReply {

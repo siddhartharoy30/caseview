@@ -412,18 +412,86 @@ export function render(ctx, host, shell) {
     },
   });
 
-  function postRow(p) {
-    const tone = p.dryRun ? "neutral" : p.delivered ? "ok" : p.error ? "p0" : "p2";
-    const label = p.dryRun ? "Dry run" : p.delivered ? "Sent" : p.error ? "Failed" : "Pending";
+  const POST_STATUS_META = {
+    dry_run:   { label: "Dry run",  tone: "neutral" },
+    pending:   { label: "Pending",  tone: "p2" },
+    sent:      { label: "Sent",     tone: "ok" },
+    failed:    { label: "Failed",   tone: "p0" },
+    discarded: { label: "Discarded", tone: "neutral" },
+  };
+
+  /** Read-only row for anything that isn't waiting on a decision. */
+  function historyPostRow(p) {
+    const meta = POST_STATUS_META[p.status];
     return h("div", { class: "cov-post" },
       h("div", { class: "cov-post-head" },
-        h("span", { class: `chip ${tone}`, text: label }),
+        h("span", { class: `chip ${meta.tone}`, text: meta.label }),
         h("a", { class: "mono", href: `/case/${encodeURIComponent(p.caseNumber)}`, text: p.caseNumber }),
         h("span", { class: "dim", text: `→ ${p.triggerStatus}` }),
         h("div", { class: "spacer" }),
         h("span", { class: "dim", text: fmt.dateTimeShort(p.createdAt) })),
       h("pre", { class: "cov-post-body", text: p.body }),
       p.error ? h("div", { class: "hint", style: { color: "var(--red)" }, text: p.error }) : null);
+  }
+
+  /**
+   * Pending or failed: the two states a human still has to act on. Every
+   * post starts in the same textarea whether it will be sent verbatim or
+   * edited first -- the same "stage, review, act" shape the Draft tab uses.
+   */
+  function queuePostRow(p) {
+    const meta = POST_STATUS_META[p.status];
+    const area = h("textarea", { class: "input cov-queue-area" });
+    area.value = p.body;
+
+    const sendBtn = button(p.status === "failed" ? "Retry send" : "Send", {
+      small: true, kind: "primary",
+      onclick: async () => {
+        sendBtn.disabled = true; discardBtn.disabled = true;
+        sendBtn.textContent = "Sending…";
+        try {
+          const edited = area.value.trim() !== p.body.trim() ? area.value : undefined;
+          const res = await api.sendCoveragePost(p.id, edited);
+          if (res.ok) {
+            toast(`Sent to Slack for ${p.caseNumber}`, "ok");
+            loadCoverage();
+          } else {
+            toast(res.error || "Send failed", "error");
+            sendBtn.disabled = false; discardBtn.disabled = false;
+            sendBtn.textContent = p.status === "failed" ? "Retry send" : "Send";
+          }
+        } catch (err) {
+          toast(err.message || "Send failed", "error");
+          sendBtn.disabled = false; discardBtn.disabled = false;
+          sendBtn.textContent = p.status === "failed" ? "Retry send" : "Send";
+        }
+      },
+    });
+    const discardBtn = button("Discard", {
+      small: true, kind: "danger",
+      onclick: async () => {
+        const ok = await confirmDialog({
+          title: "Discard this coverage post?",
+          message: `${p.caseNumber} → ${p.triggerStatus}. This does not undo the status change, only the Slack post.`,
+          confirmLabel: "Discard", danger: true,
+        });
+        if (!ok) return;
+        await api.discardCoveragePost(p.id);
+        toast("Discarded", "ok");
+        loadCoverage();
+      },
+    });
+
+    return h("div", { class: `cov-post cov-post-queued t-${meta.tone}` },
+      h("div", { class: "cov-post-head" },
+        h("span", { class: `chip ${meta.tone}`, text: meta.label }),
+        h("a", { class: "mono", href: `/case/${encodeURIComponent(p.caseNumber)}`, text: p.caseNumber }),
+        h("span", { class: "dim", text: `→ ${p.triggerStatus}` }),
+        h("div", { class: "spacer" }),
+        h("span", { class: "dim", text: fmt.dateTimeShort(p.createdAt) })),
+      p.error ? h("div", { class: "hint", style: { color: "var(--red)", marginBottom: "6px" }, text: p.error }) : null,
+      area,
+      h("div", { class: "cov-queue-actions" }, sendBtn, discardBtn));
   }
 
   function paintCoverage() {
@@ -448,8 +516,8 @@ export function render(ctx, host, shell) {
       h("div", { class: "to-sec-head" }, h("span", { class: "art-title", text: "Coverage" })),
 
       covState.dryRun
-        ? banner("info", "Dry run is on — coverage posts are composed and recorded, but nothing is sent to Slack.")
-        : banner("warn", "Dry run is OFF. A matching status change during declared time off will post to the active channel for real."),
+        ? banner("info", "Dry run is on — coverage posts are composed and recorded, but nothing is sent to Slack, and none are offered for sending.")
+        : banner("warn", "Dry run is off. A matching status change during declared time off will compose a post and place it in the queue below — nothing sends until you click Send on it."),
 
       h("div", { class: "card cov-card" },
         h("div", { class: "art-head" }, h("span", { class: "art-title", text: "Channels" })),
@@ -477,13 +545,28 @@ export function render(ctx, host, shell) {
           "Checks real Salesforce Status history against the trigger list above and your declared time off — not a simulation."),
         backtestHost),
 
-      h("div", { class: "card cov-card" },
-        h("div", { class: "art-head" },
-          h("span", { class: "art-title", text: "Recent activity" }),
-          h("span", { class: "cd-tab-count mono", text: String(covState.posts.length) })),
-        covState.posts.length
-          ? h("div", { class: "cov-posts" }, covState.posts.map(postRow))
-          : h("div", { class: "hint" }, "Nothing recorded yet.")));
+      (() => {
+        const queue = covState.posts.filter((p) => p.status === "pending" || p.status === "failed");
+        const history = covState.posts.filter((p) => p.status !== "pending" && p.status !== "failed");
+        return h("div", {},
+          h("div", { class: "card cov-card" },
+            h("div", { class: "art-head" },
+              h("span", { class: "art-title", text: "Approval queue" }),
+              h("span", { class: "cd-tab-count mono", text: String(queue.length) })),
+            h("div", { class: "hint", style: { marginBottom: "10px" } },
+              "Nothing here sends itself. Edit the text if you want, then Send or Discard each one."),
+            queue.length
+              ? h("div", { class: "cov-posts" }, queue.map(queuePostRow))
+              : h("div", { class: "hint" }, "Nothing waiting on you right now.")),
+
+          h("div", { class: "card cov-card" },
+            h("div", { class: "art-head" },
+              h("span", { class: "art-title", text: "History" }),
+              h("span", { class: "cd-tab-count mono", text: String(history.length) })),
+            history.length
+              ? h("div", { class: "cov-posts" }, history.map(historyPostRow))
+              : h("div", { class: "hint" }, "Nothing recorded yet.")));
+      })());
   }
 
   mount(host, page(

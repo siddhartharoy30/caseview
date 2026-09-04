@@ -340,7 +340,7 @@ already lives.
 | 5 | Draft pre-flight, auto-repair, keyword override, artifacts | predicted score before copy |
 | 6 | Time-off calendar, commitment pre-flight | done, range surfaces its commitments |
 | 7 | Status-transition watcher, compose, dry run, sweep | done, 30-day backtest shows volume (701 checked, 6 would fire) |
-| 8 | Slack delivery, threading, approval queue, escalation ping | dormant until a token exists |
+| 8 | Slack delivery, approval queue | done; threading and escalation ping skipped (webhook cannot thread, no bot token) |
 | 9 | Recap, batch drafting, SentryAI import | — |
 
 Phase 8's gate cannot be met today and that is a credential problem, not a code
@@ -686,3 +686,68 @@ trigger_at)` dedup (decision 6, the same `INSERT OR IGNORE` trick
 (decision 7) — nothing this phase does is any different from what a real
 delivery would compose and record, except the one `fetch()` call, which
 dry-run skips.
+
+---
+
+## Phase 8 — discovery and decisions
+
+Scoped down twice before writing anything, both times because of the
+phase 7 pivot to Incoming Webhooks (no bot token).
+
+**Escalation ping: skipped, at the owner's explicit request.** It needs
+`reactions:read` to detect a response, which only a bot token has.
+
+**Threading: skipped too, for a reason the owner had not been told yet.**
+Grouping a case's follow-up posts into one Slack thread means posting with
+`thread_ts`, and Incoming Webhooks do not support that parameter at all —
+every webhook post is a new top-level message, unconditionally. This isn't
+a scope choice like escalation ping was; it is the same webhook-vs-bot
+limitation showing up a second time, and it was worth surfacing on its own
+rather than silently folding into "skip escalation ping" and letting the
+owner think that was the only thing given up.
+
+**What phase 7 actually shipped, read again: dry run off meant auto-send.**
+`recordAndMaybeDeliver()` called the webhook itself the moment dry run was
+false and a channel was active — no human step in between. That is flatly
+inconsistent with this project's own founding rule, unchanged since the
+first planning session: "Autonomy: draft-and-approve — every outbound
+email/Slack/case-edit is queued for the user to Approve/Edit/Send. No
+autonomous sending." Phase 5's AI drafts already honor this ("Draft only —
+review before sending. Nothing is sent automatically."); phase 7's coverage
+posts did not, and nothing had actually been sent for real yet (no webhook
+URL existed at the time), so fixing it now costs nothing already relied on.
+
+**Decision: dry-run-off arms the queue, it does not arm sending.** Turning
+dry run off no longer means "the next matching transition posts itself." It
+means "the next matching transition is composed, recorded, and placed in an
+approval queue" — a human still clicks Send (or edits the text first, or
+discards it) for every single post, exactly the same shape as the Draft
+tab's AI replies. Dry run keeps its original job too: a dry-run post is
+purely informational and never offered a Send button at all, so testing the
+detection logic and actually operating the queue are two different modes,
+not the same button with a delayed effect.
+
+No new column for this: the existing `dry_run` / `delivered` / `error`
+fields already distinguish four states without adding one --
+`dry_run=1` → dry run (never actionable); `dry_run=0, delivered=0,
+error IS NULL` → pending approval; `dry_run=0, delivered=1` → sent;
+`dry_run=0, delivered=0, error IS NOT NULL` → failed (retryable). One
+column was added, `discarded_at`, for the human explicitly declining to
+send a pending post -- the row stays as a record either way, nothing about
+a real trigger is ever deleted.
+
+**A real bug the approval-queue work surfaced in phase 7's own dedup.**
+`recordAndMaybeDeliver()` stamped `trigger_at` with `new Date().toISOString()`
+-- wall-clock-at-detection-time, not anything intrinsic to the transition.
+Caught by testing the same transition through `sweepTransitions()` twice in
+a row (simulating an overlapping or retried sync): the second call minted a
+different `trigger_at` than the first, so `UNIQUE(case_number,
+trigger_status, trigger_at)` never matched and the dedup silently did
+nothing -- exactly the failure mode decision 6 exists to prevent, sitting
+undetected in phase 7 because nothing had exercised a repeated sweep yet.
+Fixed by keying on the case's own `last_modified_date` instead (already on
+hand from `getCaseRow()`), which only moves when Salesforce records a real
+further change -- the same "derive the key from data, not from when the
+code happened to run" rule `notify.ts`'s event ids already follow. Verified
+against a clean table: sweeping the identical transition twice now produces
+exactly one row.

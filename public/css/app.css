@@ -4717,3 +4717,26 @@ body.compact .iqs-kw { display: none; }
 @media (max-width: 700px) {
   .cov-add-channel { grid-template-columns: 1fr; }
 }
+
+/* ---- coverage approval queue (Phase 8) ----------------------------------- */
+
+.cov-post-queued {
+  border-color: color-mix(in srgb, var(--tone) 30%, var(--border));
+  background: color-mix(in srgb, var(--tone) 5%, var(--surface));
+}
+
+.cov-queue-area {
+  width: 100%;
+  min-height: 100px;
+  padding: 8px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  resize: vertical;
+  margin-bottom: 8px;
+}
+
+.cov-queue-actions {
+  display: flex;
+  gap: 8px;
+}
