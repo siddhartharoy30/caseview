@@ -1699,6 +1699,62 @@ mark {
   resize: vertical;
 }
 .draft-area:focus { outline: none; border-color: var(--blue-2); }
+.draft-area.is-busy { color: transparent; caret-color: transparent; }
+
+/*
+ * "Skeletons, never spinners" (see .skel above) applies here too, extended
+ * for a wait long enough to need more than a shimmer alone: an AI draft is a
+ * paragraph shape appearing, not a value popping in, so the overlay holds
+ * that shape rather than blanking it, and narrates the real pipeline stages
+ * rather than a fake percentage. The trailing caret is the one purely
+ * decorative touch — it borrows the "something is being typed here" read of
+ * a text cursor, which a bar-shaped shimmer alone does not give you.
+ */
+.draft-area-wrap { position: relative; }
+
+.draft-busy {
+  position: absolute;
+  inset: 1px;
+  border-radius: 7px;
+  padding: 14px 15px;
+  background: var(--bg-sunken);
+  display: flex;
+  flex-direction: column;
+  animation: fade 180ms ease;
+}
+
+.draft-busy-lines { display: flex; flex-direction: column; gap: 11px; }
+
+.draft-busy-line {
+  height: 11px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+.draft-busy-lastline { display: flex; align-items: center; gap: 3px; }
+.draft-busy-lastline .draft-busy-line { flex: 0 0 auto; }
+
+.draft-busy-caret {
+  width: 2px;
+  height: 13px;
+  background: var(--blue-2);
+  animation: blink 1s step-end infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+.draft-busy-caption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 12px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.draft-busy-caption svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.8; animation: spin 1s linear infinite; }
+.draft-busy-caption-text { animation: fade 260ms ease; }
 
 .draft-meta {
   display: flex;

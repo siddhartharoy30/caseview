@@ -875,6 +875,22 @@ export function render(ctx, host, shell) {
     if (state.tab === "draft") onLoaded();
   }
 
+  const ICON_SPIN = ["M20 11a8 8 0 10-.6 4", "M20 4v7h-7"]; // same shape as the topbar sync spinner
+
+  /**
+   * What to say while an AI call is in flight, in the order it is actually
+   * true. Both are real pipeline stages -- drafting really does read history
+   * before writing, and repair really does re-score between the mechanical
+   * pass and the model pass -- not a fake progress bar. The caption sits on
+   * the last stage rather than looping, because a request that runs long is
+   * "still finishing the last thing," not "starting over."
+   */
+  const BUSY_STAGES = {
+    generate: ["Reading the case history…", "Applying the IQS rubric…", "Drafting the reply…", "Running the self-check…"],
+    repair: ["Fixing flagged phrases…", "Re-scoring the draft…", "Rewriting what's left…"],
+  };
+  const BUSY_STEP_MS = 1100;
+
   function paintDraft() {
     const c = state.detail.case;
     const key = `${KEY_DRAFT}.${caseNumber}`;
@@ -888,6 +904,50 @@ export function render(ctx, host, shell) {
       placeholder: "Stage your reply here, or generate one with AI below. Nothing is sent from this page — it holds text and copies it.",
     });
     area.value = store.get(key, "");
+
+    const captionText = h("span", { class: "draft-busy-caption-text", "aria-live": "polite" });
+    const busyOverlay = h("div", { class: "draft-busy", "aria-busy": "true", hidden: true },
+      h("div", { class: "draft-busy-lines" },
+        h("div", { class: "draft-busy-line", style: { width: "34%" } }),
+        h("div", { class: "draft-busy-line", style: { width: "91%" } }),
+        h("div", { class: "draft-busy-line", style: { width: "82%" } }),
+        h("div", { class: "draft-busy-lastline" },
+          h("div", { class: "draft-busy-line", style: { width: "23%" } }),
+          h("span", { class: "draft-busy-caret" }))),
+      h("div", { class: "draft-busy-caption" },
+        icon(ICON_SPIN, 14),
+        captionText));
+
+    let busyTimer = null;
+
+    /**
+     * Shown while area.value is stale (mid-generation) so nothing reads as
+     * "hung" -- the earlier version of this tab had no feedback at all here,
+     * which for a 3-8 second model call looked exactly like a frozen page.
+     * The textarea itself stays underneath (dimmed, read-only) rather than
+     * being replaced, so its scrollbar and size never jump when the overlay
+     * comes down.
+     */
+    function setBusy(kind) {
+      const stages = BUSY_STAGES[kind];
+      let i = 0;
+      captionText.textContent = stages[0];
+      area.classList.add("is-busy");
+      area.readOnly = true;
+      busyOverlay.hidden = false;
+      clearInterval(busyTimer);
+      busyTimer = setInterval(() => {
+        if (i < stages.length - 1) captionText.textContent = stages[++i];
+      }, BUSY_STEP_MS);
+    }
+
+    function clearBusy() {
+      clearInterval(busyTimer);
+      busyTimer = null;
+      area.classList.remove("is-busy");
+      area.readOnly = false;
+      busyOverlay.hidden = true;
+    }
 
     const paintMeta = () => {
       const v = area.value;
@@ -1007,7 +1067,9 @@ export function render(ctx, host, shell) {
             !confirm(`Replace the ${area.value.length} characters already staged with an AI-generated draft?`)) return;
         state.draftBusy = true;
         generateBtn.disabled = true;
+        generateBtn.textContent = "Drafting…";
         repairBtn.disabled = true;
+        setBusy("generate");
         try {
           const result = await api.suggestReply(caseNumber, true, state.draftKeyword || undefined);
           area.value = result.draft;
@@ -1017,9 +1079,12 @@ export function render(ctx, host, shell) {
           requestScore();
         } catch (err) {
           toast(err.message || "Could not generate a draft", "error");
+        } finally {
+          clearBusy();
+          state.draftBusy = false;
+          generateBtn.disabled = false;
+          generateBtn.textContent = "Generate with AI";
         }
-        state.draftBusy = false;
-        generateBtn.disabled = false;
       },
     });
 
@@ -1031,6 +1096,8 @@ export function render(ctx, host, shell) {
         state.draftBusy = true;
         generateBtn.disabled = true;
         repairBtn.disabled = true;
+        repairBtn.textContent = "Repairing…";
+        setBusy("repair");
         try {
           const keyword = state.draftKeyword || state.draftScore?.keyword || "UPDATE";
           const result = await api.repairDraft(caseNumber, area.value, keyword);
@@ -1048,10 +1115,13 @@ export function render(ctx, host, shell) {
           );
         } catch (err) {
           toast(err.message || "Could not repair the draft", "error");
+        } finally {
+          clearBusy();
+          state.draftBusy = false;
+          generateBtn.disabled = false;
+          repairBtn.disabled = false;
+          repairBtn.textContent = "Auto-repair";
         }
-        state.draftBusy = false;
-        generateBtn.disabled = false;
-        repairBtn.disabled = false;
       },
     });
     repairBtn.hidden = !hasIssues();
@@ -1080,7 +1150,7 @@ export function render(ctx, host, shell) {
 
         artifactsHost,
 
-        area,
+        h("div", { class: "draft-area-wrap" }, area, busyOverlay),
         meta,
         scoreHost,
 
