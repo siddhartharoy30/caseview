@@ -73,6 +73,12 @@ export const api = {
   artifacts:  (n)       => request("GET", `/api/cases/${encodeURIComponent(n)}/artifacts`),
   related:    (n)       => request("GET", `/api/cases/${encodeURIComponent(n)}/related`),
 
+  /* quality — the local IQS score. `iqs` is its own call rather than part of
+     caseDetail because the breakdown is a dimension tree and the queue only
+     ever wants the three summary fields it already gets on each row. */
+  iqs:      (n)    => request("GET", `/api/cases/${encodeURIComponent(n)}/iqs`),
+  iqsStats: (open) => request("GET", "/api/iqs/stats" + qs({ open })),
+
   /* commitments */
   commitments:   (state)      => request("GET",   "/api/commitments" + qs({ state })),
   addCommitment: (payload)    => request("POST",  "/api/commitments", payload),

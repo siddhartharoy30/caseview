@@ -32,6 +32,7 @@ import {
 import { deriveProductArea } from "./productArea";
 import { extractArtifacts, errorSignature } from "./artifacts";
 import { parseCommitments } from "./commitments";
+import { scoreCases } from "./iqs/store";
 import { zoned } from "./businessHours";
 import { log, errText } from "./log";
 
@@ -461,6 +462,12 @@ async function runSync(full: boolean): Promise<SyncResult> {
     write();
     reconcileCommitments();
 
+    // Quality scoring runs here and not inside recomputeCase(): the Reliability
+    // dimension reads commitment states, and those states are only correct
+    // after reconciliation has moved what came due. Layer 1 is pure regex over
+    // rows already in hand, so this costs no API call and no round trip.
+    const graded = scoreCases(caseIds);
+
     const afterRows = db
       .prepare(
         "SELECT case_number, subject, priority, account, created_date, last_customer_touch," +
@@ -520,6 +527,8 @@ async function runSync(full: boolean): Promise<SyncResult> {
       comments: comments.length,
       emails: emails.length,
       commitments: newCommitments,
+      scored: graded.scored,
+      scoreFailures: graded.failed,
       durationMs,
       watermark,
     });

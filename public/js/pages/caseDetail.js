@@ -21,6 +21,10 @@ import {
   toast, emptyState, banner, button, skeletonRows, copyBtn, copyToast,
 } from "../lib/ui.js";
 import { htmlToText, splitQuoted, textNodes } from "../lib/text.js";
+import {
+  scoreMeter, bandChip, bandExplain,
+  tone as iqsTone, KEYWORD_LABEL, KEYWORD_HINT,
+} from "../lib/iqs.js";
 import { page } from "./_shared.js";
 import { navigate, setQuery } from "../router.js";
 
@@ -37,12 +41,20 @@ const ICON_OUT  = ["M14 4h6v6", "M20 4l-8 8", "M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 
 const ICON_PREV = ["M15 5l-7 7 7 7"];
 const ICON_NEXT = ["M9 5l7 7-7 7"];
 
+/*
+ * Quality goes last rather than next to Timeline, and that is a deliberate
+ * cost. The number-key shortcut is the tab's index, so any insertion silently
+ * remaps every shortcut after it — muscle memory for "5 is Draft" would break
+ * for a tab that is read occasionally, not constantly. Appending keeps 1..5
+ * where they were and gives Quality 6.
+ */
 const TABS = [
   { id: "timeline",    label: "Timeline" },
   { id: "artifacts",   label: "Artifacts" },
   { id: "commitments", label: "Commitments" },
   { id: "related",     label: "Related" },
   { id: "draft",       label: "Draft" },
+  { id: "iqs",         label: "Quality" },
 ];
 
 const COMMITMENT_TONE = {
@@ -87,6 +99,8 @@ export function render(ctx, host, shell) {
     timeline: null,
     artifacts: null,
     related: null,
+    iqs: null,
+    iqsOpen: new Set(),
     tab: TABS.some((t) => t.id === ctx.query.tab) ? ctx.query.tab : "timeline",
     find: ctx.query.q || "",
     expanded: new Set(),
@@ -255,7 +269,24 @@ export function render(ctx, host, shell) {
         ? (state.related.cases?.length || 0) + (state.related.jira?.length || 0)
         : null;
     }
+    /*
+     * The badge here is the score, not a count of anything — it is the one
+     * number worth seeing without opening the tab. An unscorable case shows no
+     * badge rather than a zero, because zero is a score and "nothing of mine
+     * to score" is not.
+     */
+    if (id === "iqs") {
+      const s = state.iqs?.score ?? state.detail?.case?.iqs;
+      return s && s.overall !== null && s.overall !== undefined ? Math.round(s.overall) : null;
+    }
     return null;
+  }
+
+  /** Only the quality badge is tinted; a count of comments has no good or bad. */
+  function tabCountTone(id) {
+    if (id !== "iqs") return "";
+    const s = state.iqs?.score ?? state.detail?.case?.iqs;
+    return s?.band ? `t-${iqsTone(s.band)}` : "";
   }
 
   function paintTabs() {
@@ -268,7 +299,7 @@ export function render(ctx, host, shell) {
         onclick: () => selectTab(t.id),
       },
       h("span", { text: t.label }),
-      n === null ? null : h("span", { class: "cd-tab-count mono", text: String(n) }));
+      n === null ? null : h("span", { class: `cd-tab-count mono ${tabCountTone(t.id)}`, text: String(n) }));
     }));
   }
 
@@ -280,6 +311,36 @@ export function render(ctx, host, shell) {
     paintBody();
   }
 
+  /**
+   * Jump to a comment in the timeline and make it obvious which one.
+   *
+   * Two tabs cite comments by id — Commitments points at the sentence that made
+   * the promise, Quality points at the sentence that cost points — and an
+   * evidence link that lands you on a filtered timeline with the target hidden
+   * is worse than no link. So the filters are cleared and the folds opened
+   * before the scroll, and a missing id says so rather than scrolling nowhere.
+   */
+  function jumpToComment(commentId, missingMessage) {
+    const inTimeline = new Set((state.timeline?.entries || []).map((e) => e.id));
+    if (!commentId || !inTimeline.has(commentId)) {
+      toast(missingMessage || "That comment is not in the cached timeline");
+      return;
+    }
+    state.find = "";
+    state.vis = "all";
+    state.src = "all";
+    state.expandAll = true;
+    setQuery({ q: null });
+    selectTab("timeline");
+    requestAnimationFrame(() => {
+      const el = document.getElementById(`tl-${commentId}`);
+      if (!el) return;
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+      el.classList.add("tl-flash");
+      setTimeout(() => el.classList.remove("tl-flash"), 1600);
+    });
+  }
+
   /* ----------------------------------------------------------- tab bodies */
 
   function paintBody() {
@@ -288,6 +349,7 @@ export function render(ctx, host, shell) {
     if (state.tab === "commitments") return paintCommitments();
     if (state.tab === "related")     return paintRelated();
     if (state.tab === "draft")       return paintDraft();
+    if (state.tab === "iqs")         return paintQuality();
     return undefined;
   }
 
@@ -601,27 +663,9 @@ export function render(ctx, host, shell) {
     });
 
     const active = rows.filter((r) => r.state === "active");
-    const inTimeline = new Set((state.timeline?.entries || []).map((e) => e.id));
 
-    const jumpToSource = (cm) => {
-      if (!cm.sourceCommentId || !inTimeline.has(cm.sourceCommentId)) {
-        toast("The comment this came from is not in the cached timeline");
-        return;
-      }
-      state.find = "";
-      state.vis = "all";
-      state.src = "all";
-      state.expandAll = true;
-      setQuery({ q: null });
-      selectTab("timeline");
-      requestAnimationFrame(() => {
-        const el = document.getElementById(`tl-${cm.sourceCommentId}`);
-        if (!el) return;
-        el.scrollIntoView({ block: "center", behavior: "smooth" });
-        el.classList.add("tl-flash");
-        setTimeout(() => el.classList.remove("tl-flash"), 1600);
-      });
-    };
+    const jumpToSource = (cm) =>
+      jumpToComment(cm.sourceCommentId, "The comment this came from is not in the cached timeline");
 
     mount(bodyHost,
       active.length > 1
@@ -878,6 +922,309 @@ export function render(ctx, host, shell) {
               paintMeta();
             },
           }))));
+  }
+
+  /* ---- quality ----------------------------------------------------------- */
+
+  /**
+   * The local IQS estimate, shown as an argument rather than a verdict.
+   *
+   * This is a machine reading regular expressions over my own words, and it is
+   * wrong sometimes. A bare number would be useless for that reason — the point
+   * of the tab is not "you scored 61", it is "here is the sentence that cost you
+   * the four points, decide whether you agree". So every dimension can be opened
+   * to the individual signals, every signal that fired carries the quote it
+   * fired on, and every deduction links to the comment it came from.
+   *
+   * Nothing here is customer-facing and nothing here is sent anywhere. It reads
+   * one cached row that was written by a pure function on the last sync.
+   */
+
+  const MARK_FULL = ["M4 12.5l5 5L20 6.5"];
+  const MARK_PART = ["M5 12h14"];
+  const MARK_NONE = ["M6.5 6.5l11 11", "M17.5 6.5l-11 11"];
+
+  /** Points, to one decimal, without a pointless ".0". */
+  const pts = (n) => String(Math.round((Number(n) || 0) * 10) / 10);
+
+  function signalRow(sig) {
+    const w = Number(sig.weight) || 0;
+    const state_ = w >= 0.999 ? "full" : w <= 0.001 ? "none" : "part";
+    const marks = { full: MARK_FULL, part: MARK_PART, none: MARK_NONE };
+
+    return h("li", { class: `iqs-sig s-${state_}` },
+      h("span", { class: "iqs-sig-mark" }, icon(marks[state_], 14)),
+
+      h("div", { class: "iqs-sig-main" },
+        h("div", { class: "iqs-sig-label", text: sig.label }),
+        sig.note ? h("div", { class: "iqs-sig-note", text: sig.note }) : null,
+        // Evidence is my own prose, quoted back at me. Text nodes only.
+        sig.evidence ? textNodes(sig.evidence, "", "iqs-sig-ev") : null),
+
+      h("span", {
+        class: "iqs-sig-w mono",
+        title: state_ === "full" ? "Full credit for this signal"
+          : state_ === "none" ? "This signal did not fire"
+          : "Partial credit — the signal fired weakly",
+        text: state_ === "full" ? "1.0" : state_ === "none" ? "0" : w.toFixed(2).replace(/^0/, ""),
+      }));
+  }
+
+  function dimensionCard(dim, scopeNotes) {
+    const open = state.iqsOpen.has(dim.id);
+    const pct = Math.round(Math.max(0, Math.min(100, (Number(dim.fraction) || 0) * 100)) * 10) / 10;
+
+    /*
+     * Counted at full credit only. Weights are fractional, so a count of
+     * "anything above zero" would have printed 3/3 next to a Not Meeting
+     * badge — technically true and completely misleading. The partials are
+     * still acknowledged, in the tooltip and in the bar.
+     */
+    const w = dim.signals.map((s) => Number(s.weight) || 0);
+    const full = w.filter((n) => n >= 0.999).length;
+    const part = w.filter((n) => n > 0.001 && n < 0.999).length;
+    const firedTitle = [
+      `${full} at full credit`,
+      part ? `${part} partial` : null,
+      w.length - full - part ? `${w.length - full - part} not found` : null,
+    ].filter(Boolean).join(", ");
+
+    return h("div", { class: `card iqs-dim t-${iqsTone(dim.band)}${open ? " is-open" : ""}` },
+      h("button", {
+        class: "iqs-dim-head", type: "button",
+        "aria-expanded": open ? "true" : "false",
+        title: open ? "Hide the signals behind this score" : "Show the signals behind this score",
+        onclick: () => {
+          if (open) state.iqsOpen.delete(dim.id); else state.iqsOpen.add(dim.id);
+          paintQuality();
+        },
+      },
+        h("span", { class: "iqs-caret" }, icon(["M9 5l7 7-7 7"], 13)),
+        h("span", { class: "iqs-dim-label", text: dim.label }),
+        bandChip(dim.band),
+        h("div", { class: "spacer" }),
+        h("span", { class: "iqs-dim-sig dim", title: firedTitle, text: `${full}/${w.length} signals` }),
+        h("span", { class: "iqs-dim-score mono", text: `${pts(dim.earned)} / ${pts(dim.max)}` }),
+        h("span", { class: "bar-track iqs-dim-track" },
+          h("span", { class: "bar-fill", style: { width: `${pct}%` } }))),
+
+      h("div", { class: "iqs-dim-basis" },
+        h("span", { text: dim.basis }),
+        scopeNotes?.[dim.scope]
+          ? h("span", { class: "dim", text: ` — ${scopeNotes[dim.scope]}` })
+          : null),
+
+      open ? h("ul", { class: "iqs-signals" }, dim.signals.map(signalRow)) : null);
+  }
+
+  function wwwTable(comments) {
+    const cell = (ok, waived) => {
+      if (waived) return h("td", { class: "iqs-www-cell" }, h("span", { class: "chip neutral", text: "waived" }));
+      return h("td", { class: `iqs-www-cell ${ok ? "yes" : "no"}` },
+        icon(ok ? MARK_FULL : MARK_NONE, 14));
+    };
+
+    return h("div", { class: "card iqs-card" },
+      h("div", { class: "art-head" },
+        h("span", { class: "art-title", text: "What / Why / When" }),
+        h("span", { class: "cd-tab-count mono", text: String(comments.length) }),
+        h("div", { class: "spacer" }),
+        h("span", { class: "hint", text: "Every comment of mine, scored out of 3" })),
+
+      h("div", { class: "iqs-www-scroll" },
+        h("table", { class: "tbl iqs-www" },
+          /*
+           * "Posted", not "When" — the third-from-last column is also a
+           * "When", and it means something entirely different (the WWW
+           * signal, not a timestamp). Two identical headers over unrelated
+           * columns is the kind of thing that reads fine to whoever wrote it.
+           * "Posted" also covers internal comments, which are never sent.
+           */
+          h("thead", {}, h("tr", {},
+            h("th", { text: "Posted" }),
+            h("th", { text: "Visibility" }),
+            h("th", { class: "right", text: "What" }),
+            h("th", { class: "right", text: "Why" }),
+            h("th", { class: "right", text: "When" }),
+            h("th", { class: "right", text: "Score" }),
+            h("th", { text: "Opening line" }))),
+
+          h("tbody", {}, comments.map((cm) => h("tr", {
+            class: "row iqs-www-row",
+            title: "Open this comment in the timeline",
+            onclick: () => jumpToComment(cm.id, "That comment is not in the cached timeline"),
+          },
+            h("td", { class: "nowrap mono dim", text: fmt.dateTimeShort(cm.createdDate) }),
+            h("td", { class: "nowrap" },
+              h("span", { class: `chip ${cm.isPublic ? "neutral" : "purple"}`,
+                text: cm.isPublic ? "Public" : "Internal" }),
+              cm.source === "email" ? h("span", { class: "chip neutral", text: "Email" }) : null),
+            cell(cm.what, false),
+            cell(cm.why, false),
+            cell(cm.when, cm.whenWaived),
+            h("td", { class: "right mono", text: `${pts(cm.earned)}/3` }),
+            h("td", { class: "iqs-www-ex" },
+              cm.excerpt ? textNodes(cm.excerpt, "", "iqs-ex") : h("span", { class: "dim", text: "—" }))))))));
+  }
+
+  function violationsCard(violations) {
+    return h("div", { class: "card iqs-card iqs-viol-card" },
+      h("div", { class: "art-head" },
+        h("span", { class: "art-title", text: "Language deductions" }),
+        h("span", { class: "cd-tab-count mono t-bad", text: String(violations.length) }),
+        h("div", { class: "spacer" }),
+        h("span", { class: "hint", text: "Phrases the rubric marks down, and what to write instead" })),
+
+      h("div", { class: "iqs-viols" }, violations.map((v) => h("div", { class: "iqs-viol" },
+        h("div", { class: "iqs-viol-top" },
+          h("span", { class: "chip iqs-band t-bad", text: v.label }),
+          h("code", { class: "iqs-viol-match", text: `“${v.match}”` }),
+          h("div", { class: "spacer" }),
+          h("span", { class: "mono dim nowrap", text: fmt.dateTimeShort(v.createdDate) }),
+          h("button", {
+            class: "linkbtn", type: "button", text: "jump to comment",
+            onclick: () => jumpToComment(v.commentId, "That comment is not in the cached timeline"),
+          })),
+
+        v.excerpt ? textNodes(v.excerpt, "", "iqs-viol-ex") : null,
+
+        h("div", { class: "iqs-viol-fix" },
+          h("span", { class: "iqs-viol-fix-tag", text: "Instead" }),
+          h("span", { text: v.replacement }))))));
+  }
+
+  async function paintQuality() {
+    if (!state.iqs) {
+      mount(bodyHost, skeletonRows(6, [160, 240, 240, 120]));
+      try {
+        state.iqs = await api.iqs(caseNumber);
+        paintTabs();
+      } catch (err) {
+        mount(bodyHost, banner("error", err.message || "Could not load the quality score",
+          button("Retry", { small: true, onclick: () => paintQuality() })));
+        return;
+      }
+      if (state.tab !== "iqs") return;   // the tab changed while fetching
+    }
+
+    const score = state.iqs.score;
+    const rubric = state.iqs.rubric || {};
+    const scoped = score.overall !== null && score.overall !== undefined;
+
+    /*
+     * A dimension that does not apply to this response type is absent from the
+     * score, not zero in it — a follow-up is not marked down for failing to
+     * restate the business impact. Naming the absent ones is the only way the
+     * denominator makes sense, so they are listed rather than silently missing.
+     */
+    const scoredIds = new Set(score.dimensions.map((d) => d.id));
+    const notApplicable = (rubric.dimensions || []).filter((d) => !scoredIds.has(d.id));
+
+    const kwLabel = KEYWORD_LABEL[score.keyword] || score.keyword;
+
+    const header = h("div", { class: `card iqs-hero t-${scoped ? iqsTone(score.band) : "none"}` },
+      h("div", { class: "iqs-hero-left" },
+        h("div", { class: "iqs-hero-meter" }, scoreMeter(score.overall, score.band, { width: 168 })),
+        h("div", {
+          class: "iqs-hero-of",
+          // The headline rounds; the tenth lives here rather than being lost.
+          title: scoped ? `Exactly ${pts(score.overall)} of 100` : "",
+          text: "out of 100 applicable points",
+        })),
+
+      h("div", { class: "iqs-hero-right" },
+        h("div", { class: "iqs-hero-chips" },
+          bandChip(score.band),
+          h("span", {
+            class: "chip neutral",
+            title: KEYWORD_HINT[score.keyword] || "",
+            text: `Scored as ${kwLabel}`,
+          }),
+          h("span", {
+            class: "chip neutral",
+            title: "Comments of mine the scorer could read on this case",
+            text: `${score.ownerComments} of my comments`,
+          })),
+
+        /*
+         * The derivation, not the result — the result is the 34px number to
+         * the left. It deliberately stops before an equals sign: the headline
+         * is rounded and the operands are exact, so a total here would either
+         * disagree with the number beside it or fail to add up.
+         */
+        h("div", { class: "iqs-hero-sum", title: bandExplain(score.overall, score.band, rubric.bands) },
+          scoped
+            ? h("span", {},
+                h("span", { class: "mono", text: pts(score.base) }),
+                h("span", { class: "dim", text: " dimensions" }),
+                score.penalty > 0
+                  ? h("span", {},
+                      h("span", { class: "dim", text: "  −  " }),
+                      h("span", { class: "mono t-bad", text: pts(score.penalty) }),
+                      h("span", { class: "dim", text: " language" }))
+                  : h("span", { class: "dim", text: "  ·  no language deductions" }))
+            : h("span", { class: "dim", text: "No score — see below" })),
+
+        h("div", { class: "iqs-hero-meta hint" },
+          // Rubric and scorer, named apart. When a score looks wrong the first
+          // question is which of the two moved, and a slash-joined pair makes
+          // that a guess. Scorer is omitted for rows stored before it was
+          // recorded rather than printed as "undefined".
+          `Rubric ${score.rubricVersion}`
+          + (score.scorerVersion ? ` · scorer ${score.scorerVersion}` : "")
+          + ` · scored locally ${fmt.dateTime(score.scoredAt)} · no API call, no model`)));
+
+    if (!scoped) {
+      mount(bodyHost,
+        header,
+        (score.notes || []).map((n) => banner("info", n)),
+        emptyState({
+          title: "Nothing of mine to score yet",
+          message: "The rubric grades what I wrote. This case has no comment from me in the cache, so a number here would be a number about somebody else's work.",
+          iconName: "inbox",
+          action: button("Open Timeline", { small: true, onclick: () => selectTab("timeline") }),
+        }));
+      return;
+    }
+
+    const allOpen = score.dimensions.length > 0 && score.dimensions.every((d) => state.iqsOpen.has(d.id));
+
+    mount(bodyHost,
+      header,
+
+      (score.notes || []).map((n) => banner("info", n)),
+
+      h("div", { class: "iqs-sec-head" },
+        h("span", { class: "art-title", text: "Dimensions" }),
+        h("div", { class: "spacer" }),
+        h("button", {
+          class: "linkbtn", type: "button",
+          text: allOpen ? "Collapse all" : "Expand all",
+          onclick: () => {
+            if (allOpen) state.iqsOpen.clear();
+            else for (const d of score.dimensions) state.iqsOpen.add(d.id);
+            paintQuality();
+          },
+        })),
+
+      h("div", { class: "iqs-dims" }, score.dimensions.map((d) => dimensionCard(d, rubric.scopeNotes))),
+
+      notApplicable.length
+        ? h("div", { class: "hint iqs-na" },
+            // "this", not "a" — two of the four keyword labels start with a
+            // vowel, so a hardcoded article gets "a update" and "a intro"
+            // wrong. Sidestepping the article is cheaper than choosing one.
+            `Not scored for this ${kwLabel.toLowerCase()}: ${notApplicable.map((d) => d.label).join(", ")}. `
+            + "These drop out of the denominator rather than scoring zero.")
+        : null,
+
+      score.violations.length ? violationsCard(score.violations) : null,
+
+      score.comments.length ? wwwTable(score.comments) : null,
+
+      h("div", { class: "hint iqs-foot" },
+        "This is QView's own estimate, produced by pattern matching on the cached case — not an official IQS result and not visible to anyone else. "
+        + "Where it disagrees with you, it is the estimate that is probably wrong; the evidence above is there so you can tell which."));
   }
 
   /* ---------------------------------------------------------- live clocks */

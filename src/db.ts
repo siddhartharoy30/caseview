@@ -175,6 +175,23 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
 CREATE INDEX IF NOT EXISTS idx_events_pending ON events(delivered, attempts);
+
+CREATE TABLE IF NOT EXISTS iqs_scores (
+  case_id        TEXT NOT NULL,
+  layer          TEXT NOT NULL,                    -- 'layer1' (deterministic) | 'layer2' (model)
+  case_number    TEXT NOT NULL,
+  keyword        TEXT NOT NULL,                    -- response type the score was read against
+  overall        REAL,                             -- 0..100, null when nothing applies yet
+  band           TEXT,                             -- meeting | partial | not_meeting
+  detail         TEXT NOT NULL,                    -- JSON: dimensions, per-comment WWW, violations
+  rubric_version TEXT NOT NULL,                    -- a bump here invalidates every row
+  content_hash   TEXT,                             -- layer 2 cache key; null for layer 1
+  scored_at      INTEGER NOT NULL,
+  PRIMARY KEY (case_id, layer),
+  FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_iqs_scores_overall ON iqs_scores(layer, overall);
+CREATE INDEX IF NOT EXISTS idx_iqs_scores_number ON iqs_scores(case_number);
 `);
 
 /* --------------------------------------------------------------- full text */

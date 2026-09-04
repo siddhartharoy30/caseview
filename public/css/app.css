@@ -3707,3 +3707,422 @@ body.light .set-danger {
 .sk-line.w60 { width: 60%; }
 .sk-line.w70 { width: 70%; }
 .sk-line.w80 { width: 80%; }
+
+/* ==========================================================================
+   Quality (IQS)
+
+   One tone system, used by the queue cell, the tab badge and the whole Quality
+   tab. A band sets --tone on an ancestor and everything underneath — meter
+   fill, chip, bar, accent — reads that variable, so the same score is the same
+   colour wherever it appears and a palette change is a one-line edit. The tones
+   resolve to the theme's own --green/--amber/--red, which means light mode
+   needs no rules of its own here.
+   ========================================================================== */
+
+.t-good { --tone: var(--green); }
+.t-mid  { --tone: var(--amber); }
+.t-bad  { --tone: var(--red); }
+.t-none { --tone: var(--text-4); }
+
+/* Loose tone utility for a number that is not inside a toned container. */
+.mono.t-bad  { color: var(--red); }
+.mono.t-good { color: var(--green); }
+
+/* ---- the score itself, at any size -------------------------------------- */
+
+.iqs-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  vertical-align: middle;
+}
+
+.iqs-track {
+  display: inline-block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-3);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.iqs-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  min-width: 2px;
+  background: var(--tone);
+  transition: width var(--speed) ease-out;
+}
+
+.iqs-num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--tone);
+  min-width: 2.2ch;
+  text-align: right;
+}
+
+.iqs-meter.t-none .iqs-num { color: var(--text-4); font-weight: 400; }
+
+/* ---- queue cell --------------------------------------------------------- */
+
+.iqs-cell { display: inline-flex; align-items: center; gap: 8px; }
+
+.iqs-kw {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .07em;
+  color: var(--text-4);
+  white-space: nowrap;
+}
+
+/* The meter alone survives a 32px row; the keyword is the first thing to go. */
+body.compact .iqs-kw { display: none; }
+
+/* ---- band chip ---------------------------------------------------------- */
+
+.chip.iqs-band {
+  background: color-mix(in srgb, var(--tone) 20%, transparent);
+  color: var(--tone);
+}
+
+.chip.iqs-band.t-none { background: var(--surface-3); color: var(--text-3); }
+
+/* The tab badge is a score, so it carries the band colour. These come after the
+   base .cd-tab-count pair on purpose — they have to win both of them. */
+.cd-tab-count.t-good,
+.cd-tab-count.t-mid,
+.cd-tab-count.t-bad {
+  background: color-mix(in srgb, var(--tone) 18%, transparent);
+  color: var(--tone);
+  font-weight: 600;
+}
+
+.cd-tab.active .cd-tab-count.t-good,
+.cd-tab.active .cd-tab-count.t-mid,
+.cd-tab.active .cd-tab-count.t-bad {
+  background: color-mix(in srgb, var(--tone) 26%, transparent);
+  color: var(--tone);
+}
+
+/* ---- hero --------------------------------------------------------------- */
+
+.iqs-hero {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  padding: 18px 20px;
+  margin-bottom: 14px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tone) 8%, var(--surface)), var(--surface));
+  border-color: color-mix(in srgb, var(--tone) 26%, var(--border));
+}
+
+.iqs-hero-left { flex-shrink: 0; }
+
+/* Reversed so the number leads and the track trails it, which reads better at
+   this size than a long bar with a digit stuck on the end. */
+.iqs-hero-meter .iqs-meter { gap: 14px; flex-direction: row-reverse; }
+.iqs-hero-meter .iqs-track { height: 9px; border-radius: 5px; }
+.iqs-hero-meter .iqs-fill  { border-radius: 5px; }
+
+.iqs-hero-meter .iqs-num {
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: -.02em;
+  min-width: 3ch;
+  text-align: left;
+}
+
+.iqs-hero-of {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-4);
+}
+
+.iqs-hero-right { min-width: 0; display: flex; flex-direction: column; gap: 9px; }
+
+.iqs-hero-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.iqs-hero-sum {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.iqs-hero-sum .mono { font-weight: 600; color: var(--text); }
+.iqs-hero-sum .dim  { font-size: 12px; }
+
+.iqs-hero-meta { color: var(--text-4); }
+
+/* ---- section heading ---------------------------------------------------- */
+
+.iqs-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 9px;
+}
+
+/* ---- dimensions --------------------------------------------------------- */
+
+.iqs-dims { display: flex; flex-direction: column; gap: 8px; }
+
+.iqs-dim { padding: 0; overflow: hidden; }
+
+.iqs-dim-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 14px 11px 10px;
+  background: none;
+  border: none;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--speed);
+}
+
+.iqs-dim-head:hover { background: var(--surface-2); }
+
+.iqs-caret {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text-4);
+  transition: transform var(--speed) ease-out;
+}
+
+.iqs-dim.is-open .iqs-caret { transform: rotate(90deg); color: var(--tone); }
+
+.iqs-dim-label {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.iqs-dim-sig { font-size: 11px; white-space: nowrap; }
+
+.iqs-dim-score {
+  min-width: 8ch;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--tone);
+  white-space: nowrap;
+  text-align: right;
+}
+
+.iqs-dim-track { width: 84px; height: 7px; flex-shrink: 0; }
+.iqs-dim-track .bar-fill { background: var(--tone); }
+
+/* Aligned under the label rather than the caret, so the sentence explaining
+   what was read sits with the thing it explains. */
+.iqs-dim-basis {
+  margin-top: -4px;
+  padding: 0 14px 11px 33px;
+  max-width: 92ch;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+/* ---- signals ------------------------------------------------------------ */
+
+.iqs-signals {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+  margin: 0;
+  padding: 4px 14px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-sunken);
+}
+
+.iqs-sig {
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  align-items: start;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.iqs-sig:last-child { border-bottom: none; }
+
+/* A signal that did not fire is grey, not red. It is an absence, not a fault —
+   the deduction it implies is already priced into the dimension bar. */
+.iqs-sig.s-full { --sig: var(--green); }
+.iqs-sig.s-part { --sig: var(--amber); }
+.iqs-sig.s-none { --sig: var(--text-4); }
+
+.iqs-sig-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: var(--sig);
+  background: color-mix(in srgb, var(--sig) 16%, transparent);
+}
+
+.iqs-sig.s-none .iqs-sig-mark { background: var(--surface-3); }
+
+.iqs-sig-main { min-width: 0; }
+
+.iqs-sig-label {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+
+.iqs-sig.s-none .iqs-sig-label { color: var(--text-3); }
+
+.iqs-sig-note {
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-4);
+}
+
+/* The quote the signal fired on. Ruled in the signal's own colour so it reads
+   as evidence for that verdict rather than as more of the label. */
+.iqs-sig-ev {
+  margin-top: 6px;
+  padding: 5px 0 5px 10px;
+  max-width: 96ch;
+  border-left: 2px solid color-mix(in srgb, var(--sig) 45%, transparent);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-3);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.iqs-sig-w {
+  min-width: 3.5ch;
+  padding-top: 3px;
+  font-size: 11.5px;
+  color: var(--sig);
+  text-align: right;
+}
+
+/* ---- shared shell for the two lower blocks ------------------------------ */
+
+.iqs-card { padding: 12px 14px; margin-top: 14px; }
+
+.iqs-na { margin-top: 10px; max-width: 92ch; line-height: 1.55; }
+
+.iqs-foot {
+  margin: 18px 0 4px;
+  padding-top: 12px;
+  max-width: 92ch;
+  border-top: 1px solid var(--border);
+  line-height: 1.6;
+}
+
+/* ---- language deductions ------------------------------------------------ */
+
+/* The one block on the tab that is unambiguously bad news, so the card itself
+   is tinted rather than only the rows inside it. */
+.iqs-viol-card { border-color: color-mix(in srgb, var(--red) 20%, var(--border)); }
+
+.iqs-viols { display: flex; flex-direction: column; gap: 9px; }
+
+.iqs-viol {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--red) 22%, var(--border));
+  border-left: 3px solid color-mix(in srgb, var(--red) 55%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--red) 5%, transparent);
+}
+
+.iqs-viol-top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.iqs-viol-match {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--red);
+  overflow-wrap: anywhere;
+}
+
+.iqs-viol-ex {
+  margin-top: 7px;
+  padding-left: 10px;
+  max-width: 96ch;
+  border-left: 2px solid var(--border-2);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-3);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.iqs-viol-fix {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.iqs-viol-fix-tag {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--green);
+}
+
+/* ---- what / why / when grid --------------------------------------------- */
+
+/* Negative margins let the table bleed to the card edge while its own padding
+   keeps the sticky header aligned with the heading above it. */
+.iqs-www-scroll { overflow-x: auto; margin: 0 -14px -12px; padding: 0 14px; }
+
+.iqs-www { margin-top: 4px; }
+
+.iqs-www-row { cursor: pointer; }
+.iqs-www-row:hover td { background: var(--surface-2); }
+
+.iqs-www td { height: 34px; padding: 0 10px; border-bottom: 1px solid var(--border); }
+.iqs-www tr:last-child td { border-bottom: none; }
+
+.iqs-www-cell { text-align: right; white-space: nowrap; }
+.iqs-www-cell.yes { color: var(--green); }
+.iqs-www-cell.no  { color: var(--text-4); }
+.iqs-www-cell svg { vertical-align: middle; }
+
+.iqs-www-ex { max-width: 46ch; }
+
+.iqs-ex {
+  max-width: 46ch;
+  font-size: 11.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- narrow ------------------------------------------------------------- */
+
+@media (max-width: 860px) {
+  .iqs-hero { flex-direction: column; align-items: flex-start; gap: 14px; }
+  .iqs-dim-head { flex-wrap: wrap; }
+  .iqs-dim-track { width: 100%; }
+  .iqs-dim-basis { padding-left: 14px; }
+}

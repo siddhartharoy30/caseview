@@ -19,6 +19,7 @@ import {
   toast, toastError, dialog, confirmDialog,
   skeletonRows, emptyState, banner, button, copyToast,
 } from "../lib/ui.js";
+import { scoreMeter, bandExplain, bandLabel, KEYWORD_LABEL } from "../lib/iqs.js";
 import { pageHead, page } from "./_shared.js";
 import { navigate, setQuery } from "../router.js";
 
@@ -144,6 +145,35 @@ const COLUMNS = [
     sortVal: (c) => (c.productArea || "").toLowerCase(),
     csv: (c) => c.productArea || "",
     cell: (c) => h("span", { class: "nowrap", text: c.productArea || "—" }),
+  },
+  /*
+   * Quality sits last on purpose.
+   *
+   * A saved layout keeps its own order and appends any column it has not seen
+   * to the end, so declaring this one last is the only position where a
+   * returning user and a fresh one see the same table. Note also that the
+   * hidden-by-default rule only applies when there is no saved layout at all —
+   * an existing user's `hidden` set cannot contain an id that did not exist
+   * when it was written, so a new column arrives visible whatever `defaultOn`
+   * says. That is the right outcome here and would be a bug for a niche
+   * column, which is why the two facts are written down rather than assumed.
+   */
+  {
+    id: "iqs", label: "Quality", defaultOn: true,
+    sortVal: (c) => (c.iqs && c.iqs.overall !== null ? c.iqs.overall : null),
+    csv: (c) => (c.iqs && c.iqs.overall !== null ? String(Math.round(c.iqs.overall)) : ""),
+    cell: (c) => {
+      if (!c.iqs) {
+        return h("span", { class: "dim", title: "Not scored yet — the next sync will score it", text: "—" });
+      }
+      const kw = c.iqs.keyword;
+      const title = `${bandExplain(c.iqs.overall, c.iqs.band)}\n`
+        + `${KEYWORD_LABEL[kw] || kw} · scored ${fmt.dateTimeShort(c.iqs.scoredAt)}`;
+      return h("span", { class: "iqs-cell", title },
+        scoreMeter(c.iqs.overall, c.iqs.band),
+        h("span", { class: "iqs-kw", text: (KEYWORD_LABEL[kw] || kw).toUpperCase() }),
+      );
+    },
   },
 ];
 
@@ -340,6 +370,9 @@ function summaryBlock(c) {
     `Last customer touch: ${c.lastCustomerTouch ? fmt.dateTime(c.lastCustomerTouch) : "—"}`,
     `Last my touch: ${c.lastMyTouch ? fmt.dateTime(c.lastMyTouch) : "—"}`,
     `Next commitment: ${c._due ? `${fmt.dateTime(c._due)} (${fmt.countdown(c._due)})` : "none"}`,
+    `Quality (local estimate): ${c.iqs && c.iqs.overall !== null
+      ? `${Math.round(c.iqs.overall)}/100 ${bandLabel(c.iqs.band)} — scored as ${KEYWORD_LABEL[c.iqs.keyword] || c.iqs.keyword}`
+      : "not scored"}`,
     `QView: ${location.origin}/case/${c.caseNumber}`,
   ].join("\n");
 }

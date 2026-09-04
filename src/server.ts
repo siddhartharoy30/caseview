@@ -21,6 +21,7 @@ import { draftSuggestedReply } from "./claude";
 import {
   listCases,
   getCase,
+  getCaseRow,
   getTimeline,
   getArtifacts,
   getRelated,
@@ -36,6 +37,13 @@ import {
   badgeCounts,
   facets,
 } from "./queries";
+import { rubricMeta } from "./iqs/rubric";
+import {
+  getDetail as getIqsDetail,
+  getStats as getIqsStats,
+  rescoreStale,
+  scoreAndStoreCase,
+} from "./iqs/store";
 import { resolveRange, scorecard, saveManualMetric, deleteManualMetric } from "./metrics";
 import { syncOnce, startSync, reconcileCommitments } from "./sync";
 import { listEvents, sendWebhookTest } from "./notify";
@@ -220,6 +228,28 @@ app.get("/api/cases/:caseNumber/artifacts", requireAuth, noStore, (req, res) => 
 
 app.get("/api/cases/:caseNumber/related", requireAuth, noStore, (req, res) => {
   res.json({ cases: getRelated(req.params.caseNumber), jira: getJiraLinks(req.params.caseNumber) });
+});
+
+/**
+ * The full quality breakdown. Deliberately its own route: the queue carries
+ * only the three summary columns, so a 200-row page never pays to deserialize
+ * 200 dimension trees.
+ */
+app.get("/api/cases/:caseNumber/iqs", requireAuth, noStore, (req, res) => {
+  const c = getCaseRow(req.params.caseNumber);
+  if (!c) return res.status(404).json({ error: "Case not in cache" });
+
+  let score = getIqsDetail(req.params.caseNumber);
+  // A case synced before this feature existed has no row yet. Score it now
+  // rather than showing an empty tab — it is local work, not an API call.
+  if (!score) score = scoreAndStoreCase(c.id);
+
+  if (!score) return res.status(404).json({ error: "No score for this case" });
+  res.json({ score, rubric: rubricMeta() });
+});
+
+app.get("/api/iqs/stats", requireAuth, noStore, (req, res) => {
+  res.json({ stats: getIqsStats(req.query.open === "1") });
 });
 
 /**
@@ -533,5 +563,9 @@ function safeHost(url: string): string {
 
 app.listen(config.port, () => {
   log.info("server.listening", { port: config.port });
+  // Cases cached before quality scoring existed, and every case if the rubric
+  // version moved, are graded here. Local regex over the cache: no Salesforce
+  // call, no API key, so it is safe to do before the first sync lands.
+  rescoreStale();
   startSync();
 });

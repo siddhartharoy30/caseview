@@ -8,6 +8,7 @@
 
 import { db, newId, now } from "./db";
 import { ARTIFACT_LABELS, ArtifactKind } from "./artifacts";
+import { getSummary as iqsSummaryFor } from "./iqs/store";
 
 /* --------------------------------------------------------------- case rows */
 
@@ -90,6 +91,10 @@ export function toApiCase(r: CaseRow) {
     commentCount: r.comment_count || 0,
     syncedAt: r.synced_at,
     nextCommitment: next,
+    // Three numbers, not the whole breakdown. The queue sorts and colours on
+    // these; the dimension tree stays behind /api/cases/:n/iqs so a 200-row
+    // page does not carry 200 of them.
+    iqs: iqsSummaryFor(r.id),
   };
 }
 

@@ -431,6 +431,42 @@ comments (N/A here).`,
 export const FOLLOWUP_ATTEMPTS_BEFORE_CLOSURE = 2;
 
 /**
+ * A JSON-safe view of the rubric for the browser.
+ *
+ * The Quality tab shows dimension labels, signal wording and band thresholds.
+ * It gets them from here rather than restating them in JavaScript, so a rubric
+ * edit reaches the UI on the next reload instead of drifting silently out of
+ * step with the score beside it. RegExp does not survive JSON, so patterns stay
+ * on the server where they are used.
+ */
+export function rubricMeta() {
+  return {
+    version: RUBRIC_VERSION,
+    bands: BANDS,
+    bandLabels: BAND_LABELS,
+    dimensions: DIMENSIONS.map((d) => ({
+      id: d.id,
+      label: d.label,
+      max: d.max,
+      signals: d.signals,
+      scope: d.scope,
+      appliesTo: d.appliesTo,
+    })),
+    bannedPhrases: BANNED_PHRASES.map((p) => ({
+      id: p.id,
+      label: p.label,
+      replacement: p.replacement,
+    })),
+    scopeNotes: {
+      first3: "read from the case's opening comments",
+      everyOwnerComment: "scored on each of my comments and averaged",
+      case: "derived from the case's commitment record",
+      closure: "read from my closing comment",
+    } as Record<DimensionScope, string>,
+  };
+}
+
+/**
  * Guards the two places where prose and data are kept in step by hand rather
  * than by rendering. Runs at import: a mismatch is a bug in this file, and the
  * cheapest moment to find it is boot rather than the first time somebody trusts
