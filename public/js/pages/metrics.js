@@ -22,7 +22,7 @@ import * as fmt from "../lib/fmt.js";
 import {
   toast, toastError, dialog, confirmDialog, skeletonCards, banner, field, button,
 } from "../lib/ui.js";
-import { pageHead, page } from "./_shared.js";
+import { pageHead, page, tile } from "./_shared.js";
 import { navigate } from "../router.js";
 
 const KEY_PERIOD = "metrics.period";
@@ -328,16 +328,6 @@ function agingChart(aging, nowMs) {
 
 /* -------------------------------------------------------------- fragments -- */
 
-function tile({ label, value, sub, href, tone = "", hint }) {
-  const inner = [
-    h("div", { class: "tile-label" }, label, hint ? h("span", { class: "tile-hint", title: hint }, "?") : null),
-    h("div", { class: "tile-value " + tone }, value),
-    sub ? h("div", { class: "tile-sub" }, sub) : null,
-  ];
-  return href
-    ? h("a", { class: "tile link", href }, inner)
-    : h("div", { class: "tile" }, inner);
-}
 
 /** Horizontal bars for a categorical breakdown. Each row is its own filter. */
 function breakdown(rows, hrefFor, { empty = "Nothing to show.", tone = "blue", max: cap } = {}) {

@@ -22,6 +22,7 @@ const ICONS = {
   commitments: ["M6 4h9l4 4v12H6z", "M9 12h6", "M9 16h4"],
   escalations: ["M12 4l9 16H3z", "M12 10v4", "M12 17.5v.01"],
   metrics:     ["M5 20V10", "M12 20V4", "M19 20v-7"],
+  iqs:         ["M4 17a8 8 0 0 1 16 0", "M12 17l4.2-4.6", "circle:12,17,1.3"],
   search:      ["circle:11,11,7", "M20 20l-3.5-3.5"],
   patterns:    ["circle:6,7,2.4", "circle:17,7,2.4", "circle:11.5,17,2.4", "M8.1,8.4 L10.2,14.8", "M15,8.6 L12.8,14.8"],
   settings:    ["circle:12,12,3", "M12 3v2.2M12 18.8V21M4.2 7.5l1.9 1.1M17.9 15.4l1.9 1.1M4.2 16.5l1.9-1.1M17.9 8.6l1.9-1.1"],
@@ -35,6 +36,7 @@ const NAV = [
   { id: "escalations", label: "Escalations", path: "/escalations", key: "e", badge: "escalations" },
   { section: "Insight" },
   { id: "metrics",     label: "Scorecard",   path: "/metrics",     key: "m" },
+  { id: "iqs",         label: "Quality",     path: "/iqs",         key: "i" },
   { id: "search",      label: "Search",      path: "/search",      key: "s" },
   { id: "patterns",    label: "Patterns",    path: "/patterns" },
   { section: "System" },
@@ -46,6 +48,7 @@ const PAGES = {
   caseDetail:  () => import("./pages/caseDetail.js"),
   commitments: () => import("./pages/commitments.js"),
   metrics:     () => import("./pages/metrics.js"),
+  iqs:         () => import("./pages/iqs.js"),
   triage:      () => import("./pages/triage.js"),
   escalations: () => import("./pages/escalations.js"),
   search:      () => import("./pages/search.js"),
@@ -406,6 +409,7 @@ function registerRoutes() {
   route("/case/:caseNumber", page(PAGES.caseDetail));
   route("/commitments", page(PAGES.commitments));
   route("/metrics", page(PAGES.metrics));
+  route("/iqs", page(PAGES.iqs));
   route("/triage", page(PAGES.triage));
   route("/escalations", page(PAGES.escalations));
   route("/search", page(PAGES.search));

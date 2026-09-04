@@ -194,6 +194,43 @@ CREATE INDEX IF NOT EXISTS idx_iqs_scores_overall ON iqs_scores(layer, overall);
 CREATE INDEX IF NOT EXISTS idx_iqs_scores_number ON iqs_scores(case_number);
 `);
 
+/* ------------------------------------------------- layer 2 usage ledger */
+
+/**
+ * One row per Layer 2 scoring decision, cache hits included.
+ *
+ * Phase 3's gate is "cost and hit rate visible", and neither number can be
+ * recovered after the fact from the score table: a cache hit writes no score
+ * row, and a re-score overwrites the one it replaces. So the ledger is the
+ * measurement, not a log. It is append-only and is the only place the hit
+ * rate exists.
+ *
+ * cost_usd is a LOCAL ESTIMATE from a list-price table, not a bill. The
+ * gateway does not report spend, and the estimate is worth having anyway
+ * because its job is to trip the daily cap, not to reconcile an invoice.
+ */
+db.exec(`
+CREATE TABLE IF NOT EXISTS iqs_layer2_usage (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_id            TEXT,
+  case_number        TEXT,
+  content_hash       TEXT,
+  model              TEXT    NOT NULL,
+  outcome            TEXT    NOT NULL,             -- hit | miss | error | skipped
+  reason             TEXT,                         -- why, for skipped and error
+  input_tokens       INTEGER NOT NULL DEFAULT 0,
+  output_tokens      INTEGER NOT NULL DEFAULT 0,
+  cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+  cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+  cost_usd           REAL    NOT NULL DEFAULT 0,
+  ms                 INTEGER NOT NULL DEFAULT 0,
+  source             TEXT    NOT NULL DEFAULT 'demand',   -- demand | sweep
+  created_at         INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_l2_usage_created ON iqs_layer2_usage(created_at);
+CREATE INDEX IF NOT EXISTS idx_l2_usage_case ON iqs_layer2_usage(case_number, created_at);
+`);
+
 /* --------------------------------------------------------------- full text */
 
 /**

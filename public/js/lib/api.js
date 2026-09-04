@@ -79,6 +79,13 @@ export const api = {
   iqs:      (n)    => request("GET", `/api/cases/${encodeURIComponent(n)}/iqs`),
   iqsStats: (open) => request("GET", "/api/iqs/stats" + qs({ open })),
 
+  /* quality, layer 2 — the model score. GET never spends: it returns what is
+     stored, or the reason there is nothing. POST is the purchase. */
+  iqsLayer2:      (n)       => request("GET",  "/api/cases/" + encodeURIComponent(n) + "/iqs/layer2"),
+  scoreLayer2:    (n, body) => request("POST", "/api/cases/" + encodeURIComponent(n) + "/iqs/layer2", body || {}),
+  iqsOverview:    (p)       => request("GET",  "/api/iqs/overview" + qs(p)),
+  iqsSweep:       ()        => request("POST", "/api/iqs/sweep", {}),
+
   /* commitments */
   commitments:   (state)      => request("GET",   "/api/commitments" + qs({ state })),
   addCommitment: (payload)    => request("POST",  "/api/commitments", payload),

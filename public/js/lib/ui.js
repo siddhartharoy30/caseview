@@ -161,10 +161,12 @@ export function select(options, value, onchange) {
 }
 
 export function button(label, opts = {}) {
-  const { onclick, kind = "", iconPaths, title, small } = opts;
+  const { onclick, kind = "", iconPaths, title, small, disabled } = opts;
   return h("button", {
     class: `btn ${kind} ${small ? "sm" : ""}`.trim(),
-    onclick,
+    onclick: disabled ? null : onclick,
+    disabled: disabled || null,
+    "aria-disabled": disabled ? "true" : null,
     title: title || null,
   }, iconPaths ? icon(iconPaths, small ? 13 : 15) : null, label);
 }
