@@ -4617,3 +4617,52 @@ body.compact .iqs-kw { display: none; }
   .l2-act { flex-wrap: wrap; gap: 4px 10px; }
   .l2-act-reason { flex-basis: 100%; white-space: normal; }
 }
+
+/* ============================================================ time off (Phase 6) */
+
+.to-add-card { margin-bottom: 18px; }
+
+.to-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(140px, 1fr));
+  gap: 14px;
+}
+.to-fields .field { margin-bottom: 0; }
+
+.to-add-actions { display: flex; justify-content: flex-end; margin-top: 4px; }
+
+.to-preview { margin-top: 12px; }
+.to-clear { color: var(--green); }
+
+.to-cm-list { display: flex; flex-direction: column; gap: 4px; }
+
+.to-cm-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 12px;
+  transition: background var(--speed);
+}
+.to-cm-row:hover { background: var(--surface-3); }
+.to-cm-num { flex-shrink: 0; }
+.to-cm-subject { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.to-cm-due { flex-shrink: 0; }
+
+.to-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 9px;
+}
+
+.to-list { display: flex; flex-direction: column; gap: 12px; }
+
+.to-range-card { padding: 13px 14px; }
+.to-range-card.is-past { opacity: 0.6; }
+.to-range-dates { font-weight: 500; }
+.to-range-note { font-style: italic; }

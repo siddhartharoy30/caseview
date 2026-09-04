@@ -90,6 +90,12 @@ export const api = {
   commitments:   (state)      => request("GET",   "/api/commitments" + qs({ state })),
   addCommitment: (payload)    => request("POST",  "/api/commitments", payload),
   patchCommitment: (id, p)    => request("PATCH", `/api/commitments/${encodeURIComponent(id)}`, p),
+  commitmentsInRange: (start, end) => request("GET", "/api/commitments/range" + qs({ start, end })),
+
+  /* time off — Phase 6's coverage calendar */
+  timeOff:       ()           => request("GET",    "/api/time-off"),
+  addTimeOff:    (payload)    => request("POST",   "/api/time-off", payload),
+  deleteTimeOff: (id)         => request("DELETE", `/api/time-off/${encodeURIComponent(id)}`),
 
   /* metrics */
   metrics:          (p)       => request("GET",    "/api/metrics" + qs(p)),

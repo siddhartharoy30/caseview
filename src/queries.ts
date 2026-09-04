@@ -393,6 +393,49 @@ export function listCommitments(states?: string[]) {
   );
 }
 
+/**
+ * Phase 6's commitment pre-flight: every outstanding promise due inside a
+ * date range, in New York wall-clock terms (see timeOff.ts:rangeBoundsMs()).
+ * `active` and `breached` only -- an outstanding promise in either state is
+ * exactly what needs a plan before you're unreachable; `met`, `superseded`
+ * and `dismissed` are resolved, and `unparsed` has no `due_at` to range
+ * against. Same join and the same row shape listCommitments() uses, so the
+ * Time Off page and the Commitments page render one commitment identically.
+ */
+export function commitmentsInRange(startIso: string, endIso: string) {
+  const rows = db
+    .prepare(
+      `SELECT cm.*,
+              c.subject   AS c_subject,
+              c.account   AS c_account,
+              c.priority  AS c_priority,
+              c.status    AS c_status,
+              c.is_closed AS c_is_closed
+       FROM commitments cm LEFT JOIN cases c ON c.id = cm.case_id
+       WHERE cm.state IN ('active', 'breached') AND cm.due_at BETWEEN ? AND ?
+       ORDER BY cm.due_at ASC`,
+    )
+    .all(startIso, endIso) as Array<
+      CommitmentRow & {
+        c_subject: string | null;
+        c_account: string | null;
+        c_priority: string | null;
+        c_status: string | null;
+        c_is_closed: number | null;
+      }
+    >;
+
+  return rows.map((r) =>
+    toApiCommitment(r, {
+      subject: r.c_subject,
+      account: r.c_account,
+      priority: r.c_priority,
+      status: r.c_status,
+      isClosed: r.c_is_closed === 1,
+    }),
+  );
+}
+
 export function listCommitmentsForCase(caseNumber: string) {
   const rows = db
     .prepare("SELECT * FROM commitments WHERE case_number = ? ORDER BY due_at IS NULL, due_at ASC")

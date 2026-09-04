@@ -338,7 +338,7 @@ already lives.
 | 3 | Layer 2 scorer, hash cache, `/iqs` page | done, cost and hit rate visible |
 | 4 | `src/nextAction.ts`, both callers delegate, queue column | done, `sla.ts` and `claude.ts` agree |
 | 5 | Draft pre-flight, auto-repair, keyword override, artifacts | predicted score before copy |
-| 6 | Time-off calendar, commitment pre-flight | range surfaces its commitments |
+| 6 | Time-off calendar, commitment pre-flight | done, range surfaces its commitments |
 | 7 | Status-transition watcher, compose, dry run, sweep | 30-day backtest shows volume |
 | 8 | Slack delivery, threading, approval queue, escalation ping | dormant until a token exists |
 | 9 | Recap, batch drafting, SentryAI import | — |
@@ -577,3 +577,62 @@ whatever is currently staged.
   context ("the case has these on file; cite them"), and shows a one-line
   summary in the Draft tab so the reviewing engineer sees it without a tab
   switch.
+
+---
+
+## Phase 6 — discovery and decisions
+
+Phase 6 (`Time-off calendar, commitment pre-flight`) is the first piece of
+Feature C (Phase 0's coverage automation) to actually get built. Nothing for
+it existed yet: no `time_off` table, no `coverageDryRun`/`coverageSlackChannel`
+settings, no route. Grepping for all three came back empty before writing any
+code, which is the honest starting point — phases 7-9 (status-transition
+watcher, Slack delivery) build on top of what this phase lays down, so getting
+the shape right here matters more than usual.
+
+**What "commitment pre-flight" means, concretely.** The commitment system
+already exists (`commitments.ts` parses promises out of case text,
+`queries.ts:listCommitments()` serves the Commitments page's breached / at-risk
+/ today / upcoming bands). What phase 6 adds is a second lens on the same
+data: given a date range, which of those deadlines fall inside it. That is a
+plain filter (`due_at BETWEEN`), not new commitment logic, so
+`queries.ts:commitmentsInRange()` reuses the same join and the same
+`toApiCommitment()` shaping the Commitments page already uses — one row shape,
+two views.
+
+**Decision: a real persisted calendar, not just a date picker.** The gate
+says "range surfaces its commitments," which a stateless two-date-field form
+would satisfy literally. But phase 7's status-transition watcher and phase
+8's Slack delivery need to know, on their own, whether coverage should be
+armed *right now* — that requires a saved list of ranges to check against, not
+something that only exists while a form is open. So `time_off` is a table
+(`start_date`, `end_date`, `note`), not a settings blob: phases 7-9 will query
+it the same way `commitments` and `iqs_scores` are queried, and a settings
+JSON value would have made that an awkward parse-and-scan instead of a normal
+indexed lookup.
+
+**Whole days, in the owner's timezone, not the container's.** A time-off range
+is dates, not instants — "out Sep 10 through Sep 12" means midnight to
+midnight in `America/New_York`, not UTC. Phase 1 already found and fixed the
+exact bug class this would otherwise reintroduce (`claude.ts`'s date
+formatting running in UTC and writing tomorrow's date after 8 PM Eastern), so
+`timeOff.ts:rangeBoundsMs()` goes through the same `businessHours.ts:fromWallClock()`
+every other date-sensitive part of this codebase uses, rather than a fresh
+`new Date(startDate)` that would parse as UTC midnight and shift the boundary
+by hours depending on the server's clock.
+
+**Scope drawn at "surface," not "act."** This phase shows what needs
+attention before you leave; it does not renegotiate, dismiss, or notify
+anyone. Phases 7 and 8 own the status-transition watcher and the Slack post —
+adding either here would be doing phase 7/8's job under phase 6's gate, the
+same trap phase 1 explicitly declined to walk into with `detectKeyword()`'s
+own thresholds. `active` and `breached` commitments are the ones surfaced
+(an outstanding promise, in either state, is exactly what needs a plan before
+you're unreachable); `met`, `superseded` and `dismissed` are resolved and
+`unparsed` has no `due_at` to range against, so all four are excluded.
+
+**Its own page, not a section bolted onto Commitments.** Phases 7 and 8 add a
+coverage-trigger settings block, a dry-run banner, and an approval queue —
+real screen area this page doesn't have yet but will. `/iqs` went through the
+same reasoning in phase 3: give the feature its own room now rather than
+migrate it out of a denser page later.

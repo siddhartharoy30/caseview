@@ -122,6 +122,25 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_commitments_dedupe
   ON commitments(case_id, source_comment_id, raw_text)
   WHERE source_comment_id IS NOT NULL;
 
+-- Phase 6 (Feature C, the coverage automation this project's spec calls
+-- time-off): declared out-of-office windows. Whole days in the owner's
+-- timezone, not instants -- see timeOff.ts rangeBoundsMs(), which converts
+-- through businessHours.ts fromWallClock() the same way every other
+-- date-sensitive part of this codebase does, rather than a bare
+-- new Date(startDate) that would parse as UTC midnight.
+--
+-- A table, not a settings value: phases 7-9 need to ask "is coverage armed
+-- right now" on their own, which wants a normal indexed lookup, not a
+-- parse-and-scan over a JSON blob.
+CREATE TABLE IF NOT EXISTS time_off (
+  id         TEXT PRIMARY KEY,
+  start_date TEXT NOT NULL,   -- YYYY-MM-DD, inclusive
+  end_date   TEXT NOT NULL,   -- YYYY-MM-DD, inclusive
+  note       TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_time_off_start ON time_off(start_date);
+
 CREATE TABLE IF NOT EXISTS artifacts (
   id          TEXT PRIMARY KEY,
   case_id     TEXT NOT NULL,

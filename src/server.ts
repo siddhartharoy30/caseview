@@ -32,11 +32,13 @@ import {
   addManualCommitment,
   updateCommitment,
   renegotiateCommitment,
+  commitmentsInRange,
   search,
   patterns,
   badgeCounts,
   facets,
 } from "./queries";
+import { listTimeOff, addTimeOff, deleteTimeOff, rangeBoundsMs } from "./timeOff";
 import { rubricMeta } from "./iqs/rubric";
 import type { Keyword } from "./iqs/rubric";
 import {
@@ -389,6 +391,42 @@ app.patch("/api/commitments/:id", requireAuth, (req, res) => {
   }
 });
 
+/**
+ * Phase 6's pre-flight: what falls due in a date range. Used both for an
+ * ad-hoc preview while a new time-off range is being picked (before it's
+ * saved) and for viewing an already-saved range -- the same query either way.
+ */
+app.get("/api/commitments/range", requireAuth, noStore, (req, res) => {
+  const start = String(req.query.start || "");
+  const end = String(req.query.end || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+    return res.status(400).json({ error: "start and end must be YYYY-MM-DD" });
+  }
+  const { startIso, endIso } = rangeBoundsMs(start, end);
+  res.json({ commitments: commitmentsInRange(startIso, endIso) });
+});
+
+/* ------------------------------------------------------------- time off */
+
+app.get("/api/time-off", requireAuth, noStore, (_req, res) => {
+  res.json({ ranges: listTimeOff() });
+});
+
+app.post("/api/time-off", requireAuth, (req, res) => {
+  const { startDate, endDate, note } = req.body || {};
+  try {
+    const range = addTimeOff(String(startDate || ""), String(endDate || ""), note ? String(note) : null);
+    res.json({ ok: true, range });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete("/api/time-off/:id", requireAuth, (req, res) => {
+  deleteTimeOff(req.params.id);
+  res.json({ ok: true });
+});
+
 /* ----------------------------------------------------------------- metrics */
 
 app.get("/api/metrics", requireAuth, noStore, (req, res) => {
@@ -695,6 +733,7 @@ const SPA_ROUTES = [
   "/",
   "/case/:caseNumber",
   "/commitments",
+  "/timeoff",
   "/metrics",
   "/iqs",
   "/triage",

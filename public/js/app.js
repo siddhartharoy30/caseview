@@ -20,6 +20,7 @@ const ICONS = {
   queue:       ["M4 6h16", "M4 12h16", "M4 18h10"],
   triage:      ["circle:12,12,9", "M12 8v4l2.5 2"],
   commitments: ["M6 4h9l4 4v12H6z", "M9 12h6", "M9 16h4"],
+  timeoff:     ["M4 5h16v15H4z", "M4 9.5h16", "M8 3v4", "M16 3v4"],
   escalations: ["M12 4l9 16H3z", "M12 10v4", "M12 17.5v.01"],
   metrics:     ["M5 20V10", "M12 20V4", "M19 20v-7"],
   iqs:         ["M4 17a8 8 0 0 1 16 0", "M12 17l4.2-4.6", "circle:12,17,1.3"],
@@ -33,6 +34,7 @@ const NAV = [
   { id: "queue",       label: "Queue",       path: "/",            key: "q", badge: "queue" },
   { id: "triage",      label: "Triage",      path: "/triage",      key: "t", badge: "triage" },
   { id: "commitments", label: "Commitments", path: "/commitments", key: "c", badge: "commitments" },
+  { id: "timeoff",     label: "Time Off",    path: "/timeoff" },
   { id: "escalations", label: "Escalations", path: "/escalations", key: "e", badge: "escalations" },
   { section: "Insight" },
   { id: "metrics",     label: "Scorecard",   path: "/metrics",     key: "m" },
@@ -47,6 +49,7 @@ const PAGES = {
   queue:       () => import("./pages/queue.js"),
   caseDetail:  () => import("./pages/caseDetail.js"),
   commitments: () => import("./pages/commitments.js"),
+  timeoff:     () => import("./pages/timeoff.js"),
   metrics:     () => import("./pages/metrics.js"),
   iqs:         () => import("./pages/iqs.js"),
   triage:      () => import("./pages/triage.js"),
@@ -408,6 +411,7 @@ function registerRoutes() {
   route("/", page(PAGES.queue));
   route("/case/:caseNumber", page(PAGES.caseDetail));
   route("/commitments", page(PAGES.commitments));
+  route("/timeoff", page(PAGES.timeoff));
   route("/metrics", page(PAGES.metrics));
   route("/iqs", page(PAGES.iqs));
   route("/triage", page(PAGES.triage));
