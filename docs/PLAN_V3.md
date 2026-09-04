@@ -334,9 +334,9 @@ already lives.
 |---|---|---|
 | 0 | Discovery, this document | done |
 | 1 | `src/iqs/rubric.ts`, `claude.ts` imports it, no behaviour change | done, byte-identical |
-| 2 | Layer 1 scorer, queue column, Quality tab | scores appear with zero API calls |
-| 3 | Layer 2 scorer, hash cache, `/iqs` page | cost and hit rate visible |
-| 4 | `src/nextAction.ts`, both callers delegate, queue column | `sla.ts` and `claude.ts` agree |
+| 2 | Layer 1 scorer, queue column, Quality tab | done, scores appear with zero API calls |
+| 3 | Layer 2 scorer, hash cache, `/iqs` page | done, cost and hit rate visible |
+| 4 | `src/nextAction.ts`, both callers delegate, queue column | done, `sla.ts` and `claude.ts` agree |
 | 5 | Draft pre-flight, auto-repair, keyword override, artifacts | predicted score before copy |
 | 6 | Time-off calendar, commitment pre-flight | range surfaces its commitments |
 | 7 | Status-transition watcher, compose, dry run, sweep | 30-day backtest shows volume |
@@ -457,3 +457,61 @@ disclosed rather than absorbed.
 problem as `addBusinessDays`, but its counterpart is `deriveNextAction()` in
 `sla.ts` and unifying them is phase 4's entire scope. Widening phase 1 to reach
 it would have put an untested behaviour change under a no-behaviour-change gate.
+
+---
+
+## Phase 3 as built
+
+`src/iqs/layer2.ts` (the Anthropic-backed scorer) and `src/iqs/layer2Store.ts`
+(content-hash cache, `iqs_layer2_usage` ledger, budget-capped background
+sweep) shipped as designed in Phase 0. Layer 1 stays fully standalone — Layer
+2 never scores on a `GET`, only on `POST` or from the sweep, and is inert
+without `ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_API_KEY` set.
+
+New routes: `GET /api/cases/:caseNumber/iqs/layer2`, `POST` (same path, scores
+on demand, `?force=1` to bypass the cache), `GET /api/iqs/overview` (stats,
+budget, sweep status, predicted-vs-official comparisons, recent activity in
+one round trip), `POST /api/iqs/sweep` (run the sweep now). New `/iqs` page.
+
+Verified locally end to end: server boots clean, `/api/iqs/overview` and
+`/api/iqs/sweep` both require auth and return the expected shape, sweep runs
+safely against an empty cache with zero cost and zero errors.
+
+## Phase 4 as built
+
+The gate was "`sla.ts` and `claude.ts` agree," and getting there meant finding
+a third implementation the gate didn't originally name:
+`iqs/layer1.ts:detectKeywordFromComments()`, added during phase 2/3 and
+explicitly commented as mirroring `claude.ts` until phase 4 arrived. All three
+collapsed into `src/nextAction.ts`:
+
+- `detectKeyword(status, comments)` — the single 3-Strikes derivation. Takes a
+  minimal `{isPublic, isMine}[]` shape so it works equally over live
+  Salesforce comments (drafting) and cached rows (scoring), oldest-first.
+- `nextActionForKeyword(facts)` — the queue's Next Action column. `kind`
+  (work/followup/closure) is looked up from `keyword` via a fixed table, not
+  re-derived from status text, so it is structurally impossible for the queue
+  to disagree with the drafter or the scorer on the fundamental bucket. Status,
+  quiet-days, NCC and escalation still shape the `reason` text.
+
+`sla.ts:deriveNextAction()` and `iqs/layer1.ts:detectKeywordFromComments()`
+kept their names and are now thin wrappers, so no importer needed to change.
+`claude.ts` calls `detectKeyword` directly.
+
+This surfaced and fixed a real disagreement, not just a hypothetical one.
+Status `"Resolved - Pending Customer"` is a terminal status by the shared
+`isTerminalStatus()` check, so `detectKeyword` returns `CLOSURE` immediately —
+exactly what `claude.ts` already did before this refactor. But the pre-phase-4
+`deriveNextAction()` treated that same status as `followup` ("confirm fix with
+customer") until the customer had been quiet 4+ days, only then flipping to
+`closure`. Same case, two different queues telling the engineer two different
+things. Verified against the live synced queue: case `01301616`
+("Resolved - Pending Customer") now shows `kind: closure` from both the
+`/api/cases` queue endpoint and what `claude.ts` would draft, on day zero.
+
+Also fixed in passing: the `/api/cases` handler's `legacy` object (built for
+`deriveQueue`/`computeSla`/`deriveNextAction`) never set `IsEscalated`, so
+`deriveNextAction`'s escalated-reason branch was dead code from this call site
+since it was written. Now mapped; case `01302660` (escalated, mid-conversation)
+shows `"Escalated — needs active work"` instead of the generic `"Needs
+review"`.
