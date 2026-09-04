@@ -1718,6 +1718,45 @@ mark {
   margin-bottom: 11px;
 }
 
+.draft-kw-select { max-width: 160px; }
+
+.draft-artifacts { margin-bottom: 10px; }
+
+.draft-score-host { margin-top: 10px; }
+
+.draft-score-card {
+  padding: 11px 13px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tone) 7%, var(--surface)), var(--surface));
+  border-color: color-mix(in srgb, var(--tone) 22%, var(--border));
+}
+
+.draft-score-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.draft-www-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.draft-viols {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+}
+
+.draft-viol {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
 /* --- small shared controls ------------------------------------------------ */
 
 .icon-btn {

@@ -515,3 +515,65 @@ Also fixed in passing: the `/api/cases` handler's `legacy` object (built for
 since it was written. Now mapped; case `01302660` (escalated, mid-conversation)
 shows `"Escalated — needs active work"` instead of the generic `"Needs
 review"`.
+
+---
+
+## Phase 5 — discovery and decisions
+
+Phase 5 (`Draft pre-flight, auto-repair, keyword override, artifacts`) had no
+discovery write-up of its own, unlike phases 0-4, so the first step was
+finding out what's actually live before adding to it.
+
+**Finding: the AI drafting feature already exists end to end on the backend
+and is completely disconnected from the app.** `/api/intelligence/suggest-reply`
+(`draftSuggestedReply()` in `claude.ts`, cached in `suggested_replies`) is real
+and working. Its only frontend caller is `public/js/dashboard.js` — 859 lines
+building a `suggestModal` with a keyword badge, self-check panel and copy flow.
+That file is loaded by nothing: not `index.html`, not `app.js`'s router, not
+any page. It predates the SPA rewrite (`app.js` + `pages/*.js`) and was never
+deleted. Deleted now — keeping dead code that calls a live paid API is worse
+than having no code, because it reads as a working feature to the next person
+who greps for `suggest-reply`.
+
+The Draft tab a user actually sees today (`caseDetail.js`) is a different,
+simpler thing: a `localStorage`-backed staging textarea with static
+bracketed-placeholder skeletons (INTRO/UPDATE/CLOSURE) and a copy button.
+No AI, no scoring, no override.
+
+**Decision: build phase 5 into that live tab, not the dead modal.** One
+staging textarea, one Copy button, regardless of whether the text came from a
+skeleton, an AI draft, or hand-typing — every capability below applies to
+whatever is currently staged.
+
+- **Predicted score before copy (the gate).** `iqs/store.ts:previewDraftScore()`
+  appends the staged text as a synthetic `isMine` comment onto the case's real
+  cached facts and calls the existing pure `scoreCase()` — the same Layer 1
+  scorer every real score goes through, free and instant, with zero new
+  rubric logic. Because Layer 1 already returns `violations[]` (exact banned
+  phrase + the rubric's own required replacement) and a per-comment WWW
+  breakdown, the preview needed nothing new to be genuinely actionable, not
+  just a number. Fetched eagerly as soon as staged text looks non-trivial, so
+  in the normal flow the score is already on screen by the time Copy is
+  reached — advisory, not a hard block, consistent with this app never
+  gating a human's own judgment anywhere else.
+- **Auto-repair, two tiers.** Tier 1 (`mechanicalRepair()` in `layer1.ts`):
+  every banned-phrase hit already carries its mandated replacement in the
+  rubric, so fixing it is a regex substitution, not a model decision — free,
+  deterministic, zero risk of the model touching anything else. Tier 2
+  (`repairDraft()` in `claude.ts`): only reached if a structural gap remains
+  after tier 1 (a missing What/Why/When, a dimension still weak) — one model
+  call, targeted at exactly those named gaps, instructed to preserve
+  everything already correct. One "Auto-repair" button runs tier 1 always and
+  tier 2 only if still needed, so the common case (a stray banned phrase) never
+  spends a token.
+- **Keyword override.** `scoreCase()` gained an optional second parameter so
+  a forced keyword flows through scoring the same way `layer2.ts` already
+  forces one through Layer 2 (`keywordOverride || detectKeyword(...)`, the
+  same pattern, now the third place it appears — drafting, both score layers).
+  `draftSuggestedReply()` and `repairDraft()` take the same override.
+- **Artifacts.** Already extracted and cached per case (`getArtifacts()` in
+  `queries.ts`, backing the existing Artifacts tab) — nothing new to extract.
+  Phase 5 just hands that same list to the drafting and repair prompts as
+  context ("the case has these on file; cite them"), and shows a one-line
+  summary in the Draft tab so the reviewing engineer sees it without a tab
+  switch.

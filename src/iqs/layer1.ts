@@ -396,6 +396,26 @@ export function findBannedPhrases(text: string): Array<{ phraseIndex: number; st
   return kept.sort((a, b) => a.start - b.start);
 }
 
+/**
+ * Tier 1 of phase 5's auto-repair: every banned phrase already names its own
+ * required replacement in the rubric, so fixing one is a substitution, not a
+ * decision. Free, deterministic, and safe to run before ever reaching for a
+ * model -- the common case (a stray banned phrase, nothing else wrong) never
+ * spends a token.
+ */
+export function mechanicalRepair(text: string): { text: string; fixedCount: number } {
+  let out = text;
+  let fixedCount = 0;
+  for (const p of BANNED_PHRASES) {
+    const rx = new RegExp(p.pattern.source, p.pattern.flags.includes("g") ? p.pattern.flags : p.pattern.flags + "g");
+    out = out.replace(rx, () => {
+      fixedCount++;
+      return p.replacement;
+    });
+  }
+  return { text: out, fixedCount };
+}
+
 /* ---------------------------------------------------------------- signals */
 
 const ASKS_FOR_IMPACT =
@@ -785,14 +805,19 @@ function safeParseCommitments(text: string, createdDate: string) {
 
 /* ------------------------------------------------------------------ score */
 
-export function scoreCase(facts: CaseFacts): Layer1Score {
+/**
+ * `keywordOverride` bypasses `detectKeywordFromComments()` -- the same override
+ * pattern `iqs/layer2.ts`'s model scorer already uses, and now what phase 5's
+ * draft preview uses too, so a forced keyword scores exactly as it would draft.
+ */
+export function scoreCase(facts: CaseFacts, keywordOverride?: Keyword): Layer1Score {
   const all = [...facts.comments].sort((a, b) => a.createdDate.localeCompare(b.createdDate));
   const mine: MyComment[] = all
     .filter((c) => c.isMine && c.body.trim())
     .map((c) => ({ ...c, text: ownText(c.body) }))
     .filter((c) => c.text.length > 0);
 
-  const keyword = detectKeywordFromComments(facts.status, all);
+  const keyword = keywordOverride || detectKeywordFromComments(facts.status, all);
   const applicable = APPLICABLE_DIMENSIONS[keyword];
   const window = openingWindow(all, mine);
   const notes: string[] = [];
@@ -871,4 +896,37 @@ export function scoreCase(facts: CaseFacts): Layer1Score {
     notes,
     scoredAt: Date.now(),
   };
+}
+
+/** The synthetic comment id `iqs/store.ts:previewDraftScore()` scores a staged draft under. */
+export const DRAFT_PREVIEW_ID = "draft-preview";
+
+/**
+ * Turns a preview score into repair instructions a model can act on --
+ * concrete rubric findings, not "make it better." Only the staged draft's own
+ * findings are relevant; a gap on an already-posted comment is not something
+ * rewriting the draft can fix.
+ */
+export function repairNotesFor(score: Layer1Score): string[] {
+  const notes: string[] = [];
+
+  for (const v of score.violations) {
+    if (v.commentId !== DRAFT_PREVIEW_ID) continue;
+    notes.push(`Replace the banned phrase "${v.match}" with: ${v.replacement}`);
+  }
+
+  const www = score.comments.find((c) => c.id === DRAFT_PREVIEW_ID);
+  if (www) {
+    if (!www.what) notes.push("Add an explicit What: state plainly what was done or found.");
+    if (!www.why) notes.push("Add an explicit Why: state why that action was taken, or what it means for the customer.");
+    if (!www.when && !www.whenWaived) notes.push("Add an explicit When: name the specific date/time the next step lands.");
+  }
+
+  for (const d of score.dimensions) {
+    for (const s of d.signals) {
+      if (s.weight < 1 && s.note) notes.push(`${d.label}: ${s.note}`);
+    }
+  }
+
+  return notes;
 }

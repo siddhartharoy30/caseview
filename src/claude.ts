@@ -2,8 +2,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import { addBusinessDays, TZ } from "./businessHours";
 import { config } from "./config";
 import { CORE_RULES, TEMPLATE_RULES } from "./iqs/rubric";
+import type { Keyword } from "./iqs/rubric";
 import { detectKeyword } from "./nextAction";
-import type { CommentSignal } from "./nextAction";
+import type { CommentSignal, KeywordDetection } from "./nextAction";
 import type { SalesforceCase, SalesforceCaseComment } from "./salesforce";
 import { getPublicCaseComments } from "./salesforce";
 
@@ -18,6 +19,18 @@ export interface DraftResult {
   customerText: string;
   internalNote: string | null;
   selfCheck: string | null;
+}
+
+export interface DraftOptions {
+  /** Bypasses detectKeyword() -- the case's engineer knows the situation better than the heuristic sometimes does. */
+  keywordOverride?: Keyword;
+  /** Already-extracted artifacts on file for this case (see queries.ts:getArtifacts), passed in rather than looked up here so this module stays DB-agnostic. */
+  knownArtifacts?: string[];
+}
+
+function artifactsContext(knownArtifacts?: string[]): string {
+  if (!knownArtifacts?.length) return "";
+  return `\nKnown artifacts on file for this case (cite the relevant ones; do not invent others):\n${knownArtifacts.join("\n")}\n`;
 }
 
 // getPublicCaseComments already filters to published comments, oldest first --
@@ -69,9 +82,11 @@ function buildFollowupBody(attempt: 1 | 2): string {
   return "This is the second and final follow-up. Note this is the second attempt, and state that if there is no response the case will move to close, giving the absolute close-by date/time from the reference dates below.";
 }
 
-export async function draftSuggestedReply(c: SalesforceCase): Promise<DraftResult> {
+export async function draftSuggestedReply(c: SalesforceCase, opts: DraftOptions = {}): Promise<DraftResult> {
   const comments = await getPublicCaseComments(c.Id);
-  const detection = detectKeyword(c.Status, asCommentSignals(c, comments));
+  const detection: KeywordDetection = opts.keywordOverride
+    ? { keyword: opts.keywordOverride, path: "confirmed", attempt: 1, trailingMine: 0 }
+    : detectKeyword(c.Status, asCommentSignals(c, comments));
   const ownerName = c.Owner?.Name || "the case owner";
   const ownerTitle = c.Owner?.Title || "Support Engineer";
 
@@ -123,7 +138,7 @@ export async function draftSuggestedReply(c: SalesforceCase): Promise<DraftResul
     "",
     "Reference dates (use exactly, do not recompute):",
     referenceDates,
-    "",
+    artifactsContext(opts.knownArtifacts),
     `Case comment history (${scaledComments.length} of ${comments.length} public comments, oldest to newest):`,
     formatComments(scaledComments, ownerName),
   ].join("\n");
@@ -146,6 +161,57 @@ export async function draftSuggestedReply(c: SalesforceCase): Promise<DraftResul
 
   return {
     keyword: detection.keyword,
+    customerText: parsed.customerText,
+    internalNote: parsed.internalNote,
+    selfCheck: parsed.selfCheck,
+  };
+}
+
+/**
+ * Tier 2 of phase 5's auto-repair. Only reached once tier 1
+ * (iqs/layer1.ts:mechanicalRepair, a plain substitution) has already fixed
+ * every banned phrase -- this is for gaps that need actual rewriting: a
+ * missing What/Why/When, a weak dimension signal. `repairNotes` come from
+ * iqs/layer1.ts:repairNotesFor(), which reads them straight off a preview
+ * score, so every instruction here traces back to a specific rubric finding
+ * rather than a vague "make it better."
+ */
+export async function repairDraft(
+  draftText: string,
+  keyword: Keyword,
+  repairNotes: string[],
+  opts: DraftOptions = {},
+): Promise<DraftResult> {
+  const templateText = TEMPLATE_RULES[keyword];
+  const systemPrompt = `${CORE_RULES}\n\n${templateText}`;
+
+  const prompt = [
+    "Revise the draft below to fix exactly the issues listed. Preserve everything else -- tone, structure, and any content that is already correct -- unchanged.",
+    "",
+    "Issues to fix:",
+    repairNotes.map((n) => `- ${n}`).join("\n"),
+    artifactsContext(opts.knownArtifacts),
+    "Draft to revise:",
+    "```",
+    draftText,
+    "```",
+    "",
+    "Follow the output contract exactly.",
+  ].join("\n");
+
+  const res = await client.messages.create({
+    model: config.anthropic.model,
+    max_tokens: 4096,
+    system: systemPrompt,
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  const block = res.content.find((b) => b.type === "text");
+  const raw = block && block.type === "text" ? block.text.trim() : "";
+  const parsed = parseModelOutput(raw, keyword === "CLOSURE");
+
+  return {
+    keyword,
     customerText: parsed.customerText,
     internalNote: parsed.internalNote,
     selfCheck: parsed.selfCheck,

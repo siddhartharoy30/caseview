@@ -17,7 +17,7 @@ import {
   cacheCounts,
   rebuildCache,
 } from "./db";
-import { draftSuggestedReply } from "./claude";
+import { draftSuggestedReply, repairDraft } from "./claude";
 import {
   listCases,
   getCase,
@@ -38,12 +38,15 @@ import {
   facets,
 } from "./queries";
 import { rubricMeta } from "./iqs/rubric";
+import type { Keyword } from "./iqs/rubric";
 import {
   getDetail as getIqsDetail,
   getStats as getIqsStats,
+  previewDraftScore,
   rescoreStale,
   scoreAndStoreCase,
 } from "./iqs/store";
+import { mechanicalRepair, repairNotesFor } from "./iqs/layer1";
 import {
   getComparisons,
   getLayer2Stats,
@@ -527,11 +530,25 @@ app.get("/api/sync/status", requireAuth, noStore, (_req, res) => {
   });
 });
 
-/* --------------------------------------------------------- AI draft (kept) */
+/* --------------------------------------------------------------- AI draft */
+
+/** getArtifacts() already groups by label -- flatten to plain lines a prompt can read. */
+function artifactLines(caseNumber: string): string[] {
+  return getArtifacts(caseNumber).flatMap((g: { label: string; values: string[] }) =>
+    g.values.map((v) => `${g.label}: ${v}`),
+  );
+}
+
+const VALID_KEYWORDS: Keyword[] = ["INTRO", "UPDATE", "FOLLOWUP", "CLOSURE"];
 
 app.post("/api/intelligence/suggest-reply", requireAuth, async (req, res) => {
   const caseNumber = String(req.body?.case_number || "").trim();
-  const regenerate = !!req.body?.regenerate;
+  const keywordOverride = VALID_KEYWORDS.includes(req.body?.keyword_override)
+    ? (req.body.keyword_override as Keyword)
+    : undefined;
+  // An explicit override means the cache from a different keyword is stale
+  // for the caller's purposes even if nothing else asked to regenerate.
+  const regenerate = !!req.body?.regenerate || !!keywordOverride;
   if (!caseNumber) return res.status(400).json({ error: "case_number is required" });
 
   try {
@@ -552,7 +569,7 @@ app.post("/api/intelligence/suggest-reply", requireAuth, async (req, res) => {
     const c = await getCaseByNumber(caseNumber);
     if (!c) return res.status(404).json({ error: "Case not found" });
 
-    const result = await draftSuggestedReply(c);
+    const result = await draftSuggestedReply(c, { keywordOverride, knownArtifacts: artifactLines(caseNumber) });
     const saved = saveSuggestedReply(
       caseNumber,
       result.customerText,
@@ -571,6 +588,68 @@ app.post("/api/intelligence/suggest-reply", requireAuth, async (req, res) => {
     });
   } catch (err: any) {
     log.error("api.suggest_reply_failed", { caseNumber, error: errText(err) });
+    res.status(502).json({ error: err.message });
+  }
+});
+
+/**
+ * Phase 5's "predicted score before copy" gate. Scores whatever text is
+ * currently staged -- AI-drafted, skeleton-inserted, or hand-typed, this
+ * route does not care which -- as if it were the case's newest comment.
+ * Read-only: nothing is written, so this is safe to call on every keystroke
+ * (the client debounces).
+ */
+app.post("/api/cases/:caseNumber/draft-score", requireAuth, noStore, (req, res) => {
+  const c = getCaseRow(req.params.caseNumber);
+  if (!c) return res.status(404).json({ error: "Case not in cache" });
+
+  const text = String(req.body?.text || "");
+  const keywordOverride = VALID_KEYWORDS.includes(req.body?.keyword_override)
+    ? (req.body.keyword_override as Keyword)
+    : undefined;
+
+  const score = previewDraftScore(c.id, text, keywordOverride);
+  if (!score) return res.status(404).json({ error: "Case not in cache" });
+  res.json({ score });
+});
+
+/**
+ * Auto-repair: tier 1 (mechanical, free) always runs; tier 2 (one model
+ * call) only runs if a structural gap remains afterward, so the common case
+ * -- a stray banned phrase, nothing else wrong -- never spends a token.
+ */
+app.post("/api/intelligence/repair-reply", requireAuth, async (req, res) => {
+  const caseNumber = String(req.body?.case_number || "").trim();
+  const draftText = String(req.body?.draft_text || "");
+  const keyword = VALID_KEYWORDS.includes(req.body?.keyword) ? (req.body.keyword as Keyword) : "UPDATE";
+  if (!caseNumber) return res.status(400).json({ error: "case_number is required" });
+  if (!draftText.trim()) return res.status(400).json({ error: "draft_text is required" });
+
+  try {
+    const c = getCaseRow(caseNumber);
+    if (!c) return res.status(404).json({ error: "Case not in cache" });
+
+    const mechanical = mechanicalRepair(draftText);
+    let score = previewDraftScore(c.id, mechanical.text, keyword);
+    let text = mechanical.text;
+    let modelCalled = false;
+
+    const notes = score ? repairNotesFor(score) : [];
+    if (notes.length > 0) {
+      modelCalled = true;
+      const repaired = await repairDraft(text, keyword, notes, { knownArtifacts: artifactLines(caseNumber) });
+      text = repaired.customerText;
+      score = previewDraftScore(c.id, text, keyword);
+    }
+
+    res.json({
+      text,
+      score,
+      mechanicalFixes: mechanical.fixedCount,
+      modelCalled,
+    });
+  } catch (err: any) {
+    log.error("api.repair_reply_failed", { caseNumber, error: errText(err) });
     res.status(502).json({ error: err.message });
   }
 });

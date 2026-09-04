@@ -14,7 +14,7 @@ import { db } from "../db";
 import { log } from "../log";
 import { RUBRIC_VERSION } from "./rubric";
 import type { Band, Keyword } from "./rubric";
-import { scoreCase, SCORER_VERSION } from "./layer1";
+import { DRAFT_PREVIEW_ID, scoreCase, SCORER_VERSION } from "./layer1";
 import type { CaseFacts, CommentFacts, CommitmentFacts, Layer1Score } from "./layer1";
 
 export const LAYER = "layer1";
@@ -150,6 +150,39 @@ export function loadCaseFacts(caseId: string): CaseFacts | null {
     comments,
     commitments,
   };
+}
+
+/**
+ * Phase 5's "predicted score before copy" gate: score a not-yet-posted draft
+ * as if it were the case's newest public comment.
+ *
+ * Nothing is written -- this is the same pure `scoreCase()` every real score
+ * goes through, fed one synthetic comment on top of the case's real cached
+ * history, so the dimension-scope rules (first three owner comments, every
+ * owner comment for WWW) apply exactly as they would once the draft is
+ * actually posted. A case with three owner comments already on it correctly
+ * gets no Business Impact / Technical Definition credit for a fourth -- that
+ * is the real rubric, not a preview quirk.
+ */
+export function previewDraftScore(
+  caseId: string,
+  draftText: string,
+  keywordOverride?: Keyword,
+): Layer1Score | null {
+  const facts = loadCaseFacts(caseId);
+  if (!facts) return null;
+
+  const draftComment: CommentFacts = {
+    id: DRAFT_PREVIEW_ID,
+    body: draftText,
+    createdDate: new Date().toISOString(),
+    isMine: true,
+    isPublic: true,
+    isInbound: false,
+    source: "comment",
+  };
+
+  return scoreCase({ ...facts, comments: [...facts.comments, draftComment] }, keywordOverride);
 }
 
 /* ------------------------------------------------------------------ write */

@@ -112,7 +112,22 @@ export const api = {
      to fetch the recent backlog, which a fresh tab uses to seed its seen-set. */
   events: (sinceMs) => request("GET", "/api/events" + qs({ since: sinceMs || undefined })),
 
-  /* AI draft (staging only — the assistant that writes replies lives elsewhere) */
-  suggestReply: (caseNumber, regenerate) =>
-    request("POST", "/api/intelligence/suggest-reply", { case_number: caseNumber, regenerate: !!regenerate }),
+  /* AI draft — generates into the same staging area the Draft tab already owns.
+     Nothing here sends anything; every result still goes through the tab's own
+     Copy button. */
+  suggestReply: (caseNumber, regenerate, keywordOverride) =>
+    request("POST", "/api/intelligence/suggest-reply", {
+      case_number: caseNumber,
+      regenerate: !!regenerate,
+      keyword_override: keywordOverride || undefined,
+    }),
+
+  /* Phase 5 pre-flight: score whatever text is currently staged, and repair it. */
+  draftScore: (caseNumber, text, keywordOverride) =>
+    request("POST", `/api/cases/${encodeURIComponent(caseNumber)}/draft-score`, {
+      text,
+      keyword_override: keywordOverride || undefined,
+    }),
+  repairDraft: (caseNumber, draftText, keyword) =>
+    request("POST", "/api/intelligence/repair-reply", { case_number: caseNumber, draft_text: draftText, keyword }),
 };

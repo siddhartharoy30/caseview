@@ -101,6 +101,10 @@ export function render(ctx, host, shell) {
     related: null,
     iqs: null,
     iqsOpen: new Set(),
+    draftKeyword: null,     // null = auto-detect, else an override
+    draftScore: null,       // last predicted score for the staged text, or null
+    draftScoring: false,
+    draftBusy: false,       // generating or repairing — guards against overlap
     tab: TABS.some((t) => t.id === ctx.query.tab) ? ctx.query.tab : "timeline",
     find: ctx.query.q || "",
     expanded: new Set(),
@@ -849,15 +853,39 @@ export function render(ctx, host, shell) {
     `QView: ${location.origin}/case/${c.caseNumber}`,
   ].join("\n");
 
+  const KEYWORD_OPTIONS = ["INTRO", "UPDATE", "FOLLOWUP", "CLOSURE"];
+
+  /** A yes/no read for one WWW component, shown next to the predicted score. */
+  function wwwPill(label, ok) {
+    return h("span", { class: `chip ${ok ? "ok" : "neutral"}`, text: `${label} ${ok ? "✓" : "✗"}` });
+  }
+
+  /**
+   * Known artifacts for the case, fetched independently of the Artifacts tab
+   * (a visitor who never opens that tab should still see this) but sharing
+   * its cache once loaded, so opening Artifacts afterward does not re-fetch.
+   */
+  async function ensureArtifacts(onLoaded) {
+    if (state.artifacts) return onLoaded();
+    try {
+      state.artifacts = await api.artifacts(caseNumber);
+    } catch {
+      return; // advisory only — the draft tab works fine without this line
+    }
+    if (state.tab === "draft") onLoaded();
+  }
+
   function paintDraft() {
     const c = state.detail.case;
     const key = `${KEY_DRAFT}.${caseNumber}`;
 
     const meta = h("div", { class: "draft-meta" });
+    const scoreHost = h("div", { class: "draft-score-host" });
+    const artifactsHost = h("div", {});
     const area = h("textarea", {
       class: "input draft-area",
       spellcheck: "true",
-      placeholder: "Stage your reply here. Nothing is sent from this page — it holds text and copies it.",
+      placeholder: "Stage your reply here, or generate one with AI below. Nothing is sent from this page — it holds text and copies it.",
     });
     area.value = store.get(key, "");
 
@@ -869,8 +897,82 @@ export function render(ctx, host, shell) {
         h("div", { class: "spacer" }),
         h("span", { class: "dim", text: v ? "Saved in this browser" : "Nothing staged yet" }));
     };
-    area.oninput = debounce(() => { store.set(key, area.value); paintMeta(); }, 300);
     paintMeta();
+
+    /**
+     * Phase 5's gate: whatever is staged gets scored before Copy, the same
+     * way regardless of whether it came from AI, a skeleton, or typing.
+     * Layer 1 only — free and instant, so this can run on every pause in
+     * typing without a second thought about cost.
+     */
+    function paintScorePanel() {
+      if (state.draftScoring) {
+        mount(scoreHost, h("div", { class: "hint", text: "Scoring…" }));
+        return;
+      }
+      const score = state.draftScore;
+      if (!score) {
+        mount(scoreHost, h("div", { class: "hint", text: "Stage a couple of sentences to see a predicted score." }));
+        return;
+      }
+      const scoped = score.overall !== null && score.overall !== undefined;
+      const draftWww = score.comments.find((cm) => cm.id === "draft-preview");
+      const draftViolations = score.violations.filter((v) => v.commentId === "draft-preview");
+
+      mount(scoreHost,
+        h("div", { class: `card draft-score-card t-${scoped ? iqsTone(score.band) : "none"}` },
+          h("div", { class: "draft-score-top" },
+            scoreMeter(score.overall, score.band, { width: 90 }),
+            scoped ? bandChip(score.band) : h("span", { class: "dim", text: "Not enough to score" }),
+            h("span", {
+              class: "chip neutral", title: KEYWORD_HINT[score.keyword] || "",
+              text: `Scored as ${KEYWORD_LABEL[score.keyword] || score.keyword}`,
+            }),
+            h("div", { class: "spacer" }),
+            h("span", { class: "hint", text: "Predicted, Layer 1 — free, nothing sent" })),
+
+          draftWww ? h("div", { class: "draft-www-row" },
+            wwwPill("What", draftWww.what),
+            wwwPill("Why", draftWww.why),
+            wwwPill("When", draftWww.when || draftWww.whenWaived)) : null,
+
+          draftViolations.length ? h("div", { class: "draft-viols" }, draftViolations.map((v) =>
+            h("div", { class: "draft-viol" },
+              h("code", { class: "iqs-viol-match", text: `“${v.match}”` }),
+              h("span", { class: "dim", text: " → " }),
+              h("span", { text: v.replacement })))) : null));
+    }
+
+    const hasIssues = () => {
+      const score = state.draftScore;
+      if (!score) return false;
+      const draftWww = score.comments.find((cm) => cm.id === "draft-preview");
+      const missingWww = draftWww && (!draftWww.what || !draftWww.why || (!draftWww.when && !draftWww.whenWaived));
+      return score.violations.some((v) => v.commentId === "draft-preview") || !!missingWww;
+    };
+
+    const requestScore = debounce(async () => {
+      const text = area.value;
+      if (text.trim().length < 20) {
+        state.draftScore = null;
+        paintScorePanel();
+        repairBtn.hidden = true;
+        return;
+      }
+      state.draftScoring = true;
+      paintScorePanel();
+      try {
+        const { score } = await api.draftScore(caseNumber, text, state.draftKeyword || undefined);
+        state.draftScore = score;
+      } catch {
+        state.draftScore = null;
+      }
+      state.draftScoring = false;
+      paintScorePanel();
+      repairBtn.hidden = !hasIssues();
+    }, 500);
+
+    area.oninput = () => { store.set(key, area.value); paintMeta(); requestScore(); };
 
     const insert = (name) => {
       if (area.value.trim() &&
@@ -881,13 +983,94 @@ export function render(ctx, host, shell) {
       area.focus();
       area.setSelectionRange(0, 0);
       toast(`${name} skeleton inserted`, "ok");
+      requestScore();
     };
+
+    const keywordSelect = h("select", {
+      class: "input draft-kw-select",
+      title: "Which response type to draft and score as — leave on Auto unless the detected one is wrong for this case",
+      onchange: (e) => {
+        state.draftKeyword = e.target.value || null;
+        requestScore();
+      },
+    },
+      h("option", { value: "", text: "Auto-detect", selected: !state.draftKeyword }),
+      ...KEYWORD_OPTIONS.map((k) =>
+        h("option", { value: k, text: KEYWORD_LABEL[k], selected: state.draftKeyword === k })));
+
+    const generateBtn = button("Generate with AI", {
+      small: true, kind: "primary",
+      title: "Draft a reply with Claude, using the case history and rubric",
+      onclick: async () => {
+        if (state.draftBusy) return;
+        if (area.value.trim() &&
+            !confirm(`Replace the ${area.value.length} characters already staged with an AI-generated draft?`)) return;
+        state.draftBusy = true;
+        generateBtn.disabled = true;
+        repairBtn.disabled = true;
+        try {
+          const result = await api.suggestReply(caseNumber, true, state.draftKeyword || undefined);
+          area.value = result.draft;
+          store.set(key, area.value);
+          paintMeta();
+          toast(`${KEYWORD_LABEL[result.keyword] || result.keyword} draft generated`, "ok");
+          requestScore();
+        } catch (err) {
+          toast(err.message || "Could not generate a draft", "error");
+        }
+        state.draftBusy = false;
+        generateBtn.disabled = false;
+      },
+    });
+
+    const repairBtn = button("Auto-repair", {
+      small: true,
+      title: "Fix banned phrases by direct substitution, then ask AI to fix anything left (a missing What/Why/When, a weak dimension) — free unless a structural gap remains",
+      onclick: async () => {
+        if (state.draftBusy || !area.value.trim()) return;
+        state.draftBusy = true;
+        generateBtn.disabled = true;
+        repairBtn.disabled = true;
+        try {
+          const keyword = state.draftKeyword || state.draftScore?.keyword || "UPDATE";
+          const result = await api.repairDraft(caseNumber, area.value, keyword);
+          area.value = result.text;
+          store.set(key, area.value);
+          state.draftScore = result.score;
+          paintMeta();
+          paintScorePanel();
+          repairBtn.hidden = !hasIssues();
+          toast(
+            result.modelCalled
+              ? `Repaired — ${result.mechanicalFixes} phrase fix(es) + an AI rewrite`
+              : `Repaired — ${result.mechanicalFixes} phrase fix(es), no AI needed`,
+            "ok",
+          );
+        } catch (err) {
+          toast(err.message || "Could not repair the draft", "error");
+        }
+        state.draftBusy = false;
+        generateBtn.disabled = false;
+        repairBtn.disabled = false;
+      },
+    });
+    repairBtn.hidden = !hasIssues();
+
+    ensureArtifacts(() => {
+      const lines = (state.artifacts?.groups || []).flatMap((g) => g.values.map((v) => `${g.label}: ${v}`));
+      mount(artifactsHost, lines.length
+        ? h("div", { class: "hint draft-artifacts", title: lines.join("\n") },
+            `On file for this case: ${lines.slice(0, 4).join(" · ")}${lines.length > 4 ? ` · +${lines.length - 4} more` : ""}`)
+        : null);
+    });
 
     mount(bodyHost,
       h("div", { class: "card draft-card" },
         h("div", { class: "art-head" },
           h("span", { class: "art-title", text: "Draft" }),
           h("div", { class: "spacer" }),
+          keywordSelect,
+          generateBtn,
           button("INTRO", { small: true, onclick: () => insert("INTRO") }),
           button("UPDATE", { small: true, onclick: () => insert("UPDATE") }),
           button("CLOSURE", { small: true, onclick: () => insert("CLOSURE") })),
@@ -895,8 +1078,11 @@ export function render(ctx, host, shell) {
         h("div", { class: "hint", style: { marginBottom: "10px" } },
           "This tab stages and copies text. It does not write the reply for you and it never sends anything — paste the finished version into Salesforce yourself."),
 
+        artifactsHost,
+
         area,
         meta,
+        scoreHost,
 
         h("div", { class: "draft-actions" },
           button("Copy draft", {
@@ -911,6 +1097,7 @@ export function render(ctx, host, shell) {
             title: "Case number, account, status and the next deadline",
             onclick: () => copyToast(summaryText(c), "Summary copied"),
           }),
+          repairBtn,
           h("div", { class: "spacer" }),
           button("Clear", {
             small: true, kind: "danger",
@@ -920,8 +1107,14 @@ export function render(ctx, host, shell) {
               area.value = "";
               store.remove(key);
               paintMeta();
+              state.draftScore = null;
+              paintScorePanel();
+              repairBtn.hidden = true;
             },
           }))));
+
+    paintScorePanel();
+    if (area.value.trim().length >= 20) requestScore();
   }
 
   /* ---- quality ----------------------------------------------------------- */
