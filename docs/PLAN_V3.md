@@ -341,7 +341,7 @@ already lives.
 | 6 | Time-off calendar, commitment pre-flight | done, range surfaces its commitments |
 | 7 | Status-transition watcher, compose, dry run, sweep | done, 30-day backtest shows volume (701 checked, 6 would fire) |
 | 8 | Slack delivery, approval queue | done; threading and escalation ping skipped (webhook cannot thread, no bot token) |
-| 9 | Recap, batch drafting, SentryAI import | — |
+| 9 | Recap, batch drafting, SentryAI import | done |
 
 Phase 8's gate cannot be met today and that is a credential problem, not a code
 problem. It ships complete and dormant; the dry-run path is what gets verified.
@@ -751,3 +751,94 @@ further change -- the same "derive the key from data, not from when the
 code happened to run" rule `notify.ts`'s event ids already follow. Verified
 against a clean table: sweeping the identical transition twice now produces
 exactly one row.
+
+---
+
+## Phase 9 — discovery and decisions
+
+The last phase on the original roadmap, and the only one whose table row
+had no gate at all (`| 9 | Recap, batch drafting, SentryAI import | — |`).
+Checked before assuming any of the three had a real spec: none did.
+`docs/PLAN.md`, `docs/FEATURE_GAP.md` and `docs/ARCHITECTURE_CURRENT.md`
+have zero hits for "recap" or "digest". "Batch drafting" has no existing
+selection UI anywhere in `queue.js` to extend. The one piece with a real
+spec is SentryAI's Tier 3 import, decided in phase 0 and never built.
+
+### SentryAI official import (Tier 3)
+
+Phase 0's decision, quoted because it still holds: *"`POST
+/api/iqs/official/import` takes a CSV or a pasted table from the IQS Report
+page. This is what actually runs... the comparison UI labels our number
+predicted and the imported number official, and never averages them."*
+
+**A new table, not a third `iqs_scores` layer.** `iqs_scores` has `keyword`
+and `detail` as `NOT NULL` -- both meaningful only for a score computed
+against *our* rubric shape (a response-type keyword, a dimension tree). An
+official score has neither; SentryAI's own dimensions and weights are still
+unknown (phase 0: "What is still unknown without an authenticated session:
+the dimension list, the per-dimension weights, and the period
+granularity"). Forcing an official row into `iqs_scores` would mean
+inventing a fake keyword and an empty detail blob just to satisfy
+constraints that exist for a different kind of row. `iqs_official_scores`
+(case_id, overall, band, source_note, imported_at) keeps every row
+meaningful, the same reasoning phase 6 used for `time_off` and phase 7 for
+`coverage_channels`.
+
+**The column names are a guess, disclosed as one.** Nobody on this project
+has ever seen a real SentryAI export -- phase 0's discovery got as far as
+the login wall and stopped. `iqs/official.ts`'s parser matches header
+aliases ("case", "case number", "case #" for the case column; "score",
+"overall", "overall score", "iqs score" for the score column) rather than
+one exact format, and reports what it understood before committing, so the
+first real paste is a correction, not a rewrite.
+
+### Batch drafting
+
+No backend change needed at all. `/api/intelligence/suggest-reply` already
+takes one case at a time and already does everything phase 5 built --
+keyword detection, artifacts context, rubric-consistent drafting. Batch
+drafting is `queue.js` gaining row selection and looping that same
+endpoint client-side, then reusing `previewDraftScore()`'s existing route
+to show a predicted score next to every result, exactly like the Draft tab
+already does for one case. Capped at 15 cases per run with an explicit "N
+AI calls" confirmation first -- the one thing phase 5's single-case flow
+had that a batch loses by default is the natural friction of one click per
+call.
+
+### Recap
+
+No spec existed to build against, so this defines one: a copyable text
+digest, not a new chart. `metrics.ts:scorecard()` already computes
+everything period-scoped that a recap needs (opened, closed, commitments
+met/breached, TTR, aging); duplicating that computation for a recap would
+be the exact single-source-of-truth mistake phase 4 fixed for next-action
+logic. Recap is a new tab on the existing Scorecard page, sharing its
+period selector and its already-fetched data, adding only what
+`scorecard()` doesn't have: current Layer 1 quality average
+(`iqs/store.ts:getStats()`) and coverage activity in range (new
+`coverage.ts:listPostsSince()`). "Copy recap" formats it as plain text --
+consistent with this app never sending anything on its own, a recap is
+something the owner copies into their own stand-up or status update by
+hand.
+
+### Verified, and one bug the verification found
+
+All three tested against real synced data. SentryAI import: a deliberately
+mixed paste (two valid rows, one unparseable score, one case number not in
+the cache) came back exactly right -- 2 imported, 1 unmatched, 1 warning --
+and the comparisons table correctly showed a real predicted-vs-official gap
+(70.5 predicted vs. 87.5 official on one case). Batch drafting: two real AI
+calls through the existing single-case endpoint, both scored afterward
+through the existing draft-score endpoint, no new failure mode. Recap:
+real period data from `scorecard()` plus a live quality average, correctly
+formatted and copyable.
+
+The bug: a paste with no recognizable header at all (`importOfficialScores`
+returning zero rows because neither column could be found) came back as
+HTTP 200 with `ok: true` -- indistinguishable from "nothing needed
+importing" when the real story was "this input could not be read." Fixed
+by giving `ParseResult` a `fatal` flag, true only when the header itself
+couldn't be read, false when the header was fine but some data rows were
+skipped -- the same distinction commitments.ts already draws between
+"this isn't a promise" and "this is a promise with an unparseable date."
+The route now answers 400 for the first case and 200 for the second.

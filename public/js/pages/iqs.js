@@ -300,6 +300,89 @@ function deltaTable(rows, onOpen) {
       h("tbody", {}, body)));
 }
 
+/**
+ * Predicted vs official, side by side, never averaged (phase 0's rule --
+ * the two are not measured against the same dimensions or weights, so a
+ * blended number would claim a precision neither score has).
+ */
+function officialTable(rows, onOpen) {
+  if (!rows.length) {
+    return h("p", { class: "hint" }, "Nothing imported yet — paste a report above.");
+  }
+  const body = rows.map((r) => {
+    const d = r.delta;
+    const dTone = d === null ? "none" : Math.abs(d) < 5 ? "none" : d < 0 ? "bad" : "good";
+    return h("tr", {
+      class: "row iqs-delta-row",
+      tabindex: "0",
+      onclick: () => onOpen(r.caseNumber),
+      onkeydown: (e) => { if (e.key === "Enter") onOpen(r.caseNumber); },
+    },
+      h("td", { class: "mono nowrap" }, r.caseNumber),
+      h("td", { class: "right" }, r.predicted === null ? "not scored" : scoreMeter(r.predicted, null, { width: 44 })),
+      h("td", { class: "right mono" }, r.official.toFixed(1)),
+      h("td", { class: "right" },
+        h("span", { class: "iqs-delta t-" + dTone }, d === null ? "—" : signed(d))),
+      h("td", { class: "nowrap hint" }, fmt.dateTimeShort(r.importedAt)));
+  });
+
+  return h("div", { class: "table-wrap" },
+    h("table", { class: "tbl iqs-delta" },
+      h("thead", {},
+        h("tr", {},
+          h("th", {}, "Case"),
+          h("th", { class: "right" }, "Predicted (Layer 1)"),
+          h("th", { class: "right" }, "Official (SentryAI)"),
+          h("th", { class: "right" }, "Δ"),
+          h("th", {}, "Imported"))),
+      h("tbody", {}, body)));
+}
+
+/**
+ * The paste box. Column names are matched by alias, not one exact format --
+ * nobody on this project has seen a real SentryAI export, so this reports
+ * what it understood before committing rather than assuming it guessed right.
+ */
+function officialImportCard(onImported) {
+  const area = h("textarea", {
+    class: "input",
+    rows: "6",
+    style: { fontFamily: "ui-monospace, monospace", fontSize: "12px" },
+    placeholder: "Paste a CSV or a copied table from the IQS Report page — needs a case number column and a score column, any header names.",
+  });
+  const resultHost = h("div", { style: { marginTop: "10px" } });
+  const importBtn = button("Import", {
+    kind: "primary", small: true,
+    onclick: async () => {
+      const text = area.value.trim();
+      if (!text) { toast("Paste some rows first", "error"); return; }
+      importBtn.disabled = true;
+      importBtn.textContent = "Importing…";
+      try {
+        const result = await api.importOfficialScores(text);
+        mount(resultHost,
+          banner(result.unmatched.length || result.warnings.length ? "warn" : "info",
+            `Imported ${result.imported} score${result.imported === 1 ? "" : "s"}.`
+            + (result.unmatched.length ? ` ${result.unmatched.length} case number(s) not in the cache: ${result.unmatched.join(", ")}.` : "")
+            + (result.warnings.length ? ` ${result.warnings.length} row(s) skipped.` : "")),
+          result.warnings.length
+            ? h("ul", { class: "hint", style: { margin: "6px 0 0 18px" } }, result.warnings.map((w) => h("li", {}, w)))
+            : null);
+        if (result.imported) { area.value = ""; onImported(); }
+      } catch (err) {
+        toast(err.message || "Import failed", "error");
+      }
+      importBtn.disabled = false;
+      importBtn.textContent = "Import";
+    },
+  });
+
+  return h("div", { class: "card iqs-card" },
+    area,
+    h("div", { style: { marginTop: "8px" } }, importBtn),
+    resultHost);
+}
+
 const OUTCOME_TONE = { hit: "good", miss: "blue", skip: "none", error: "bad" };
 const OUTCOME_LABEL = { hit: "cache hit", miss: "scored", skip: "skipped", error: "failed" };
 
@@ -572,7 +655,19 @@ export function render(ctx, host, shell) {
       section("Recent decisions",
         "Every decision the store made, hits included — the ledger is what makes the hit "
         + "rate above recoverable at all.",
-        activityList(activity)));
+        activityList(activity)),
+      section("Official scores (SentryAI)",
+        "Phase 9's Tier 3 import: no authenticated SentryAI session has ever been reachable, "
+        + "so this is the working floor — paste a CSV or a copied table from the IQS Report "
+        + "page. Predicted and official are never averaged; they measure with different "
+        + "dimensions and weights.",
+        officialImportCard(load),
+        (d.official || []).length
+          ? h("div", { class: "sc-head-inline" },
+              h("a", { class: "link sm", href: casesHref(d.official.map((c) => c.caseNumber)) },
+                "Show these " + d.official.length + " in the Queue"))
+          : null,
+        officialTable(d.official || [], (n) => navigate(caseHref(n)))));
   }
 
   function tok(label, n) {

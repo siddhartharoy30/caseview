@@ -375,3 +375,9 @@ export function listRecentPosts(limit = 50) {
   const rows = db.prepare("SELECT * FROM coverage_posts ORDER BY created_at DESC LIMIT ?").all(limit) as PostRow[];
   return rows.map(toApiPost);
 }
+
+/** Phase 9's Recap: coverage activity in a period, not just "the most recent N." */
+export function listPostsSince(sinceMs: number) {
+  const rows = db.prepare("SELECT * FROM coverage_posts WHERE created_at >= ? ORDER BY created_at DESC").all(sinceMs) as PostRow[];
+  return rows.map(toApiPost);
+}

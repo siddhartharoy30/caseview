@@ -86,6 +86,9 @@ export const api = {
   iqsOverview:    (p)       => request("GET",  "/api/iqs/overview" + qs(p)),
   iqsSweep:       ()        => request("POST", "/api/iqs/sweep", {}),
 
+  /* Phase 9 — SentryAI Tier 3: paste a CSV/table, get back predicted-vs-official. */
+  importOfficialScores: (text) => request("POST", "/api/iqs/official/import", { text }),
+
   /* commitments */
   commitments:   (state)      => request("GET",   "/api/commitments" + qs({ state })),
   addCommitment: (payload)    => request("POST",  "/api/commitments", payload),
@@ -143,7 +146,7 @@ export const api = {
   deleteCoverageChannel: (id)          => request("DELETE", `/api/coverage/channels/${encodeURIComponent(id)}`),
   activateCoverageChannel: (id)        => request("POST",   `/api/coverage/channels/${encodeURIComponent(id)}/activate`),
   testCoverageChannel:   (id)          => request("POST",   `/api/coverage/channels/${encodeURIComponent(id)}/test`),
-  coveragePosts:         ()            => request("GET",    "/api/coverage/posts"),
+  coveragePosts:         (sinceMs)     => request("GET",    "/api/coverage/posts" + qs({ since: sinceMs })),
   coverageBacktest:      ()            => request("GET",    "/api/coverage/backtest"),
 
   /* Phase 8 — approval queue. sendCoveragePost's body param is optional: an

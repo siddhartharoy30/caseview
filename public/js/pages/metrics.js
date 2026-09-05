@@ -20,13 +20,14 @@ import { api } from "../lib/api.js";
 import * as store from "../lib/store.js";
 import * as fmt from "../lib/fmt.js";
 import {
-  toast, toastError, dialog, confirmDialog, skeletonCards, banner, field, button,
+  toast, toastError, dialog, confirmDialog, skeletonCards, banner, field, button, copyToast,
 } from "../lib/ui.js";
 import { pageHead, page, tile } from "./_shared.js";
 import { navigate } from "../router.js";
 
 const KEY_PERIOD = "metrics.period";
 const KEY_CUSTOM = "metrics.custom";
+const KEY_VIEW = "metrics.view";
 
 const PERIODS = [
   { id: "week", label: "Week" },
@@ -369,6 +370,9 @@ export function render(ctx, host, shell) {
     data: null,
     error: null,
     loading: true,
+    view: store.get(KEY_VIEW, "charts"),   // Phase 9: charts | recap
+    recapExtra: null,                       // { iqs, coverage } — fetched lazily, only for the Recap tab
+    recapLoading: false,
   };
 
   const head = pageHead("Scorecard", "Loading…");
@@ -421,13 +425,28 @@ export function render(ctx, host, shell) {
         ? `${fmt.dateOnly(r.from)} → ${fmt.dateOnly(new Date(Date.parse(r.to) - 1))} ET`
         : "";
 
+    const viewSeg = h("div", { class: "seg", role: "tablist" },
+      [["charts", "Charts"], ["recap", "Recap"]].map(([id, label]) => h("button", {
+        class: "seg-btn" + (id === state.view ? " on" : ""),
+        role: "tab", "aria-selected": id === state.view ? "true" : "false",
+        onclick: () => setView(id),
+      }, label)));
+
     mount(periodBar, seg,
       h("span", { class: "sc-range" }, sentence),
       h("span", { class: "spacer" }),
+      viewSeg,
       state.period === "custom"
         ? button("Change range", { small: true, onclick: askCustomRange })
         : null,
       button("Refresh", { small: true, onclick: load }));
+  }
+
+  function setView(id) {
+    if (id === state.view) return;
+    state.view = id;
+    store.set(KEY_VIEW, id);
+    paint();
   }
 
   function askCustomRange() {
@@ -492,6 +511,8 @@ export function render(ctx, host, shell) {
     const r = d.range;
     head.querySelector(".page-sub").textContent =
       `${r.label} · ${fmt.dateOnly(r.from)} → ${fmt.dateOnly(new Date(Date.parse(r.to) - 1))} ET`;
+
+    if (state.view === "recap") { paintRecap(d, r); return; }
 
     const nowMs = Date.now();
     const p1 = d.ttr.find((t) => t.priority === "P1" || t.priority === "P0");
@@ -613,6 +634,78 @@ export function render(ctx, host, shell) {
           breakdown(d.byAccount, (row) => (row.key === "Unknown" ? null : drill.openAccount(row.key)), { empty: "Nothing open.", tone: "green" }))));
 
     mount(body, headline, ttrSection, charts, breakdowns, manualBlock(d, r));
+  }
+
+  /* ----------------------------------------------------------------- recap -- */
+
+  /**
+   * A copyable digest, not a fifth chart. Everything in the "Cases /
+   * response / commitments / escalations" block below is read straight off
+   * `scorecard()` -- the same numbers the tiles above show, just narrated --
+   * because computing them twice is the exact single-source-of-truth mistake
+   * phase 4 fixed for next-action logic. Only two things are genuinely new
+   * here: the current Layer 1 quality average and coverage activity in
+   * range, neither of which `scorecard()` has any reason to carry.
+   */
+  function recapText(d, r, extra) {
+    const lines = [
+      `QView Recap — ${d.range.label} (${fmt.dateOnly(r.from)} – ${fmt.dateOnly(new Date(Date.parse(r.to) - 1))} ET)`,
+      "",
+      `Cases: ${d.owned.opened} opened, ${d.owned.closed} closed, ${d.owned.open} open now`,
+      `Initial response: ${d.irt.eligible ? fmt.pct(d.irt.pct) + ` (${d.irt.met} of ${d.irt.eligible} on target)` : "nothing answered yet this period"}`,
+      `Commitments: ${d.commitments.met} met, ${d.commitments.breached} breached`,
+      `Escalations: ${d.escalations.flagged} flagged, ${d.escalations.p1} P0/P1 open`,
+    ];
+    if (extra) {
+      lines.push("");
+      lines.push(
+        extra.iqs.withScore
+          ? `Quality (current, open cases): ${extra.iqs.average} average — ${extra.iqs.meeting} meeting / ${extra.iqs.partial} partial / ${extra.iqs.notMeeting} not meeting`
+          : "Quality: no open case has a Layer 1 score yet.",
+      );
+      if (extra.coverage.length) {
+        const sent = extra.coverage.filter((p) => p.status === "sent").length;
+        const pending = extra.coverage.filter((p) => p.status === "pending" || p.status === "failed").length;
+        lines.push(`Coverage (while away): ${extra.coverage.length} transition${extra.coverage.length === 1 ? "" : "s"} surfaced, ${sent} sent, ${pending} awaiting review`);
+      }
+    }
+    return lines.join("\n");
+  }
+
+  async function ensureRecapExtra(r) {
+    const key = `${r.from}|${r.to}`;
+    if (state.recapExtra && state.recapExtra.forKey === key) return state.recapExtra;
+    if (state.recapLoading) return null;
+    state.recapLoading = true;
+    try {
+      const [iqsRes, covRes] = await Promise.all([
+        api.iqsStats(true),
+        api.coveragePosts(Date.parse(r.from)),
+      ]);
+      state.recapExtra = { forKey: key, iqs: iqsRes.stats, coverage: covRes.posts };
+    } catch {
+      state.recapExtra = null; // the case/commitment digest above still stands without this
+    }
+    state.recapLoading = false;
+    return state.recapExtra;
+  }
+
+  function paintRecap(d, r) {
+    const extra = state.recapExtra && state.recapExtra.forKey === `${r.from}|${r.to}` ? state.recapExtra : null;
+    const text = recapText(d, r, extra);
+
+    mount(body,
+      section("Recap",
+        "A copyable digest for a stand-up or a status update — the same numbers the Charts tab shows, narrated instead of charted, plus current quality and any coverage activity.",
+        h("div", { class: "card recap-card" },
+          h("pre", { class: "recap-text", text }),
+          h("div", { style: { marginTop: "10px" } },
+            button("Copy recap", { kind: "primary", small: true, onclick: () => copyToast(text, "Recap copied") }),
+            !extra && !state.recapLoading ? h("span", { class: "hint", style: { marginLeft: "10px" }, text: "Loading quality and coverage…" }) : null))));
+
+    if (!extra && !state.recapLoading) {
+      ensureRecapExtra(r).then(() => { if (!disposed && state.view === "recap") paintRecap(state.data, state.data.range); });
+    }
   }
 
   /* --------------------------------------------------------------- manual -- */

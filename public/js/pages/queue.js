@@ -402,6 +402,7 @@ export async function render(ctx, host, shell) {
     all:      [],
     rows:     [],
     cursor:   -1,
+    selected: new Set(),   // case numbers, Phase 9 batch drafting
   };
 
   let facets = { accounts: [], priorities: [], statuses: [], productAreas: [] };
@@ -412,6 +413,7 @@ export async function render(ctx, host, shell) {
   const viewsBar   = h("div", { class: "views" });
   const filterBar  = h("div", { class: "toolbar-row" });
   const resultLine = h("div", { class: "result-line" });
+  const bulkBar    = h("div", { class: "bulk-toolbar", hidden: true });
   const tableWrap  = h("div", { class: "table-wrap" });
 
   const root = page(
@@ -423,6 +425,7 @@ export async function render(ctx, host, shell) {
     ]),
     h("div", { class: "toolbar" }, viewsBar, filterBar),
     resultLine,
+    bulkBar,
     tableWrap,
   );
   mount(host, root);
@@ -593,6 +596,7 @@ export async function render(ctx, host, shell) {
     store.set(KEY_ORDER, { at: Date.now(), numbers: rows.map((r) => r.caseNumber) });
 
     paintResultLine(rows);
+    paintBulkBar();
 
     if (!rows.length) {
       mount(tableWrap, emptyState(emptyFor()));
@@ -603,7 +607,7 @@ export async function render(ctx, host, shell) {
     const tbody = h("tbody");
     const table = h("table", { class: "tbl" }, h("thead", {}, headRow(cols)), tbody);
 
-    const span = cols.length + 1;
+    const span = cols.length + 2; // rail + checkbox columns
     let index = 0;
     for (const [label, items] of (state.group ? groupRows(rows, state.group) : [[null, rows]])) {
       if (label !== null) {
@@ -672,8 +676,42 @@ export async function render(ctx, host, shell) {
     );
   }
 
+  /** Phase 9: batch drafting needs a selection; this is the only place it lives. */
+  function toggleSelected(caseNumber, on) {
+    if (on) state.selected.add(caseNumber); else state.selected.delete(caseNumber);
+    paintBulkBar();
+  }
+
+  function paintBulkBar() {
+    const n = state.selected.size;
+    if (!n) { bulkBar.hidden = true; mount(bulkBar); return; }
+    bulkBar.hidden = false;
+    mount(bulkBar,
+      h("span", { class: "mono", text: `${n} selected` }),
+      h("div", { class: "spacer" }),
+      button("Generate AI drafts", {
+        small: true, kind: "primary",
+        onclick: () => runBatchDraft([...state.selected]),
+      }),
+      button("Clear selection", {
+        small: true,
+        onclick: () => { state.selected.clear(); paint({ keepFocus: true }); },
+      }));
+  }
+
   function headRow(cols) {
-    const tr = h("tr", {}, h("th", { class: "rail", "aria-hidden": "true" }));
+    const allOnPage = state.rows.length > 0 && state.rows.every((r) => state.selected.has(r.caseNumber));
+    const tr = h("tr", {},
+      h("th", { class: "rail", "aria-hidden": "true" }),
+      h("th", { class: "check-col" },
+        h("input", {
+          type: "checkbox", checked: allOnPage,
+          title: allOnPage ? "Deselect all" : "Select all on this page",
+          onclick: (e) => {
+            for (const r of state.rows) toggleSelected(r.caseNumber, e.target.checked);
+            paint({ keepFocus: true });
+          },
+        })));
     for (const col of cols) {
       const idx = state.sort.findIndex((k) => k.id === col.id);
       const key = idx >= 0 ? state.sort[idx] : null;
@@ -703,7 +741,13 @@ export async function render(ctx, host, shell) {
         focusRow(index, { scroll: false });
         openRowMenu(c, e.clientX, e.clientY);
       },
-    }, h("td", { class: "rail" }));
+    },
+      h("td", { class: "rail" }),
+      h("td", { class: "check-col", onclick: (e) => e.stopPropagation() },
+        h("input", {
+          type: "checkbox", checked: state.selected.has(c.caseNumber),
+          onclick: (e) => toggleSelected(c.caseNumber, e.target.checked),
+        })));
     for (const col of cols) tr.append(h("td", { dataset: { label: col.label } }, col.cell(c)));
     return tr;
   }
@@ -831,6 +875,88 @@ export async function render(ctx, host, shell) {
   window.addEventListener("resize", closeMenu);
 
   /* --------------------------------------------------------------- actions */
+
+  const BATCH_DRAFT_MAX = 15;
+
+  /**
+   * No new backend route: this is /api/intelligence/suggest-reply (phase 5)
+   * called once per case, sequentially, from the client. Everything phase 5
+   * already built -- keyword detection, artifacts context, rubric-consistent
+   * drafting -- runs unchanged; batching only adds the loop, the cap, and an
+   * up-front "N AI calls" confirmation, since a batch loses the one-click-
+   * per-call friction a single draft naturally has.
+   */
+  async function runBatchDraft(caseNumbers) {
+    if (!caseNumbers.length) return;
+    if (caseNumbers.length > BATCH_DRAFT_MAX) {
+      toast(`Select ${BATCH_DRAFT_MAX} or fewer at a time (${caseNumbers.length} selected)`, "error");
+      return;
+    }
+    const ok = await confirmDialog({
+      title: "Generate AI drafts?",
+      message: `This makes ${caseNumbers.length} separate AI call${caseNumbers.length === 1 ? "" : "s"}, one per case, and stages each draft exactly the way the Draft tab does. Nothing is copied or sent anywhere automatically -- review each one from its own case page.`,
+      confirmLabel: "Generate",
+    });
+    if (!ok) return;
+
+    const results = caseNumbers.map((n) => ({ caseNumber: n, status: "pending" }));
+    const listHost = h("div", { class: "batch-list" });
+
+    function rowFor(r) {
+      const c = state.all.find((x) => x.caseNumber === r.caseNumber);
+      const statusNode =
+        r.status === "pending" ? h("span", { class: "hint", text: "Waiting…" }) :
+        r.status === "working" ? h("span", { class: "hint", text: "Drafting…" }) :
+        r.status === "error"   ? h("span", { class: "chip p0", title: r.error || "", text: "Failed" }) :
+        h("span", { class: "batch-done" },
+          r.keyword ? h("span", { class: "chip neutral", text: KEYWORD_LABEL[r.keyword] || r.keyword }) : null,
+          r.score !== undefined && r.score !== null ? scoreMeter(r.score, r.band, { width: 40 }) : null,
+          h("a", { class: "link sm", href: `/case/${encodeURIComponent(r.caseNumber)}?tab=draft`, text: "Open" }));
+      return h("div", { class: `batch-row bd-${r.status}` },
+        h("span", { class: "mono batch-num", text: r.caseNumber }),
+        h("span", { class: "batch-subject", text: c?.subject || "" }),
+        h("div", { class: "spacer" }),
+        statusNode);
+    }
+
+    function paintList() {
+      mount(listHost, results.map(rowFor));
+    }
+
+    dialog({
+      title: `Generating ${caseNumbers.length} draft${caseNumbers.length === 1 ? "" : "s"}`,
+      width: "600px",
+      body: listHost,
+      actions: (close) => [h("button", { class: "btn", onclick: () => close() }, "Close")],
+    });
+    paintList();
+
+    for (const r of results) {
+      r.status = "working";
+      paintList();
+      try {
+        const draft = await api.suggestReply(r.caseNumber, true);
+        r.keyword = draft.keyword;
+        try {
+          const scored = await api.draftScore(r.caseNumber, draft.draft, draft.keyword);
+          r.score = scored.score?.overall ?? null;
+          r.band = scored.score?.band ?? null;
+        } catch {
+          // The predicted-score preview is a bonus here, not the point of
+          // batch drafting -- a failed preview must not hide a real draft.
+        }
+        r.status = "done";
+      } catch (err) {
+        r.status = "error";
+        r.error = err.message || "Failed";
+      }
+      paintList();
+    }
+
+    toast("Batch drafting done.", "ok");
+    state.selected.clear();
+    paint({ keepFocus: true });
+  }
 
   function exportCsv() {
     const cols = visibleColumns(layout);

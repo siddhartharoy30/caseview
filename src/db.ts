@@ -245,6 +245,24 @@ CREATE TABLE IF NOT EXISTS iqs_scores (
 );
 CREATE INDEX IF NOT EXISTS idx_iqs_scores_overall ON iqs_scores(layer, overall);
 CREATE INDEX IF NOT EXISTS idx_iqs_scores_number ON iqs_scores(case_number);
+
+-- Phase 9, SentryAI Tier 3 import. A separate table rather than a third
+-- iqs_scores layer: keyword and detail on that table are NOT NULL and
+-- meaningful only for a score read against our own rubric shape (a
+-- response-type keyword, a dimension tree) -- an official score has
+-- neither, and SentryAI's own dimensions are still unknown (no
+-- authenticated session has ever been obtained). One row per case, latest
+-- import wins, same as iqs_scores does per layer.
+CREATE TABLE IF NOT EXISTS iqs_official_scores (
+  case_id     TEXT PRIMARY KEY,
+  case_number TEXT NOT NULL,
+  overall     REAL NOT NULL,
+  band        TEXT,
+  source_note TEXT,
+  imported_at INTEGER NOT NULL,
+  FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_iqs_official_number ON iqs_official_scores(case_number);
 `);
 
 /* ------------------------------------------------- layer 2 usage ledger */
