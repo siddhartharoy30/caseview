@@ -98,6 +98,7 @@ export const api = {
   addCommitment: (payload)    => request("POST",  "/api/commitments", payload),
   patchCommitment: (id, p)    => request("PATCH", `/api/commitments/${encodeURIComponent(id)}`, p),
   commitmentsInRange: (start, end) => request("GET", "/api/commitments/range" + qs({ start, end })),
+  commitmentsCoverage: () => request("GET", "/api/commitments/coverage"),
 
   /* time off — Phase 6's coverage calendar */
   timeOff:       ()           => request("GET",    "/api/time-off"),

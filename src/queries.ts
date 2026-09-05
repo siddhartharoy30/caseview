@@ -105,6 +105,21 @@ WHERE case_id = ? AND state = 'active' AND due_at IS NOT NULL
 ORDER BY due_at ASC LIMIT 1
 `);
 
+/**
+ * `parseCommitments()` deliberately records a promise it cannot date as
+ * `state = 'unparsed', due_at = null` rather than losing it (see the module
+ * comment in commitments.ts) — so an undated, still-live promise is the
+ * client's problem to surface, not the DB's to drop. Most recent first: an
+ * older unparsed row is more likely to have been superseded by something the
+ * parser *could* read.
+ */
+const unparsedCommitmentStmt = db.prepare(`
+SELECT id, due_at, raw_text, state
+FROM commitments
+WHERE case_id = ? AND state = 'unparsed'
+ORDER BY created_at DESC LIMIT 1
+`);
+
 const breachedCommitmentStmt = db.prepare(`
 SELECT id, due_at, raw_text, state
 FROM commitments
@@ -119,10 +134,18 @@ interface CommitmentPeek {
   state: string;
 }
 
-/** The deadline that matters right now: the soonest active one, else the last breach. */
+/**
+ * The deadline that matters right now: the soonest active one, else the most
+ * recent undated promise, else the last breach. An active or unparsed row
+ * outranks a breach because either one means something more current is
+ * already in play — a stale breach nobody has since spoken to is the last
+ * resort, not the first answer.
+ */
 function nextCommitmentFor(caseId: string) {
-  const active = nextCommitmentStmt.get(caseId) as CommitmentPeek | undefined;
-  const row = active || (breachedCommitmentStmt.get(caseId) as CommitmentPeek | undefined);
+  const row =
+    (nextCommitmentStmt.get(caseId) as CommitmentPeek | undefined) ||
+    (unparsedCommitmentStmt.get(caseId) as CommitmentPeek | undefined) ||
+    (breachedCommitmentStmt.get(caseId) as CommitmentPeek | undefined);
   if (!row) return null;
   return { id: row.id, dueAt: row.due_at, rawText: row.raw_text, state: row.state };
 }
@@ -443,18 +466,84 @@ export function listCommitmentsForCase(caseNumber: string) {
   return rows.map((r) => toApiCommitment(r, null));
 }
 
+export interface CommitmentCoverageRow {
+  caseNumber: string;
+  subject: string | null;
+  covered: boolean;
+  /** Set only when !covered: why nothing is currently live. */
+  reason: "no_promise_found" | "met" | "breached" | "superseded" | "dismissed" | null;
+  lastCommitmentAt: number | null;
+}
+
 /**
- * Cases carrying more than one active commitment.
+ * Per open case: is a commitment currently live, and if not, why.
+ *
+ * "Live" matches duplicateCommitmentCases()'s definition — active or
+ * unparsed. A case with none is not automatically a bug: it may have just
+ * been met, or the last one was superseded and nothing has been promised
+ * since. `no_promise_found` is the one worth reading by hand — it means no
+ * commitment has EVER been recorded for this case, so either nothing has
+ * been promised, or a phrasing I actually use is slipping past TRIGGER in
+ * commitments.ts (correction 6/7 in the v4 plan).
+ */
+export function commitmentCoverage(): CommitmentCoverageRow[] {
+  const rows = db
+    .prepare(
+      `SELECT
+         c.case_number AS case_number,
+         c.subject AS subject,
+         (SELECT COUNT(*) FROM commitments cm
+            WHERE cm.case_id = c.id AND cm.state IN ('active', 'unparsed')) AS live_count,
+         (SELECT cm.state FROM commitments cm
+            WHERE cm.case_id = c.id ORDER BY cm.created_at DESC LIMIT 1) AS latest_state,
+         (SELECT cm.created_at FROM commitments cm
+            WHERE cm.case_id = c.id ORDER BY cm.created_at DESC LIMIT 1) AS latest_at,
+         (SELECT COUNT(*) FROM commitments cm WHERE cm.case_id = c.id) AS total_count
+       FROM cases c
+       WHERE c.is_closed = 0
+       ORDER BY c.last_modified_date DESC`,
+    )
+    .all() as Array<{
+    case_number: string;
+    subject: string | null;
+    live_count: number;
+    latest_state: string | null;
+    latest_at: number | null;
+    total_count: number;
+  }>;
+
+  return rows.map((r) => {
+    const covered = r.live_count > 0;
+    const reason: CommitmentCoverageRow["reason"] = covered
+      ? null
+      : r.total_count === 0
+        ? "no_promise_found"
+        : ((r.latest_state as CommitmentCoverageRow["reason"]) ?? null);
+    return {
+      caseNumber: r.case_number,
+      subject: r.subject,
+      covered,
+      reason,
+      lastCommitmentAt: r.latest_at,
+    };
+  });
+}
+
+/**
+ * Cases carrying more than one live commitment.
  *
  * Only one deadline may be live per case, so this is an error condition and the
- * UI is expected to shout about it rather than pick a winner.
+ * UI is expected to shout about it rather than pick a winner. "Live" means
+ * active (dated) or unparsed (undated but not yet met/breached/superseded) —
+ * two undated promises, or one dated and one not, are just as much a
+ * duplicate as two dated ones.
  */
 export function duplicateCommitmentCases(): string[] {
   return (
     db
       .prepare(
         `SELECT case_number FROM commitments
-         WHERE state = 'active' AND due_at IS NOT NULL
+         WHERE state IN ('active', 'unparsed')
          GROUP BY case_number HAVING COUNT(*) > 1`,
       )
       .all() as Array<{ case_number: string }>

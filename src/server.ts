@@ -29,6 +29,7 @@ import {
   listCommitments,
   listCommitmentsForCase,
   duplicateCommitmentCases,
+  commitmentCoverage,
   addManualCommitment,
   updateCommitment,
   renegotiateCommitment,
@@ -211,6 +212,10 @@ app.get("/api/cases", requireAuth, noStore, (req, res) => {
     const state = getSyncState();
     res.json({
       cases: enriched,
+      // The Next Commitment column needs this to draw its own at-risk
+      // threshold rather than a hardcoded one — the same setting
+      // /api/commitments already returns for the Commitments page.
+      atRiskHours: getSettingNumber("atRiskHours"),
       sync: {
         lastSuccess: state.last_success,
         lastAttempt: state.last_attempt,
@@ -397,6 +402,23 @@ app.get("/api/commitments", requireAuth, noStore, (req, res) => {
     duplicates: duplicateCommitmentCases(),
     atRiskHours: getSettingNumber("atRiskHours"),
   });
+});
+
+/**
+ * Phase 2.5's diagnostic: per open case, is a commitment currently live and,
+ * where not, why. Its own route (rather than folding into GET
+ * /api/commitments above) so a failure here never takes the main
+ * commitments list down with it.
+ */
+app.get("/api/commitments/coverage", requireAuth, noStore, (_req, res) => {
+  try {
+    const rows = commitmentCoverage();
+    const gaps = rows.filter((r) => !r.covered);
+    res.json({ total: rows.length, covered: rows.length - gaps.length, gaps });
+  } catch (err: any) {
+    log.error("api.commitments_coverage_failed", { error: errText(err) });
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post("/api/commitments", requireAuth, (req, res) => {

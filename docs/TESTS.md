@@ -85,3 +85,116 @@ exceeded` log appeared during any of the above, confirming normal use never
 trips it.
 
 No console errors were observed during any check in this section.
+
+## Phase 2 — the Next Commitment column
+
+Files: `src/queries.ts`, `src/commitments.ts`, `src/server.ts`,
+`public/js/pages/queue.js`, `public/js/pages/commitments.js`.
+
+Verified against real synced data after a full resync (253 cases, 6,329
+comments; `atRiskHours` = 4).
+
+### 2.1 — unparsed commitments were invisible
+
+**Repro (pre-fix).** `nextCommitmentFor()` only matched `state = 'active' AND
+due_at IS NOT NULL`, falling back to `state = 'breached'`. A promise
+`parseCommitments()` could not date — recorded as `state = 'unparsed', due_at
+= NULL` specifically so it would not be lost — matched neither branch and so
+never reached the client at all.
+
+**Confirmed gone.** `nextCommitmentFor()` now tries active → unparsed →
+breached in that order. `duplicateCommitmentCases()` (the sibling query with
+the identical `state = 'active' AND due_at IS NOT NULL` predicate) was widened
+the same way, since two live promises — one dated, one not — are just as much
+a duplicate as two dated ones.
+
+### 2.2 — real states, including the two the prompt names explicitly
+
+**Repro (pre-fix).** The cell branched only on `c._due`, so "no commitment
+because the case just closed" and "no commitment because I spoke last and
+made no promise" both rendered as the same bare `—`.
+
+**Confirmed gone**, cross-checked against `/api/cases` for the exact cases
+the Queue rendered:
+
+- `01306048`, `01305010` — `isClosed:false, needsMyReply:false,
+  nextAction.kind:"work"`, status "Waiting for Customer Input" — Queue
+  correctly shows the amber **"No follow-up committed"** chip. This is the
+  gap 2.2 asks to surface: I spoke last and made no promise.
+- `01304026`, `01301607`, `01300731` — `isClosed:false,
+  nextAction.kind:"closure"`, status "Resolved - Pending Customer" — Queue
+  correctly shows a plain muted `—`, not flagged. `nextAction.kind`, not the
+  prompt's nonexistent `nextAction.action` (correction 3).
+- Old breached commitments on **closed** cases (`/?status=all`) still render
+  red/overdue rather than being suppressed — matches how the Commitments
+  page's own `bandOf()` already treats a stale breach regardless of case
+  status; suppression is specifically for the "no commitment at all" branch,
+  driven by `nextAction.kind` and `isClosed`, not for a commitment record
+  that genuinely exists.
+
+### 2.3 — business hours, not wall clock
+
+**Repro (pre-fix).** The cell used `fmt.countdown` (wall clock) with a
+hardcoded 4-hour amber threshold, duplicated again in the 30 s re-tick —
+disagreeing with the Commitments page, which already used
+`bizhours.remaining()`.
+
+**Confirmed gone.** Two open cases due Mon Sep 08 18:00 ET, checked on a
+weekend: `.cd` shows `1d 0h` / `2d 0h` (9 and 18 *business* hours — the
+`BUSINESS_MS_PER_DAY` = 9h divisor, not calendar days) with the plain
+(non-amber) tone, since both exceed the 4-hour `atRiskHours` setting now read
+from `/api/cases`'s new `atRiskHours` field rather than a hardcoded literal.
+The calendar date (`Sep 08, 6:00 PM`) renders underneath because wall time and
+business time diverge by more than one business day across the weekend — the
+"show the date when the clocks disagree" rule. The 30 s tick was rewritten to
+recompute `bh.remaining()` live, so a commitment ticks from on-track into
+breached (`overdue Xh`) without waiting for the next full repaint.
+
+### 2.4 — hover, click, sort
+
+**Confirmed:**
+
+- Hover title shows `rawText` verbatim (confirmed present on every dated/
+  unparsed cell).
+- Clicking a commitment cell navigates to `/case/<N>?tab=commitments`
+  (`CLICKED_HREF` / `URL_AFTER` both `/case/01302766?tab=commitments`).
+- Sorting the column **ascending** puts breached first, ordered oldest-breach
+  first within the tier (`overdue 93d 0h` → `83d 0h` → `86d 5h` → …, business
+  hours). Sorting **descending** puts the muted `—` rows first (tier 5, the
+  highest `tier * 1e13 + timestamp` encoding) — confirming a row with no
+  commitment can now be sorted to the top or bottom on demand, which the old
+  `sortVal: c._due` (`null` for anything without a due date, always sunk by
+  the generic comparator regardless of direction) could never do.
+
+### 2.5 — coverage diagnostic, and the NEGATION narrowing it should surface
+
+**`GET /api/commitments/coverage`, live data:** 12 open cases, 7 covered, 5
+gaps — 4 `met` (expected), 1 `no_promise_found` (worth reading by hand).
+Renders on `/commitments` as an info banner: *"5 of 12 open cases have no
+live commitment right now — 4 met, 1 with no promise detected in the
+history"* with a **"Review 1 with no promise detected"** button that opens
+those cases in the Queue (`/?cases=...&status=open`). Reloading the page with
+the coverage fetch made to fail (network throttled to offline mid-load) still
+renders the full commitments list — the diagnostic's own try/catch does not
+take the page down with it.
+
+**Correction 7 — NEGATION narrowing.** Verified directly against
+`parseCommitments()`:
+
+| Input | Before | After |
+|---|---|---|
+| "I will follow up by 6:00 PM once I hear back from engineering." | discarded entirely (vanishes) | **kept**, recorded unparsed (no calendar date in the sentence — a separate, correct limitation) |
+| "Once you send me the logs, I will follow up by 6:00 PM." (genuinely conditional — negation *before* the deadline) | discarded | **still discarded** — regression-checked |
+| Both canonical phrasings from the module's own doc comment | parsed | **still parsed**, `dueAt` unchanged — regression-checked |
+| "If the issue recurs, I will follow up with the vendor." (no time at all) | discarded | **still discarded** — regression-checked |
+| "I was going to follow up by 6:00 PM but the ticket got reassigned." (historical) | discarded | **still discarded** — regression-checked |
+
+The fix: `NEGATION` only disqualifies when its match position is at or before
+the point a time-of-day was stated in the sentence; a trailing conditional
+clause after an already-stated deadline no longer discards the promise. A
+full resync against real production comments (253 cases) picked this up
+without any duplicate commitments being created (the dedupe index is keyed on
+`case_id, source_comment_id, raw_text`, and a previously-discarded sentence
+had no prior row to collide with).
+
+No console errors were observed during any check in this section.

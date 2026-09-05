@@ -20,6 +20,7 @@ import {
   skeletonRows, emptyState, banner, button, copyToast,
 } from "../lib/ui.js";
 import { scoreMeter, bandExplain, bandLabel, KEYWORD_LABEL } from "../lib/iqs.js";
+import * as bh from "../lib/bizhours.js";
 import { pageHead, page } from "./_shared.js";
 import { navigate, setQuery } from "../router.js";
 
@@ -31,6 +32,14 @@ const KEY_STALE = "queue.staleDays";
 const KEY_ORDER = "queue.order";
 
 const DEFAULT_STALE_DAYS = 5;
+
+/**
+ * The Next Commitment column's at-risk threshold, in business hours. A
+ * module-level var rather than render() state because COLUMNS below is
+ * itself module-level — the same setting /api/commitments already returns
+ * for the Commitments page, refreshed on every load() here.
+ */
+let atRiskHours = 4;
 
 const ICON_COLS = ["M4 4h16v6H4z", "M4 14h10v6H4z"];
 const ICON_COPY = ["M9 9h10v10H9z", "M5 15V5h10"];
@@ -127,18 +136,11 @@ const COLUMNS = [
   },
   {
     id: "commitment", label: "Next commitment", defaultOn: true,
-    sortVal: (c) => c._due,
-    csv: (c) => (c._due ? fmt.dateTime(c._due) : ""),
-    cell: (c) => {
-      if (!c._due) return h("span", { class: "dim", text: "—" });
-      return h("span", { class: "due-cell" },
-        h("span", {
-          class: `cd ${dueTone(c._due)}`, dataset: { due: String(c._due) },
-          text: fmt.countdown(c._due),
-        }),
-        h("span", { class: "abs", text: fmt.dateTimeShort(c._due) }),
-      );
-    },
+    // Real number always, never null — see commitmentView's doc comment for
+    // why an unparsed or "spoke last" row has to be sortable to the top.
+    sortVal: (c) => { const v = commitmentView(c); return v.tier * 1e13 + (v.due || 0); },
+    csv: (c) => commitmentCsv(c),
+    cell: (c) => commitmentCell(c),
   },
   {
     id: "productArea", label: "Product area", defaultOn: false,
@@ -278,10 +280,106 @@ function prioRank(p) {
   return m ? Number(m[1]) : 9;
 }
 
-function dueTone(due, now = Date.now()) {
-  if (due < now) return "red";
-  if (due - now <= 4 * 3600 * 1000) return "amber";
-  return "";
+/**
+ * Real states for the Next Commitment column (v4 plan phase 2.2). `tier`
+ * orders urgency for sortVal — 0 breached, 1 unparsed, 2 due soon (today or
+ * inside atRiskHours), 3 no commitment but I spoke last, 4 on track (dated,
+ * comfortably ahead), 5 nothing owed (waiting on the customer, or a closure
+ * path where none is expected). `nextAction.kind === "closure"` is the field
+ * that actually exists on the queue row — the prompt's `nextAction.action`
+ * does not (nextAction.ts / correction 3).
+ */
+function commitmentView(c, now = Date.now()) {
+  const nc = c.nextCommitment;
+
+  if (nc && nc.dueAt) {
+    const due = Date.parse(nc.dueAt);
+    const r = bh.remaining(due, now);
+    if (r.overdue || nc.state === "breached") {
+      return { tier: 0, kind: "breached", due, businessMs: r.businessMs, wallMs: r.wallMs, rawText: nc.rawText };
+    }
+    const dueToday = bh.isSameNyDay(due, now);
+    const atRisk = r.businessMs <= atRiskHours * 3600000;
+    return {
+      tier: dueToday || atRisk ? 2 : 4,
+      kind: dueToday ? "today" : atRisk ? "atrisk" : "ontrack",
+      due, businessMs: r.businessMs, wallMs: r.wallMs, rawText: nc.rawText,
+    };
+  }
+  if (nc && !nc.dueAt) {
+    return { tier: 1, kind: "unparsed", due: null, rawText: nc.rawText };
+  }
+  // No commitment at all. A terminal/closure case correctly has none — do
+  // not flag it. An open case where I spoke last and made no promise is a
+  // real gap under my own rules, so that one is surfaced, amber.
+  if (c.nextAction?.kind === "closure" || c.isClosed) {
+    return { tier: 5, kind: "closure", due: null };
+  }
+  if (c.needsMyReply === false) {
+    return { tier: 3, kind: "spoke-last", due: null };
+  }
+  return { tier: 5, kind: "waiting", due: null };
+}
+
+const commitmentHref = (c) => `/case/${encodeURIComponent(c.caseNumber)}?tab=commitments`;
+
+function commitmentCell(c) {
+  const v = commitmentView(c);
+
+  if (v.kind === "closure") {
+    return h("span", { class: "dim", title: "Resolved — no follow-up owed", text: "—" });
+  }
+  if (v.kind === "waiting") {
+    return h("span", { class: "dim", title: "Waiting on the customer — no commitment currently owed", text: "—" });
+  }
+  if (v.kind === "spoke-last") {
+    // p2 is this app's amber chip tone (see fmt.priorityClass) — there is no
+    // literal "amber" chip class.
+    return h("a", { class: "due-cell", href: commitmentHref(c), title: "I spoke last and made no follow-up commitment" },
+      h("span", { class: "chip p2", text: "No follow-up committed" }));
+  }
+  if (v.kind === "unparsed") {
+    return h("a", { class: "due-cell", href: commitmentHref(c), title: v.rawText || "" },
+      h("span", { class: "chip purple", text: "Promised, no date" }));
+  }
+
+  // Dated: breached / today / atrisk / ontrack — all share the countdown
+  // chip shape, coloured by tier. The calendar date only earns its place
+  // underneath when the two clocks disagree by more than a business day
+  // (a weekend in the way); otherwise the countdown already says it plainly.
+  const tone = v.kind === "breached" ? "red" : (v.kind === "today" || v.kind === "atrisk") ? "amber" : "";
+  const label = v.kind === "breached"
+    ? "overdue " + bh.formatBusinessDuration(Math.abs(v.businessMs))
+    : bh.formatBusinessDuration(v.businessMs);
+  const diverges = Math.abs(v.wallMs - v.businessMs) > bh.BUSINESS_MS_PER_DAY;
+  return h("a", { class: "due-cell", href: commitmentHref(c), title: v.rawText || "" },
+    h("span", { class: `cd ${tone}`, dataset: { due: String(v.due) }, text: label }),
+    diverges ? h("span", { class: "abs", text: fmt.dateTimeShort(v.due) }) : null,
+  );
+}
+
+function commitmentCsv(c) {
+  const v = commitmentView(c);
+  if (v.kind === "closure" || v.kind === "waiting") return "";
+  if (v.kind === "spoke-last") return "No follow-up committed";
+  if (v.kind === "unparsed") return "Promised, no date";
+  const label = v.kind === "breached"
+    ? "overdue " + bh.formatBusinessDuration(Math.abs(v.businessMs))
+    : bh.formatBusinessDuration(v.businessMs);
+  return `${fmt.dateTime(v.due)} (${label})`;
+}
+
+/** Plain-text form for the row context menu's "Copy summary block". */
+function commitmentSummaryText(c) {
+  const v = commitmentView(c);
+  if (v.kind === "closure") return "none (resolved)";
+  if (v.kind === "waiting") return "none";
+  if (v.kind === "spoke-last") return "none — I spoke last with no follow-up committed";
+  if (v.kind === "unparsed") return `promised, no date — "${v.rawText}"`;
+  const label = v.kind === "breached"
+    ? "overdue " + bh.formatBusinessDuration(Math.abs(v.businessMs))
+    : bh.formatBusinessDuration(v.businessMs);
+  return `${fmt.dateTime(v.due)} (${label})`;
 }
 
 function columnLayout() {
@@ -381,7 +479,7 @@ function summaryBlock(c) {
     `Opened: ${c.createdDate ? `${fmt.dateTime(c.createdDate)} (${fmt.ageDays(c.createdDate).days}d old)` : "—"}`,
     `Last customer touch: ${c.lastCustomerTouch ? fmt.dateTime(c.lastCustomerTouch) : "—"}`,
     `Last my touch: ${c.lastMyTouch ? fmt.dateTime(c.lastMyTouch) : "—"}`,
-    `Next commitment: ${c._due ? `${fmt.dateTime(c._due)} (${fmt.countdown(c._due)})` : "none"}`,
+    `Next commitment: ${commitmentSummaryText(c)}`,
     `Quality (local estimate): ${c.iqs && c.iqs.overall !== null
       ? `${Math.round(c.iqs.overall)}/100 ${bandLabel(c.iqs.band)} — scored as ${KEYWORD_LABEL[c.iqs.keyword] || c.iqs.keyword}`
       : "not scored"}`,
@@ -452,6 +550,7 @@ export async function render(ctx, host, shell) {
         api.facets(state.scope === "open" ? undefined : "all").catch(() => null),
       ]);
       if (f) facets = f;
+      atRiskHours = Number(res.atRiskHours) || 4;
       state.all = decorate(res.cases || [], staleDays);
     } catch (err) {
       mount(tableWrap, banner("error", err.message || "Could not load the queue",
@@ -1126,13 +1225,28 @@ export async function render(ctx, host, shell) {
     copyToast(el.dataset.copy, "Case number copied");
   });
 
+  /**
+   * Business hours, not wall clock (v4 plan phase 2.3) — and re-derived live
+   * so a commitment ticks from on-track/at-risk into breached without
+   * waiting for the next full paint(). The abs-date sibling underneath is
+   * left alone: whether the two clocks diverge by more than a business day
+   * does not meaningfully change inside one 30s tick.
+   */
   function tickCountdowns() {
     const now = Date.now();
     for (const el of $$(".cd[data-due]", tableWrap)) {
       const due = Number(el.dataset.due);
-      el.textContent = fmt.countdown(due, now);
-      el.classList.toggle("red", due < now);
-      el.classList.toggle("amber", due >= now && due - now <= 4 * 3600 * 1000);
+      const r = bh.remaining(due, now);
+      if (!r) continue;
+      if (r.overdue) {
+        el.textContent = "overdue " + bh.formatBusinessDuration(Math.abs(r.businessMs));
+        el.classList.add("red");
+        el.classList.remove("amber");
+      } else {
+        el.textContent = bh.formatBusinessDuration(r.businessMs);
+        el.classList.toggle("amber", r.businessMs <= atRiskHours * 3600000);
+        el.classList.remove("red");
+      }
     }
   }
   const timer = setInterval(tickCountdowns, 30000);

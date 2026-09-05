@@ -304,6 +304,10 @@ export function render(ctx, host, shell) {
     atRiskHours: 4,
     loading: true,
     error: null,
+    // Phase 2.5's diagnostic. Loaded and painted independently of the main
+    // list — see loadCoverage()'s own comment for why it must not share
+    // load()'s try/catch.
+    coverage: null,
     // The URL wins when it says anything, so a shared link reproduces the view.
     // A bare /commitments falls back to however the page was last left.
     closed: "closed" in q ? q.closed === "1" : !!prefs.closed,
@@ -342,6 +346,20 @@ export function render(ctx, host, shell) {
       state.error = err;
     }
     state.loading = false;
+    paint();
+  }
+
+  /**
+   * Its own try/catch on purpose: load() collapses the whole page to an
+   * empty state on any throw, and a diagnostic panel failing is not a
+   * reason to hide the commitments list underneath it.
+   */
+  async function loadCoverage() {
+    try {
+      state.coverage = await api.commitmentsCoverage();
+    } catch {
+      state.coverage = null;
+    }
     paint();
   }
 
@@ -620,6 +638,47 @@ export function render(ctx, host, shell) {
           : null));
   }
 
+  /* -------------------------------------------------------------- coverage */
+
+  const COVERAGE_REASON_LABEL = { met: "met", breached: "breached", superseded: "superseded", dismissed: "dismissed" };
+
+  /**
+   * Phase 2.5's diagnostic panel. `no_promise_found` is singled out with its
+   * own action because it is the one worth reading by hand — it means no
+   * commitment has ever been recorded for that case, which is either
+   * genuinely nothing promised, or a phrasing that is slipping past TRIGGER
+   * in commitments.ts. The others (met/breached/superseded/dismissed) are
+   * expected states, not something to chase.
+   */
+  function coverageBanner() {
+    const cov = state.coverage;
+    if (!cov || !cov.gaps || !cov.gaps.length) return null;
+
+    const byReason = new Map();
+    for (const g of cov.gaps) {
+      const key = g.reason || "met";
+      if (!byReason.has(key)) byReason.set(key, []);
+      byReason.get(key).push(g.caseNumber);
+    }
+    const noPromise = byReason.get("no_promise_found") || [];
+    const knownText = [...byReason.entries()]
+      .filter(([k]) => k !== "no_promise_found")
+      .map(([k, nums]) => `${nums.length} ${COVERAGE_REASON_LABEL[k] || k}`)
+      .join(", ");
+
+    const message = `${cov.gaps.length} of ${cov.total} open cases have no live commitment right now` +
+      (knownText ? ` — ${knownText}` : "") +
+      (noPromise.length ? `${knownText ? ", " : " — "}${noPromise.length} with no promise detected in the history` : ".");
+
+    const targetCases = noPromise.length ? noPromise : cov.gaps.map((g) => g.caseNumber);
+    const actionLabel = noPromise.length
+      ? `Review ${noPromise.length} with no promise detected`
+      : `View all ${cov.gaps.length} in Queue`;
+    const href = `/?cases=${encodeURIComponent(targetCases.slice(0, 60).join(","))}&status=open`;
+
+    return banner("info", message, h("a", { class: "btn sm", href, text: actionLabel }));
+  }
+
   /* ---------------------------------------------------------------- paint */
 
   function paint(opts = {}) {
@@ -667,7 +726,8 @@ export function render(ctx, host, shell) {
       unparsed.length
         ? banner("warn",
             `${unparsed.length} promise${unparsed.length === 1 ? "" : "s"} could not be turned into a deadline. They are counted, not dropped — set a date or dismiss them.`)
-        : null);
+        : null,
+      coverageBanner());
 
     /* --- filtering -------------------------------------------------------- */
 
@@ -799,6 +859,7 @@ export function render(ctx, host, shell) {
 
   paint();
   load();
+  loadCoverage();
   ticker = setInterval(tick, TICK_MS);
 
   shell.setPageKeys((e) => {

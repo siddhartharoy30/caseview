@@ -33,6 +33,22 @@ const TRIGGER =
 const NEGATION =
   /\b(?:if\s+(?:you|we|i|the)|once\s+(?:you|we|i|the)|as\s+soon\s+as|when\s+(?:you|we|i|the)|unless|in\s+case|should\s+you|i\s+will\s+not|i\s+won't|i\s+had\s+(?:said|planned)|i\s+was\s+going\s+to)\b/i;
 
+/**
+ * A trailing conditional clause after an already-stated deadline does not
+ * undo the promise: "I will follow up by 6:00 PM once I hear back from
+ * engineering" is still a 6pm commitment, with the reason it might slip
+ * appended after the fact. NEGATION only disqualifies when it appears at or
+ * before the point the deadline itself was stated — a genuinely conditional
+ * promise, e.g. "once you send me the logs, I will follow up by 6:00 PM",
+ * where the "once" governs whether the commitment happens at all.
+ */
+function isConditionalNegation(sentence: string, timeEnd: number | null): boolean {
+  const neg = NEGATION.exec(sentence);
+  if (!neg) return false;
+  if (timeEnd === null) return true; // no stated deadline for it to trail — disqualify as before
+  return neg.index < timeEnd;
+}
+
 const MONTHS: Record<string, number> = {
   jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
   may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8,
@@ -68,7 +84,14 @@ function sentences(text: string): string[] {
     .filter(Boolean);
 }
 
-interface TimeOfDay { hour: number; minute: number; exact: boolean; zone: string | null; }
+interface TimeOfDay {
+  hour: number;
+  minute: number;
+  exact: boolean;
+  zone: string | null;
+  /** Index right after the matched time text, for the NEGATION position check below. */
+  end: number;
+}
 
 function parseTimeOfDay(s: string): TimeOfDay | null {
   const zoneMatch = /\b(EST|EDT|ET|CST|CDT|CT|MST|MDT|MT|PST|PDT|PT|UTC|GMT|IST|CET|CEST|BST|Eastern)\b/i.exec(s);
@@ -79,30 +102,33 @@ function parseTimeOfDay(s: string): TimeOfDay | null {
   if (ampm) {
     let hour = Number(ampm[1]) % 12;
     if (/^p/i.test(ampm[3])) hour += 12;
-    return { hour, minute: Number(ampm[2] || 0), exact: true, zone };
+    return { hour, minute: Number(ampm[2] || 0), exact: true, zone, end: ampm.index + ampm[0].length };
   }
 
   // "17:00", "by 1700 hrs"
   const h24 = /\b([01]?\d|2[0-3]):([0-5]\d)\b/.exec(s);
   if (h24) {
-    return { hour: Number(h24[1]), minute: Number(h24[2]), exact: true, zone };
+    return { hour: Number(h24[1]), minute: Number(h24[2]), exact: true, zone, end: h24.index + h24[0].length };
   }
 
   // Named times.
-  if (/\b(?:end\s+of\s+(?:the\s+)?day|eod|close\s+of\s+business|cob)\b/i.test(s)) {
-    return { hour: 18, minute: 0, exact: true, zone };
-  }
-  if (/\b(?:start\s+of\s+(?:the\s+)?day|sod|first\s+thing|beginning\s+of\s+the\s+day)\b/i.test(s)) {
-    return { hour: 9, minute: 0, exact: true, zone };
-  }
-  if (/\bnoon|midday\b/i.test(s)) {
-    return { hour: 12, minute: 0, exact: true, zone };
-  }
-  if (/\bmorning\b/i.test(s)) return { hour: 12, minute: 0, exact: false, zone };
-  if (/\bafternoon\b/i.test(s)) return { hour: 17, minute: 0, exact: false, zone };
-  if (/\bevening\b/i.test(s)) return { hour: 18, minute: 0, exact: false, zone };
+  const eod = /\b(?:end\s+of\s+(?:the\s+)?day|eod|close\s+of\s+business|cob)\b/i.exec(s);
+  if (eod) return { hour: 18, minute: 0, exact: true, zone, end: eod.index + eod[0].length };
 
-  return zone ? { hour: 18, minute: 0, exact: false, zone } : null;
+  const sod = /\b(?:start\s+of\s+(?:the\s+)?day|sod|first\s+thing|beginning\s+of\s+the\s+day)\b/i.exec(s);
+  if (sod) return { hour: 9, minute: 0, exact: true, zone, end: sod.index + sod[0].length };
+
+  const noon = /\bnoon|midday\b/i.exec(s);
+  if (noon) return { hour: 12, minute: 0, exact: true, zone, end: noon.index + noon[0].length };
+
+  const morning = /\bmorning\b/i.exec(s);
+  if (morning) return { hour: 12, minute: 0, exact: false, zone, end: morning.index + morning[0].length };
+  const afternoon = /\bafternoon\b/i.exec(s);
+  if (afternoon) return { hour: 17, minute: 0, exact: false, zone, end: afternoon.index + afternoon[0].length };
+  const evening = /\bevening\b/i.exec(s);
+  if (evening) return { hour: 18, minute: 0, exact: false, zone, end: evening.index + evening[0].length };
+
+  return zone ? { hour: 18, minute: 0, exact: false, zone, end: zoneMatch!.index + zoneMatch![0].length } : null;
 }
 
 interface CalendarDate { year: number; month: number; day: number; }
@@ -194,9 +220,10 @@ export function parseCommitments(body: string, commentDate: Date): ParsedCommitm
 
   for (const sentence of sentences(body)) {
     if (!TRIGGER.test(sentence)) continue;
-    if (NEGATION.test(sentence)) continue;
 
     const time = parseTimeOfDay(sentence);
+    if (isConditionalNegation(sentence, time?.end ?? null)) continue;
+
     let date: CalendarDate | null = parseCalendarDate(sentence, commentDate);
     let exact = time?.exact ?? false;
 
@@ -232,7 +259,7 @@ export function parseCommitments(body: string, commentDate: Date): ParsedCommitm
       continue;
     }
 
-    const resolvedTime: TimeOfDay = time || { hour: 18, minute: 0, exact: false, zone: null };
+    const resolvedTime: TimeOfDay = time || { hour: 18, minute: 0, exact: false, zone: null, end: -1 };
     if (!time) exact = false;
 
     out.push({ raw: sentence, dueAt: toInstant(date, resolvedTime), exactTime: exact });
