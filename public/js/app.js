@@ -12,7 +12,7 @@ import * as store from "./lib/store.js";
 import * as fmt from "./lib/fmt.js";
 import { toast, toastError, dialog, emptyState } from "./lib/ui.js";
 import { startNotifications } from "./lib/notify.js";
-import { route, setNotFound, onRouteChange, navigate, start, resolve, currentRoute } from "./router.js";
+import { route, setNotFound, onRouteChange, onQueryChange, navigate, start, resolve, currentRoute } from "./router.js";
 
 /* ------------------------------------------------------------- navigation */
 
@@ -67,6 +67,7 @@ const state = {
   sync: null,
   health: "warn",
   pageCleanup: null,
+  pageModule: null,
 };
 
 /** Pages register a keyboard handler here; the shell owns the global map. */
@@ -393,11 +394,13 @@ function registerRoutes() {
     host.scrollTop = 0;
     if (typeof state.pageCleanup === "function") { try { state.pageCleanup(); } catch { /* noop */ } }
     state.pageCleanup = null;
+    state.pageModule = null;
     pageKeys.handler = null;
     try {
       const mod = await loader();
       const cleanup = await mod.render(ctx, host, shell);
       state.pageCleanup = typeof cleanup === "function" ? cleanup : null;
+      state.pageModule = mod;
     } catch (e) {
       mount(host, emptyState({
         title: "This page failed to load",
@@ -432,6 +435,10 @@ function registerRoutes() {
   onRouteChange((ctx) => {
     markActive(ctx);
     document.title = titleFor(ctx);
+  });
+
+  onQueryChange((ctx) => {
+    if (typeof state.pageModule?.onQueryChange === "function") state.pageModule.onQueryChange(ctx);
   });
 }
 

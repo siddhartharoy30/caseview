@@ -18,8 +18,8 @@ export class ApiError extends Error {
   }
 }
 
-async function request(method, path, body) {
-  const opts = { method, credentials: "same-origin", headers: {} };
+async function request(method, path, body, { signal } = {}) {
+  const opts = { method, credentials: "same-origin", headers: {}, signal };
   if (body !== undefined) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
@@ -29,6 +29,10 @@ async function request(method, path, body) {
   try {
     res = await fetch(path, opts);
   } catch (err) {
+    // A caller-initiated abort (a new search superseding this one) is not a
+    // connection failure; let it propagate as-is so the caller can tell the
+    // two apart instead of showing an error for a cancellation it asked for.
+    if (err.name === "AbortError") throw err;
     throw new ApiError("Cannot reach the QView server", 0, err.message);
   }
 
@@ -105,9 +109,10 @@ export const api = {
   saveManualMetric: (payload) => request("POST",   "/api/metrics/manual", payload),
   deleteManualMetric: (p)     => request("DELETE", "/api/metrics/manual", p),
 
-  /* search + patterns */
-  search:   (q) => request("GET", "/api/search" + qs({ q })),
-  patterns: ()  => request("GET", "/api/patterns"),
+  /* search + patterns. search() takes an optional AbortSignal so a caller can
+     cancel a stale in-flight request once a newer one supersedes it. */
+  search:   (q, signal) => request("GET", "/api/search" + qs({ q }), undefined, { signal }),
+  patterns: ()          => request("GET", "/api/patterns"),
 
   /* settings + sync */
   settings:     ()      => request("GET",   "/api/settings"),

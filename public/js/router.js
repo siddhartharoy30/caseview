@@ -74,10 +74,10 @@ export function buildUrl(path, params) {
   return path + (qs ? "?" + qs : "");
 }
 
-export function navigate(url, { replace = false } = {}) {
+export function navigate(url, { replace = false, force = false } = {}) {
   const target = new URL(url, location.origin);
   const same = target.pathname === location.pathname && target.search === location.search;
-  if (same && !replace) return;
+  if (same && !force) return;
   if (replace) history.replaceState({}, "", target);
   else history.pushState({}, "", target);
   resolve();
@@ -85,19 +85,77 @@ export function navigate(url, { replace = false } = {}) {
 
 export function currentRoute() { return current; }
 
+// Re-entrancy guard: a handler that itself triggers a navigation (directly or
+// via a query-only update) could in principle spin forever. Past a shallow
+// depth, stop recursing and log loudly instead of exhausting the socket pool
+// the way the pre-fix search page did.
+let resolveDepth = 0;
+const recentUrls = [];
+
 export function resolve() {
-  const hit = match(location.pathname);
-  const ctx = {
-    path: location.pathname,
-    params: hit ? hit.params : {},
-    query: query(),
-    pattern: hit ? hit.route.pattern : null,
-  };
-  current = ctx;
-  if (onNavigate) onNavigate(ctx);
-  if (hit) hit.route.handler(ctx);
-  else if (notFound) notFound(ctx);
+  const url = location.pathname + location.search;
+  recentUrls.push(url);
+  if (recentUrls.length > 3) recentUrls.shift();
+
+  resolveDepth++;
+  if (resolveDepth > 2) {
+    console.error("[router] resolve() re-entrancy depth exceeded — stopping", {
+      pattern: current?.pattern,
+      recentUrls: [...recentUrls],
+    });
+    resolveDepth--;
+    return;
+  }
+
+  try {
+    const hit = match(location.pathname);
+    const prev = current;
+    const ctx = {
+      path: location.pathname,
+      params: hit ? hit.params : {},
+      query: query(),
+      pattern: hit ? hit.route.pattern : null,
+    };
+
+    // A query-only change (same pattern, same params) never remounts the
+    // page — that is what search.js typing into the box or a Queue filter
+    // dropdown would otherwise do on every keystroke/click. The page's own
+    // onQueryChange hook is given the chance to react (a page that already
+    // repaints itself from its own event handlers, like commitments.js or
+    // triage.js, needs none). Route handlers are only re-invoked when the
+    // pattern or params actually changed — a real navigation.
+    const sameRoute = prev && prev.pattern === ctx.pattern &&
+      JSON.stringify(prev.params) === JSON.stringify(ctx.params);
+    const queryOnly = sameRoute && JSON.stringify(prev.query) !== JSON.stringify(ctx.query);
+
+    current = ctx;
+    if (onNavigate) onNavigate(ctx);
+
+    if (queryOnly) {
+      if (onQueryOnly) onQueryOnly(ctx);
+    } else if (hit) {
+      hit.route.handler(ctx);
+    } else if (notFound) {
+      notFound(ctx);
+    }
+  } finally {
+    resolveDepth--;
+  }
 }
+
+let onQueryOnly = null;
+
+/**
+ * Registers a hook consulted on every query-only URL change (same route
+ * pattern and params, different query string). Remounting never happens for
+ * this case regardless of whether a hook is registered — a page whose own
+ * event handlers already repaint themselves (commitments.js, triage.js,
+ * patterns.js, caseDetail.js) needs no hook at all. Pages whose filter/sort
+ * paths depend on being told about the change (queue.js, search.js — the
+ * latter also for browser back/forward through its own search history)
+ * register one to react in place.
+ */
+export function onQueryChange(fn) { onQueryOnly = fn; }
 
 /**
  * Any in-app anchor is intercepted so the shell never reloads. External links,

@@ -179,6 +179,18 @@ const COLUMNS = [
 
 const COL_BY_ID = new Map(COLUMNS.map((c) => [c.id, c]));
 
+/**
+ * The live render() instance, so the router's query-only hook can reach it.
+ * Filter/sort changes write the query string via setQuery, which the router
+ * now treats as an in-place update rather than a remount (Phase 1) — this is
+ * what lets those paths keep working instead of going silent.
+ */
+let live = null;
+
+export function onQueryChange(ctx) {
+  live?.refreshFromQuery(ctx);
+}
+
 /** Saved views that ship with the app. `flag` filters on a derived row state. */
 const BUILTIN_VIEWS = [
   { id: "reply",   label: "Needs Reply",         params: { status: "open", flag: "reply" },     hint: "Customer replied and I have not answered" },
@@ -1125,6 +1137,41 @@ export async function render(ctx, host, shell) {
   }
   const timer = setInterval(tickCountdowns, 30000);
 
+  /* -------------------------------------------------------- query changes */
+
+  /**
+   * Re-derives filter/sort/view state from a new query string without a full
+   * remount. A scope change needs fresh data from the server (the previous
+   * fetch only covers the old scope); everything else is already held in
+   * `state.all` and just needs re-filtering and re-painting in place.
+   */
+  live = {
+    refreshFromQuery(ctx) {
+      const nq = ctx.query || {};
+      const prevScope = state.scope;
+      state.scope    = nq.status === "closed" || nq.status === "all" ? nq.status : "open";
+      state.priority = nq.priority || "";
+      state.account  = nq.account || "";
+      state.area     = nq.area || "";
+      state.flag     = nq.flag || "";
+      state.find     = nq.q || "";
+      state.sort     = parseSort(nq.sort);
+      state.group    = nq.group || "";
+      state.view     = nq.view || "";
+      state.caseSet  = parseCaseSet(nq.cases);
+      state.opened   = parseRange(nq.opened);
+      state.closed   = parseRange(nq.closed);
+      state.cstatus  = nq.caseStatus || "";
+
+      if (state.scope !== prevScope) {
+        load();
+      } else {
+        paintFilters();
+        paint();
+      }
+    },
+  };
+
   await load();
 
   /* --------------------------------------------------------------- unmount */
@@ -1135,5 +1182,6 @@ export async function render(ctx, host, shell) {
     document.removeEventListener("mousedown", onDocDown);
     window.removeEventListener("resize", closeMenu);
     shell.setPageKeys(null);
+    live = null;
   };
 }

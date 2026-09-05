@@ -155,6 +155,20 @@ function resultCard(row, term) {
 
 /* ------------------------------------------------------------------ render */
 
+/**
+ * The live render() instance, so the router's query-only hook can reach it.
+ * Needed for two things a plain "write then fetch" local handler cannot
+ * cover on its own: browser back/forward through this page's own search
+ * history (no local handler runs at all — the URL just changes under it),
+ * and avoiding a double request when a local handler's own setQuery call
+ * synchronously re-enters here before that handler gets to run its own fetch.
+ */
+let live = null;
+
+export function onQueryChange(ctx) {
+  live?.refreshFromQuery(ctx);
+}
+
 export function render(ctx, host, shell) {
   const prefs = store.get(KEY_PREFS, {});
   const q0 = (ctx.query && ctx.query.q) || "";
@@ -183,6 +197,7 @@ export function render(ctx, host, shell) {
   });
   let disposed = false;
   let seq = 0;
+  let inflight = null; // AbortController for the current /api/search call
 
   function savePrefs() {
     store.set(KEY_PREFS, { scope: state.scope, sort: state.sort });
@@ -190,10 +205,13 @@ export function render(ctx, host, shell) {
 
   /* ----------------------------------------------------------------- data */
 
-  async function run() {
+  /**
+   * The fetch-and-paint core, shared by both entry points below. Writes
+   * nothing to the URL — that is each entry point's own job, since a mount
+   * reading an already-current URL must not write it straight back out.
+   */
+  async function fetchResults() {
     const term = state.term.trim();
-    setQuery({ q: term || null, scope: state.scope === "all" ? null : state.scope,
-      sort: state.sort === "relevance" ? null : state.sort });
 
     if (term.length < MIN_CHARS) {
       state.rows = []; state.ran = ""; state.tookMs = null;
@@ -205,16 +223,25 @@ export function render(ctx, host, shell) {
     const mine = ++seq;
     state.loading = true;
     paint();
+
+    // A new search — typing outruns the network on a short term — supersedes
+    // whatever is still in flight. Aborting it frees the socket immediately
+    // instead of leaving it to finish and be discarded by the seq check below.
+    inflight?.abort();
+    const controller = new AbortController();
+    inflight = controller;
+
     try {
-      const data = await api.search(term);
-      // A slow answer to an abandoned query must not overwrite a fast answer to
-      // the current one. Typing outruns the network on a short term.
+      const data = await api.search(term, controller.signal);
       if (disposed || mine !== seq) return;
       state.rows = data.results || [];
       state.tookMs = typeof data.tookMs === "number" ? data.tookMs : null;
       state.ran = term;
       state.error = null;
     } catch (err) {
+      // Our own abort, not a real failure — the request that superseded this
+      // one owns the loading state and the eventual paint().
+      if (err.name === "AbortError") return;
       if (disposed || mine !== seq) return;
       state.error = err;
     }
@@ -222,7 +249,54 @@ export function render(ctx, host, shell) {
     paint();
   }
 
-  const runSoon = debounce(run, DEBOUNCE_MS);
+  /** Mount path: state already reflects the URL that was just navigated to. */
+  function runFromUrl() {
+    return fetchResults();
+  }
+
+  /**
+   * Typing/toolbar path: writes the query string and nothing else. The write
+   * lands synchronously on router.js's onQueryChange hook below — refreshFromQuery
+   * — which is what actually fetches. Calling fetchResults() from here too
+   * would fire two requests for one keystroke, one of them instantly aborted
+   * by the other; routing every commit through the same hook that also
+   * serves browser back/forward keeps it to exactly one.
+   *
+   * `push` distinguishes a deliberate "go search for this" (Enter, the Search
+   * button) from everything else (each keystroke, a scope/sort toggle): only
+   * the former is worth a history entry of its own, or three searches and
+   * the back button would only ever land one step behind the page before
+   * search, not on the searches in between.
+   */
+  function runFromInput({ push = false } = {}) {
+    const term = state.term.trim();
+    setQuery({ q: term || null, scope: state.scope === "all" ? null : state.scope,
+      sort: state.sort === "relevance" ? null : state.sort }, { replace: !push });
+  }
+
+  /**
+   * Fires for every query-only change to this page: a local commit above
+   * (setQuery resolves synchronously into this same call stack), or the user
+   * navigating with the browser's back/forward through prior searches, which
+   * runs no local handler at all. Only a term change needs the server —
+   * scope and sort are filters over rows already in hand (see the file-header
+   * note), so those repaint state.rows in place instead of re-asking for the
+   * same answer.
+   */
+  function refreshFromQuery(ctx) {
+    const nq = ctx.query || {};
+    state.term  = nq.q || "";
+    state.scope = nq.scope || prefs.scope || "all";
+    state.sort  = nq.sort || prefs.sort || "relevance";
+    input.value = state.term;
+    savePrefs();
+    if (state.term.trim() !== state.ran.trim()) fetchResults();
+    else paint();
+  }
+
+  const runSoon = debounce(runFromInput, DEBOUNCE_MS);
+
+  live = { refreshFromQuery };
 
   /* -------------------------------------------------------------- toolbar */
 
@@ -246,11 +320,11 @@ export function render(ctx, host, shell) {
         state.term
           ? h("button", {
               class: "sr-clear", type: "button", title: "Clear", text: "×",
-              onclick: () => { state.term = ""; input.value = ""; input.focus(); run(); },
+              onclick: () => { state.term = ""; input.value = ""; input.focus(); runFromInput(); },
             })
           : null),
       h("div", { class: "tb-label", text: "Scope" }),
-      segmented(SCOPES, state.scope, (id) => { state.scope = id; savePrefs(); run(); }),
+      segmented(SCOPES, state.scope, (id) => { state.scope = id; savePrefs(); runFromInput(); }),
       h("div", { class: "tb-label", text: "Sort" }),
       segmented(SORTS, state.sort, (id) => { state.sort = id; savePrefs(); paint(); setQuery({ sort: id === "relevance" ? null : id }); }));
   }
@@ -294,7 +368,7 @@ export function render(ctx, host, shell) {
         message: state.error.message || "The server did not answer.",
         iconName: "alert",
         kind: "error",
-        action: button("Try again", { kind: "primary", onclick: () => run() }),
+        action: button("Try again", { kind: "primary", onclick: () => runFromUrl() }),
       });
     }
 
@@ -309,7 +383,7 @@ export function render(ctx, host, shell) {
           : "Nothing in the cached history contains that. If the case is older than the sync window it was never pulled down — widen the closed-case window in Settings and run a full resync.",
         iconName: "search",
         action: hidden
-          ? button("Include closed cases", { kind: "primary", onclick: () => { state.scope = "all"; savePrefs(); run(); } })
+          ? button("Include closed cases", { kind: "primary", onclick: () => { state.scope = "all"; savePrefs(); runFromInput(); } })
           : button("Open Settings", { onclick: () => shell.navigate("/settings") }),
       });
     }
@@ -348,10 +422,10 @@ export function render(ctx, host, shell) {
 
   input.addEventListener("input", () => { state.term = input.value; runSoon(); });
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); run(); }
+    if (e.key === "Enter") { e.preventDefault(); runFromInput({ push: true }); }
     if (e.key === "Escape" && input.value) {
       e.preventDefault();
-      state.term = ""; input.value = ""; run();
+      state.term = ""; input.value = ""; runFromInput();
     }
   });
 
@@ -359,7 +433,7 @@ export function render(ctx, host, shell) {
     pageHead(
       "Search",
       "Full text across every subject, description and comment in the local cache.",
-      [button("Search", { small: true, iconPaths: ICON_SEARCH, onclick: () => run() })]),
+      [button("Search", { small: true, iconPaths: ICON_SEARCH, onclick: () => runFromInput({ push: true }) })]),
     bannerHost,
     bodyHost));
 
@@ -367,7 +441,7 @@ export function render(ctx, host, shell) {
     "This searches the local cache only. Anything never synced — closed beyond the retention window, or owned by someone else — is not in here."));
 
   paint();
-  if (q0.trim().length >= MIN_CHARS) run();
+  if (q0.trim().length >= MIN_CHARS) runFromUrl();
   input.focus();
 
   // `/` is taken by the global find; on this page the search box is the find,
@@ -379,6 +453,8 @@ export function render(ctx, host, shell) {
 
   return () => {
     disposed = true;
+    inflight?.abort();
     shell.setPageKeys(null);
+    live = null;
   };
 }
