@@ -65,7 +65,7 @@
       <span id="riskBadgeText"></span>
     </button>
 
-    <div class="clocks">
+    <div class="clocks" id="clocksToggle" title="Open the time zone strip" role="button" tabindex="0">
       <div class="clock"><span>EST</span> <b id="clockEst">--:--</b></div>
       <div class="clock"><span>UTC</span> <b id="clockUtc">--:--</b></div>
     </div>
@@ -97,6 +97,8 @@
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 113.2 2.4c-.8.3-1.2 1-1.2 1.8v.3" stroke-linecap="round"/><path d="M12 17.2v.01" stroke-linecap="round" stroke-width="2.4"/></svg>
     </button>
   </header>
+
+  <div class="tz-strip" id="tzStrip" hidden></div>
 
   <main class="main" id="main"></main>
 </div>

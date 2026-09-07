@@ -215,8 +215,8 @@ button:focus-visible,
 #app {
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
-  grid-template-rows: var(--topbar-h) 1fr;
-  grid-template-areas: "sidebar topbar" "sidebar main";
+  grid-template-rows: var(--topbar-h) auto 1fr;
+  grid-template-areas: "sidebar topbar" "sidebar tzstrip" "sidebar main";
   height: 100vh;
   transition: grid-template-columns var(--speed) ease;
 }
@@ -462,7 +462,13 @@ body.sidebar-collapsed .nav-item { position: relative; }
   font-size: 11px;
   color: var(--text-3);
   white-space: nowrap;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  margin: -4px -6px;
 }
+.clocks:hover { background: var(--surface-2); }
+.clocks:focus-visible { outline: 2px solid var(--blue-2); outline-offset: 2px; }
 
 .clock b {
   color: var(--text);
@@ -471,6 +477,94 @@ body.sidebar-collapsed .nav-item { position: relative; }
 }
 
 .clock span { color: var(--text-4); }
+
+/* Time zone strip (v4 phase 7) ---------------------------------------------- */
+
+.tz-strip {
+  grid-area: tzstrip;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  padding: var(--space-3) var(--space-4);
+  max-height: 45vh;
+  overflow-y: auto;
+}
+
+.tz-strip-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.tz-scrubber { flex: 1 1 240px; min-width: 160px; accent-color: var(--blue-2); }
+
+.tz-rows { display: flex; flex-direction: column; gap: var(--space-2); }
+
+.tz-row {
+  display: grid;
+  grid-template-columns: 16px minmax(90px, 140px) minmax(90px, 120px) 1fr 24px;
+  align-items: center;
+  gap: var(--space-3);
+}
+.tz-row.dragging { opacity: .4; }
+.tz-row.drag-over { outline: 1px dashed var(--border-2); }
+
+.tz-row-name { font-size: var(--fs-table-cell); color: var(--text); }
+.tz-row-abbr { font-size: 10.5px; }
+
+.tz-row-clock { font-size: var(--fs-body); font-variant-numeric: tabular-nums; }
+.tz-row-date { font-size: 10.5px; }
+
+.tz-bar {
+  position: relative;
+  height: 14px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.tz-bar-now {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: var(--red);
+  transform: translateX(-1px);
+}
+
+.tz-row-remove { width: 22px; height: 22px; }
+
+.tz-picker { position: relative; display: flex; align-items: center; gap: var(--space-2); }
+.tz-picker-input { width: 220px; }
+.tz-picker-results {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: var(--z-dropdown);
+  width: 260px;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-3);
+}
+.tz-picker-item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: none;
+  color: var(--text-2);
+  text-align: left;
+  font-size: var(--fs-table-cell);
+  cursor: pointer;
+}
+.tz-picker-item:hover { background: var(--surface-2); color: var(--text); }
+
+@media (max-width: 700px) {
+  .tz-row { grid-template-columns: 16px minmax(70px, 1fr) minmax(70px, 1fr); }
+  .tz-bar, .tz-row-remove { display: none; }
+}
 
 .sync-chip {
   display: flex;

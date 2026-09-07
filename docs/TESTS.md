@@ -414,3 +414,93 @@ device. The 5-minutes-of-offline auto-off and the once-per-transition
 alert dedup were reviewed by hand but not exercised against a real
 multi-minute offline period or a real position change sequence, since
 neither occurred naturally during the live testing window.
+
+## Phase 7 — time zone strip
+
+Files: `public/js/lib/tz.js` (new), `public/js/lib/tzstrip.js` (new),
+`public/index.html`, `public/js/app.js`, `public/css/app.css`,
+`docs/PLAN_V4.md` (new, records the SavvyCal/holiday/account-pinning
+decisions this phase asks to write down).
+
+### 7.1 — zone list and formatting, no network call
+
+Ran `tz.js`'s functions directly under plain Node (no browser needed --
+they only touch `Intl`): `zoneList()` returned all 418 real IANA zones;
+`timeLabel`/`offsetLabel`/`dateLabel` against a fixed instant
+(2026-09-07T18:00:00Z) correctly returned DST-aware abbreviations for four
+different zones (EDT for New York, GMT+5:30 for Kolkata, PDT for Los
+Angeles, UTC) -- confirming the abbreviation is computed live from the
+real tz database rather than a hardcoded EST/PST table that would be wrong
+half the year. `commitmentPhrase()` produced both canonical forms exactly
+("6:00 PM EDT on Tuesday, September 8, 2026." for a future date, "2:00 PM
+EDT today, Monday, September 7, 2026." for the same day) against
+`commitments.ts`'s own documented phrasings.
+
+### 7.2 — a real layout bug: the strip broke the shell's grid
+
+**Repro (pre-fix).** `#app`'s CSS grid uses named areas
+(`"sidebar topbar" "sidebar main"`) with two explicit rows. Inserting
+`<div id="tzStrip">` as a third direct child between `<header>` and
+`<main>` gave the browser an element with no matching named area; it
+landed as an implicit grid item overlapping the sidebar column instead of
+spanning the content area. First screenshot after wiring the strip in
+showed the rows stacked oddly under the sidebar nav with disconnected
+remove buttons.
+
+**Fix:** added a third grid row (`auto`) and a `tzstrip` named area
+between `topbar` and `main`; `.tz-strip { grid-area: tzstrip; }`.
+Re-screenshotted: strip now renders full-width directly below the topbar,
+correctly positioned, with `[hidden]` collapsing it to zero height when
+closed (confirmed via a fresh headless Chrome profile with no cache,
+after the first screenshot's oddity turned out to need this fix rather
+than being a caching artifact).
+
+### 7.3 — coverage-window and per-zone shading, live
+
+With the strip open against four real zones (ET, UTC, IST, PT), each row's
+24h bar showed a distinct green coverage-window band correctly shifted for
+that zone's own offset from ET -- including IST's fractional (+5:30)
+offset landing the band in a different, correctly-computed position than
+the whole-hour zones. A red "now" tick appeared at the correct position on
+every row simultaneously. Weekend greying was not separately exercised
+(the test day was a Monday), but the `isWeekendIn()` check driving it is
+the same weekday parts already verified in 7.1.
+
+### 7.4 — a real bug caught in the zone picker: live-tick wiped in-progress search
+
+**Repro (pre-fix), via a scripted search:** opened the picker (40 items,
+correct initial cap), typed "London," and both the filtered-results check
+and the resulting add-a-zone click showed the *unfiltered* list was still
+active -- searching "London" produced Africa/Abidjan, Accra, Addis Ababa...
+and clicking "the first result" added Abidjan, not London. Root cause:
+`startLive()`'s 1s tick repainted the entire strip head unconditionally,
+rebuilding the picker's `<input>` (and its listener) out from under an
+in-progress search on every tick.
+
+**Fix:** skip the tick while the picker is open, and drop the tick
+interval to 30s (a clock never needed 1s precision; that was an unexamined
+default, not a requirement). Re-ran the identical scripted search after
+the fix: "London" correctly filtered to exactly `Europe/London`, and
+clicking it added a "London" row with the correct GMT+1 offset and a
+correctly-shifted coverage band -- confirmed by screenshot.
+
+### 7.5 — drag reorder
+
+Lifted from `queue.js`'s `openColumnPicker()` into a shared
+`tz.makeDraggableList()` rather than a third hand-rolled copy, per the
+plan. Not exercised end-to-end with a real drag gesture in this session
+(headless Chrome scripted drag-and-drop for HTML5 DnD specifically is
+unreliable to simulate via CDP `Input.dispatchMouseEvent` without a
+purpose-built sequence, and this was judged not worth the time against
+the phases still ahead) -- reviewed by hand against the working
+`openColumnPicker()` implementation it was lifted from instead.
+
+### 7.6 — descoped, disclosed in docs/PLAN_V4.md
+
+SavvyCal was never called (Intl covers everything the widget needs, per
+the plan's own anticipated outcome); holiday shading was not built
+(would disagree with every other business-hours calculation in the app,
+none of which handle holidays either); account-timezone pinning was not
+wired to case context (no timezone field exists anywhere in the schema to
+derive from, and the manual per-account pin fallback itself was cut for
+time). All three recorded in `docs/PLAN_V4.md`.

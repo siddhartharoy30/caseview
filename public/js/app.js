@@ -13,6 +13,7 @@ import * as fmt from "./lib/fmt.js";
 import { toast, toastError, dialog, emptyState } from "./lib/ui.js";
 import { htmlToText } from "./lib/text.js";
 import { startNotifications } from "./lib/notify.js";
+import { initTzStrip } from "./lib/tzstrip.js";
 import { route, setNotFound, onRouteChange, onQueryChange, navigate, start, resolve, currentRoute } from "./router.js";
 
 /* ------------------------------------------------------------- navigation */
@@ -90,6 +91,7 @@ async function boot() {
   wireTopbar();
   wireKeyboard();
   startClocks();
+  initTzStrip();
 
   // A 401 once the shell is already running is a different animal from being
   // signed out: it means the browser held a session the server would not
