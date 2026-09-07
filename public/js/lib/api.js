@@ -131,6 +131,9 @@ export const api = {
   eventsFeed: (opts) => request("GET", "/api/events" + qs(opts || {})),
   markEventsRead: (id) => request("POST", "/api/events/read", id ? { id } : {}),
 
+  /* phone queue monitor (v4 phase 6) */
+  phoneBoard: () => request("GET", "/api/phone/board"),
+
   /* AI draft — generates into the same staging area the Draft tab already owns.
      Nothing here sends anything; every result still goes through the tab's own
      Copy button. */

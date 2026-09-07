@@ -501,6 +501,14 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   coverageDryRun: "true",
   coverageActiveChannelId: "",
   coverageTriggerStatuses: "Waiting for Rubrik Support,Reopen,New,Assigned",
+
+  // v4 phase 6: exactly how this name renders on the AMER phone board --
+  // this map is the /api/settings allowlist, so this is genuinely "config,"
+  // not a hardcoded constant, per the project's own convention for anything
+  // a board-rendering change might require adjusting.
+  phoneBoardName: "Siddhartha",
+  phoneMonitorEnabled: "false",       // master toggle, off by default
+  phoneAlertThreshold: "3",
 };
 
 export function getSetting(key: string): string {

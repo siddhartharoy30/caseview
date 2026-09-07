@@ -77,6 +77,7 @@ import {
 import { resolveRange, scorecard, saveManualMetric, deleteManualMetric } from "./metrics";
 import { syncOnce, startSync, reconcileCommitments } from "./sync";
 import { listEvents, unreadEventCount, markEventsRead, sendWebhookTest, EventKind } from "./notify";
+import { getPhoneBoard, positionOf } from "./phone";
 import { log, errText } from "./log";
 
 const app = express();
@@ -839,6 +840,23 @@ app.post("/api/intelligence/repair-reply", requireAuth, async (req, res) => {
   }
 });
 
+/* ---------------------------------------------------------------- phone */
+
+/**
+ * `getPhoneBoard()` itself enforces the 10s-minimum-interval/serve-cached
+ * contract, so this route is a thin proxy: no request from the browser (the
+ * monitor toggled off, or no tab open) means no upstream fetch at all.
+ */
+app.get("/api/phone/board", requireAuth, noStore, async (_req, res) => {
+  const board = await getPhoneBoard();
+  const myName = getSetting("phoneBoardName");
+  res.json({
+    ...board,
+    myName,
+    myPosition: board.ok ? positionOf(board, myName) : null,
+  });
+});
+
 /* ------------------------------------------------------------------ health */
 
 /**
@@ -888,6 +906,7 @@ const SPA_ROUTES = [
   "/search",
   "/patterns",
   "/settings",
+  "/phone",
 ];
 
 // Real URLs must survive a hard refresh, so every client route serves the shell.

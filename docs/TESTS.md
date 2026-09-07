@@ -355,3 +355,62 @@ reaches that branch.
 
 First-poll-seeds-only (client, unchanged) and `MAX_PER_POLL = 3` (client,
 unchanged) were left alone per the plan's explicit "keep what works."
+
+## Phase 6 — phone queue monitor
+
+Files: `src/phone.ts` (new), `src/server.ts`, `src/db.ts`, `public/js/app.js`,
+`public/js/lib/api.js`, `public/js/pages/phone.js` (new), `public/css/app.css`,
+`docs/PHONE.md` (new). Full discovery notes in `docs/PHONE.md` — this entry
+covers what was run and observed.
+
+### 6.1 — parser, against a real fetched board snapshot
+
+Fetched the live board (`http://reportrunner.colo.rubrik.com/cgi-bin/amer/phone_now_et.pl`)
+from the VM, saved the raw HTML, and ran `src/phone.ts`'s exact row/header/time
+regexes against it directly (not the running server — the regex logic in
+isolation) before trusting it in the app: all 7 real rows parsed correctly
+(name, status class, status text, duration, federal flag), including a
+`fed` row and a non-`available` (`zoom`) row; header queued-counts and the
+board clock both parsed correctly.
+
+### 6.2 — position, cross-validated against Case Desk twice
+
+1. Computed position from the parsed board snapshot above:
+   `Siddhartha` = position 2 of 5 non-federal agents.
+2. Independently fetched Case Desk's own live `/api/phone-queue` a few
+   minutes later (real board state, not a shared payload) and applied the
+   same filter -- also position 2.
+3. Once the running `/phone` page was live end to end, the position card
+   showed `#2`, "1" ahead of me, and the board table's pinned row agreed --
+   matching both independent computations above for the same live board
+   state.
+
+### 6.3 — polling discipline
+
+Checked `data/qview.log` for `phone.` entries across the whole session:
+zero `phone.board_fetched` lines while the monitor was off, exactly one the
+moment it was switched on (confirmed via the running dev server, not just
+code review) -- "off means zero requests" is real, not aspirational. No
+agent names appeared in the log at all (info level logs `agents`/`queued`/
+`queuedFederal` counts only; names are `debug`-only, per the plan's note
+that `log.ts`'s redaction matches key names like `token`/`secret`, not
+`name`, so this needed a deliberate choice in `phone.ts`).
+
+### 6.4 — the page, live
+
+Screenshotted both states: monitor off (empty-state card, no board), and
+monitor on against the real board (position card, my row highlighted in
+the table, Federal/AMER badges distinct from color alone, status chips
+matching the source page's own colour grouping). Toggling the checkbox
+fired a real toast ("You're 2 for the phone queue") from the alert logic,
+confirming the escalating-threshold code path executes against live data
+without waiting for a manufactured test position.
+
+### 6.5 — not verified in this session
+
+The chime (Web Audio, no asset file, same construction as phase 5's) was
+not confirmed to actually produce audio -- headless Chrome has no audio
+device. The 5-minutes-of-offline auto-off and the once-per-transition
+alert dedup were reviewed by hand but not exercised against a real
+multi-minute offline period or a real position change sequence, since
+neither occurred naturally during the live testing window.

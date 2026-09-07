@@ -27,6 +27,7 @@ const ICONS = {
   iqs:         ["M4 17a8 8 0 0 1 16 0", "M12 17l4.2-4.6", "circle:12,17,1.3"],
   search:      ["circle:11,11,7", "M20 20l-3.5-3.5"],
   patterns:    ["circle:6,7,2.4", "circle:17,7,2.4", "circle:11.5,17,2.4", "M8.1,8.4 L10.2,14.8", "M15,8.6 L12.8,14.8"],
+  phone:       ["M6.5 3h3l1.5 4-2 1.5a11 11 0 005 5l1.5-2 4 1.5v3a2 2 0 01-2.2 2A17 17 0 014.5 5.2 2 2 0 016.5 3z"],
   settings:    ["circle:12,12,3", "M12 3v2.2M12 18.8V21M4.2 7.5l1.9 1.1M17.9 15.4l1.9 1.1M4.2 16.5l1.9-1.1M17.9 8.6l1.9-1.1"],
 };
 
@@ -37,6 +38,7 @@ const NAV = [
   { id: "commitments", label: "Commitments", path: "/commitments", key: "c", badge: "commitments" },
   { id: "timeoff",     label: "Time Off",    path: "/timeoff" },
   { id: "escalations", label: "Escalations", path: "/escalations", key: "e", badge: "escalations" },
+  { id: "phone",       label: "Phone Queue", path: "/phone" },
   { section: "Insight" },
   { id: "metrics",     label: "Scorecard",   path: "/metrics",     key: "m" },
   { id: "iqs",         label: "Quality",     path: "/iqs",         key: "i" },
@@ -58,6 +60,7 @@ const PAGES = {
   search:      () => import("./pages/search.js"),
   patterns:    () => import("./pages/patterns.js"),
   settings:    () => import("./pages/settings.js"),
+  phone:       () => import("./pages/phone.js"),
 };
 
 /* ----------------------------------------------------------------- state */
@@ -499,6 +502,7 @@ function registerRoutes() {
   route("/search", page(PAGES.search));
   route("/patterns", page(PAGES.patterns));
   route("/settings", page(PAGES.settings));
+  route("/phone", page(PAGES.phone));
 
   setNotFound((ctx) => {
     mount($("#main"), emptyState({

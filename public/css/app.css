@@ -667,6 +667,8 @@ body.sidebar-collapsed .nav-item { position: relative; }
 .chip.neutral      { background: var(--surface-3);                                   color: var(--text-3); }
 .chip.purple       { background: color-mix(in srgb, var(--purple) 20%, transparent); color: var(--purple); }
 .chip.warn         { background: color-mix(in srgb, var(--amber) 20%, transparent);  color: var(--amber); }
+.chip.bad          { background: color-mix(in srgb, var(--red) 20%, transparent);    color: var(--red); }
+.chip.info         { background: color-mix(in srgb, var(--blue) 20%, transparent);   color: var(--blue); }
 
 .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .muted { color: var(--text-3); }
@@ -5073,4 +5075,43 @@ table.tbl th.check-col input {
   line-height: 1.7;
   white-space: pre-wrap;
   color: var(--text);
+}
+
+/* ---- phone queue monitor (v4 phase 6) ------------------------------------ */
+
+.phn-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.phn-status-card { margin-bottom: var(--space-4); }
+
+.phn-status-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) repeat(3, minmax(120px, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.phn-position-num {
+  font-family: var(--mono);
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--text);
+  margin-top: var(--space-1);
+}
+.phn-position-num.is-urgent { color: var(--red); }
+
+.phn-fact { min-width: 0; }
+.phn-fact > div:not(.eyebrow) { margin-top: var(--space-1); }
+
+.phn-board tbody tr.phn-me-row {
+  background: color-mix(in srgb, var(--blue-2) 10%, transparent);
+  font-weight: 600;
+}
+
+@media (max-width: 700px) {
+  .phn-status-grid { grid-template-columns: 1fr 1fr; }
 }
