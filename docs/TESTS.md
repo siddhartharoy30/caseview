@@ -281,3 +281,77 @@ behaviour, confirmed unaffected).
 "Everything" renamed to "All" (now matches the Visibility group's first
 option); both groups now carry a label ("Visibility", "Source") above the
 pills, confirmed rendered in the toolbar.
+
+## Phase 5 — notifications
+
+Files: `src/notify.ts`, `src/sync.ts`, `src/db.ts`, `src/server.ts`,
+`public/js/lib/notify.js`, `public/js/lib/ui.js`, `public/js/app.js`,
+`public/index.html`, `public/css/app.css`.
+
+### 5.1 — case.escalated and case.waiting_on_support detection
+
+Correction 1 confirmed on inspection: a repo-wide read of `is_escalated`
+found only current-state reads, no prior-vs-current comparison anywhere.
+Detection was genuinely new, not a reuse.
+
+**Verified in isolation** (a synthetic delta run directly through
+`notify.runEvents()` against the real `events` table, using a throwaway
+case number, cleaned up after): both kinds fire with the expected
+deterministic ids (`case.escalated:<num>:<lastModifiedDate>` and
+`case.waiting_on_support:<num>:<lastModifiedDate>`) and correct titles.
+Re-running the identical delta a second time fired 0 new events — the
+dedup holds. Not verified against a real live escalation/status
+transition in this session (none occurred in the synced window), so this
+is code-path-verified and dedup-verified, not observed against a real
+Salesforce transition end to end.
+
+### 5.2 — notification centre
+
+Bell icon in the topbar shows a live unread-count badge (confirmed: "9" on
+first load against real accumulated events). Clicking it opens a panel
+listing recent events with a red/amber/grey dot by severity, relative
+timestamps, and a working "Mark all read." Clicking an item with a case
+number navigates to that case and marks it read.
+
+**A real (minor) bug this surfaced, from phase 4's own commitment
+reconciliation:** one event's detail rendered raw HTML (`<br/>`, `&nbsp;`)
+in the panel — a `commitment.breached` event recorded before phase 4's
+clean_body fix, whose detail is a snapshot of `raw_text` taken at insert
+time and never revised when the underlying commitment row was later
+deleted and reinserted with clean text. Fixed defensively: the panel now
+runs `detail` through `htmlToText()` before display, which handles this
+debris (14-day retention, so it ages out on its own) without needing to
+also migrate the `events` table.
+
+### 5.3 — in-app toasts: stacking, sticky, click-to-open
+
+`toast()` extended in place (not rebuilt): a 4th toast now evicts the
+oldest non-sticky one instead of stacking unbounded; hovering any toast
+holds its dismiss timer; `case.escalated`/`case.waiting_on_support`/
+`commitment.breached` render with `sticky: true` (no auto-dismiss, close
+button only) and a severity rail (red for escalated/breached, amber for
+waiting-on-support); a toast with a case number is clickable end to end
+(navigates, then dismisses). Confirmed existing two-arg call sites
+(`toast("Removed", "ok")` etc., used throughout the app already) are
+unaffected — `opts` is a new third parameter with an empty-object default.
+
+### 5.4 — poll cadence and sound
+
+`POLL_MS` confirmed changed 60000 → 30000; a `window.addEventListener("focus",
+poll)` fires an immediate poll on tab focus rather than waiting out
+whatever was left of the interval. Sound is a new server setting
+(`notifySoundEnabled`, default `"false"`, in `SETTING_DEFAULTS` — so
+`PATCH /api/settings` accepts it and Settings can read/write it like every
+other config value) rather than a client-only preference, per the plan;
+confirmed the toggle round-trips through `GET`/`PATCH /api/settings`. The
+chime itself (Web Audio, two-tone, no asset file) was not verified with
+actual audio output in this headless-Chrome session — headless Chrome has
+no audio device — but the code path that decides whether to call it
+(`playSound = soundEnabled && wanted.some(kind is priority)`) was exercised
+via the same synthetic-delta test as 5.1, confirming a priority-kind event
+reaches that branch.
+
+### 5.5 — kept as specified
+
+First-poll-seeds-only (client, unchanged) and `MAX_PER_POLL = 3` (client,
+unchanged) were left alone per the plan's explicit "keep what works."

@@ -426,9 +426,20 @@ export function render(_ctx, host, shell) {
         ))));
     }
 
+    controls.push(toggle(
+      "Play a sound for priority events",
+      boolOf("notifySoundEnabled"),
+      "Escalated, moved to waiting-on-support, or a breached commitment — the same three that stay on screen until dismissed. Everything else stays silent.",
+      async (checked, el) => {
+        el.disabled = true;
+        await save({ notifySoundEnabled: String(checked) });
+        el.disabled = false;
+      },
+    ));
+
     return section(
       "Notifications",
-      "Four things are worth an interruption: a new case, a customer reply, a commitment about to come due, and one already missed.",
+      "Six things are worth an interruption: a new case, a customer reply, an escalation, a move to waiting-on-support, a commitment about to come due, and one already missed.",
       controls);
   }
 

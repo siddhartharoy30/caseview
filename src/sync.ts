@@ -34,7 +34,7 @@ import { extractArtifacts, errorSignature } from "./artifacts";
 import { parseCommitments } from "./commitments";
 import { parseEmailBody, EMAIL_PARSER_VERSION } from "./emailBody";
 import { scoreCases } from "./iqs/store";
-import { sweepTransitions } from "./coverage";
+import { sweepTransitions, triggerStatuses } from "./coverage";
 import { zoned } from "./businessHours";
 import { log, errText } from "./log";
 
@@ -487,14 +487,23 @@ async function runSync(full: boolean): Promise<SyncResult> {
     // still the before-state. Only the cases in this batch are looked at.
     const priorRows = db
       .prepare(
-        "SELECT case_number, needs_my_reply, status FROM cases WHERE id IN (" +
+        "SELECT case_number, needs_my_reply, status, is_escalated FROM cases WHERE id IN (" +
           caseIds.map(() => "?").join(",") +
           ")",
       )
-      .all(...caseIds) as Array<{ case_number: string; needs_my_reply: number; status: string | null }>;
+      .all(...caseIds) as Array<{
+      case_number: string;
+      needs_my_reply: number;
+      status: string | null;
+      is_escalated: number;
+    }>;
     const priorSeen = new Set(priorRows.map((r) => r.case_number));
     const priorNeedsReply = new Map(priorRows.map((r) => [r.case_number, !!r.needs_my_reply]));
     const priorStatus = new Map(priorRows.map((r) => [r.case_number, r.status]));
+    // Phase 5, correction 1: case.escalated detection did not exist anywhere
+    // -- is_escalated was read (current state) but never diffed against its
+    // prior value. Same before/after-map pattern as needs_my_reply above.
+    const priorEscalated = new Map(priorRows.map((r) => [r.case_number, !!r.is_escalated]));
 
     const write = db.transaction(() => {
       for (const c of cases) upsertCase.run(caseRow(c, syncedAt));
@@ -529,7 +538,7 @@ async function runSync(full: boolean): Promise<SyncResult> {
     const afterRows = db
       .prepare(
         "SELECT case_number, subject, priority, account, created_date, last_customer_touch," +
-          " is_closed, needs_my_reply, status FROM cases WHERE id IN (" +
+          " last_modified_date, is_closed, needs_my_reply, status, is_escalated FROM cases WHERE id IN (" +
           caseIds.map(() => "?").join(",") +
           ")",
       )
@@ -540,13 +549,16 @@ async function runSync(full: boolean): Promise<SyncResult> {
       account: string | null;
       created_date: string | null;
       last_customer_touch: string | null;
+      last_modified_date: string;
       is_closed: number;
       needs_my_reply: number;
       status: string | null;
+      is_escalated: number;
     }>;
 
-    const delta: SyncDelta = { created: [], replied: [] };
+    const delta: SyncDelta = { created: [], replied: [], escalated: [], waitingOnSupport: [] };
     const statusTransitions: Array<{ caseNumber: string; newStatus: string | null }> = [];
+    const triggers = new Set(triggerStatuses());
     for (const r of afterRows) {
       const d: DeltaCase = {
         caseNumber: r.case_number,
@@ -555,6 +567,7 @@ async function runSync(full: boolean): Promise<SyncResult> {
         account: r.account,
         createdDate: r.created_date,
         lastCustomerTouch: r.last_customer_touch,
+        lastModifiedDate: r.last_modified_date,
         isClosed: !!r.is_closed,
       };
       if (!priorSeen.has(r.case_number)) delta.created.push(d);
@@ -565,6 +578,17 @@ async function runSync(full: boolean): Promise<SyncResult> {
       // transitioned, so it is suppressed the same way case.new events are.
       if (priorSeen.has(r.case_number) && priorStatus.get(r.case_number) !== r.status) {
         statusTransitions.push({ caseNumber: r.case_number, newStatus: r.status });
+        // Phase 5: case.waiting_on_support fires off the exact same
+        // transition coverage.ts's sweepTransitions() consumes -- same
+        // trigger-status list, so coverage and notifications cannot disagree
+        // about which transitions matter.
+        if (r.status && triggers.has(r.status)) {
+          delta.waitingOnSupport.push({ ...d, newStatus: r.status });
+        }
+      }
+      // Escalation, per correction 1: detection did not exist -- built here.
+      if (priorSeen.has(r.case_number) && r.is_escalated && !priorEscalated.get(r.case_number)) {
+        delta.escalated.push(d);
       }
     }
 

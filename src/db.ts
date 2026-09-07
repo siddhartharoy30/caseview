@@ -382,6 +382,12 @@ ensureColumn("comments", "clean_body", "TEXT");
 ensureColumn("comments", "quoted_body", "TEXT");
 ensureColumn("comments", "parser_version", "INTEGER");
 
+// v4 phase 5: the notification centre's read state. Server-side because the
+// centre has to agree across tabs/reloads about what's already been seen --
+// a client-only "seen" set (like notify.js's own first-poll-seeds-only rule)
+// would re-show every event as unread on every fresh page load.
+ensureColumn("events", "read_at", "INTEGER");
+
 /**
  * One-time (per parser-version bump) backfill of the columns above.
  *
@@ -477,6 +483,10 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   atRiskHours: "4",
   theme: "dark",
   notificationsEnabled: "false",
+  // v4 phase 5: default off, and even on, the client only ever sounds for
+  // the three priority kinds (case.escalated, case.waiting_on_support,
+  // commitment.breached) -- see PRIORITY_KINDS in notify.js.
+  notifySoundEnabled: "false",
   webhookEnabled: "false",
   webhookUrl: "",
   webhookIncludeSubject: "false",  // case subjects are customer data; off means IDs only

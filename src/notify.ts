@@ -25,6 +25,8 @@ import { log } from "./log";
 export type EventKind =
   | "case.new"
   | "case.replied"
+  | "case.escalated"
+  | "case.waiting_on_support"
   | "commitment.due"
   | "commitment.breached";
 
@@ -35,6 +37,7 @@ export interface AppEvent {
   title: string;
   detail: string | null;
   createdAt: number;
+  readAt: number | null;
 }
 
 /** Anything older than this is neither worth showing nor worth delivering. */
@@ -75,6 +78,7 @@ export interface DeltaCase {
   account: string | null;
   createdDate: string | null;
   lastCustomerTouch: string | null;
+  lastModifiedDate: string | null;
   isClosed: boolean;
 }
 
@@ -83,6 +87,11 @@ export interface SyncDelta {
   created: DeltaCase[];
   /** Cases where needs_my_reply went from 0 to 1 during this run. */
   replied: DeltaCase[];
+  /** Cases where is_escalated went from 0 to 1 during this run. */
+  escalated: DeltaCase[];
+  /** Cases whose status transitioned into one of coverage.ts's trigger
+   * statuses -- the same transition sweepTransitions() consumes. */
+  waitingOnSupport: Array<DeltaCase & { newStatus: string }>;
 }
 
 /**
@@ -122,6 +131,40 @@ function caseEvents(delta: SyncDelta): number {
         "case.replied",
         c.caseNumber,
         "Customer replied on " + c.caseNumber + (label ? " (" + label + ")" : ""),
+        c.subject || null,
+      )
+    ) {
+      fired += 1;
+    }
+  }
+
+  // Correction 1: is_escalated had readers everywhere and a prior-vs-current
+  // comparison nowhere. Deterministic id keyed on last_modified_date, same
+  // as coverage_posts' dedup fix in phase 8 -- a wall-clock stamp would let
+  // a repeated sweep refire this for the same escalation.
+  for (const c of delta.escalated) {
+    const label = [c.priority, c.account].filter(Boolean).join(" · ");
+    if (
+      record(
+        "case.escalated:" + c.caseNumber + ":" + (c.lastModifiedDate || ""),
+        "case.escalated",
+        c.caseNumber,
+        "Escalated: " + c.caseNumber + (label ? " (" + label + ")" : ""),
+        c.subject || null,
+      )
+    ) {
+      fired += 1;
+    }
+  }
+
+  for (const c of delta.waitingOnSupport) {
+    const label = [c.priority, c.account].filter(Boolean).join(" · ");
+    if (
+      record(
+        "case.waiting_on_support:" + c.caseNumber + ":" + (c.lastModifiedDate || ""),
+        "case.waiting_on_support",
+        c.caseNumber,
+        c.caseNumber + " moved to " + c.newStatus + (label ? " (" + label + ")" : ""),
         c.subject || null,
       )
     ) {
@@ -283,12 +326,34 @@ export async function sendWebhookTest(
 
 /* ------------------------------------------------------------------ public */
 
-export function listEvents(sinceMs: number | null, limit = 100): AppEvent[] {
-  const rows = sinceMs
-    ? db
-        .prepare("SELECT * FROM events WHERE created_at > ? ORDER BY created_at DESC LIMIT ?")
-        .all(sinceMs, limit)
-    : db.prepare("SELECT * FROM events ORDER BY created_at DESC LIMIT ?").all(limit);
+export interface ListEventsOptions {
+  sinceMs?: number | null;
+  limit?: number;
+  kind?: EventKind | null;
+  unreadOnly?: boolean;
+}
+
+/** `sinceMs` as a bare second arg is the pre-phase-5 call shape, still used
+ * by the poll loop; the options form is for the notification centre, which
+ * needs to filter by kind and by read state instead of just a time floor. */
+export function listEvents(sinceMsOrOpts: number | null | ListEventsOptions = null, limitArg = 100): AppEvent[] {
+  const opts: ListEventsOptions =
+    typeof sinceMsOrOpts === "object" && sinceMsOrOpts !== null
+      ? sinceMsOrOpts
+      : { sinceMs: sinceMsOrOpts, limit: limitArg };
+  const { sinceMs = null, limit = 100, kind = null, unreadOnly = false } = opts;
+
+  const where: string[] = [];
+  const params: any[] = [];
+  if (sinceMs) { where.push("created_at > ?"); params.push(sinceMs); }
+  if (kind) { where.push("kind = ?"); params.push(kind); }
+  if (unreadOnly) where.push("read_at IS NULL");
+
+  const sql =
+    "SELECT * FROM events" +
+    (where.length ? " WHERE " + where.join(" AND ") : "") +
+    " ORDER BY created_at DESC LIMIT ?";
+  const rows = db.prepare(sql).all(...params, limit);
 
   return (rows as any[]).map((r) => ({
     id: r.id,
@@ -297,7 +362,23 @@ export function listEvents(sinceMs: number | null, limit = 100): AppEvent[] {
     title: r.title,
     detail: r.detail,
     createdAt: r.created_at,
+    readAt: r.read_at ?? null,
   }));
+}
+
+export function unreadEventCount(): number {
+  const r = db.prepare("SELECT COUNT(*) AS n FROM events WHERE read_at IS NULL").get() as { n: number };
+  return r.n;
+}
+
+const markEventRead = db.prepare("UPDATE events SET read_at = ? WHERE id = ?");
+
+/** Marks one event read, or every currently-unread event when `id` is
+ * omitted -- the notification centre's "mark all read" action. */
+export function markEventsRead(id?: string): number {
+  const ts = now();
+  if (id) return markEventRead.run(ts, id).changes;
+  return db.prepare("UPDATE events SET read_at = ? WHERE read_at IS NULL").run(ts).changes;
 }
 
 export function pruneEvents(): void {

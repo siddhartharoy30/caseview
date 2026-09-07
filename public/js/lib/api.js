@@ -126,6 +126,10 @@ export const api = {
   /* events — the notification feed. sinceMs is a millisecond timestamp; omit it
      to fetch the recent backlog, which a fresh tab uses to seed its seen-set. */
   events: (sinceMs) => request("GET", "/api/events" + qs({ since: sinceMs || undefined })),
+  /* notification centre feed (v4 phase 5) -- kind/unread filters, separate
+     from the poller's plain since-cursor call above. */
+  eventsFeed: (opts) => request("GET", "/api/events" + qs(opts || {})),
+  markEventsRead: (id) => request("POST", "/api/events/read", id ? { id } : {}),
 
   /* AI draft — generates into the same staging area the Draft tab already owns.
      Nothing here sends anything; every result still goes through the tab's own

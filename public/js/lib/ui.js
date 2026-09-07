@@ -6,19 +6,59 @@
  */
 
 import { copy, h, icon, mount } from "./dom.js";
+import { navigate } from "../router.js";
 
 /* ------------------------------------------------------------------ toasts */
 
-export function toast(message, kind = "") {
+const MAX_TOASTS = 3;
+
+function dismissToast(el) {
+  if (!el || !el.isConnected) return;
+  el.style.transition = "opacity 200ms";
+  el.style.opacity = "0";
+  setTimeout(() => el.remove(), 220);
+}
+
+/**
+ * `opts.sticky` (v4 phase 5) never auto-dismisses -- for case.escalated,
+ * case.waiting_on_support and commitment.breached, a toast that vanishes on
+ * its own is indistinguishable from one you dealt with. `opts.caseNumber`
+ * adds an Open button and makes the whole toast clickable. Hovering any
+ * toast holds its timer, sticky or not, so reading one does not race its own
+ * dismissal.
+ */
+export function toast(message, kind = "", opts = {}) {
   const host = document.getElementById("toasts");
   if (!host) return;
-  const el = h("div", { class: "toast " + kind, text: message });
+
+  const existing = Array.from(host.children);
+  if (existing.length >= MAX_TOASTS) {
+    const evict = existing.find((el) => !el.classList.contains("is-sticky")) || existing[0];
+    dismissToast(evict);
+  }
+
+  const { caseNumber = null, sticky = false } = opts;
+  const duration = opts.duration ?? (sticky ? null : kind === "err" ? 4200 : 2200);
+
+  const el = h("div", {
+    class: `toast ${kind} ${sticky ? "is-sticky" : ""} ${caseNumber ? "is-clickable" : ""}`,
+    onclick: caseNumber ? () => { navigate("/case/" + encodeURIComponent(caseNumber)); dismissToast(el); } : null,
+  },
+    h("div", { class: "toast-rail" }),
+    h("div", { class: "toast-body", text: message }),
+    h("button", {
+      class: "toast-close", type: "button", "aria-label": "Dismiss",
+      onclick: (e) => { e.stopPropagation(); dismissToast(el); },
+    }, "×"));
+
   host.append(el);
-  setTimeout(() => {
-    el.style.transition = "opacity 200ms";
-    el.style.opacity = "0";
-    setTimeout(() => el.remove(), 220);
-  }, kind === "err" ? 4200 : 2200);
+
+  let timer = null;
+  const arm = () => { if (duration != null) timer = setTimeout(() => dismissToast(el), duration); };
+  const disarm = () => { if (timer) clearTimeout(timer); timer = null; };
+  el.addEventListener("mouseenter", disarm);
+  el.addEventListener("mouseleave", arm);
+  arm();
 }
 
 export const toastError = (err) =>

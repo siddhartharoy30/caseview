@@ -764,17 +764,52 @@ body.sidebar-collapsed .nav-item { position: relative; }
 }
 
 .toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   background: var(--surface-3);
   color: var(--text);
   border: 1px solid var(--border-2);
-  padding: 9px 16px;
-  border-radius: 20px;
+  padding: 9px 12px 9px 0;
+  border-radius: var(--radius);
   font-size: 12px;
   box-shadow: var(--shadow-2);
   animation: toast-in 160ms ease;
+  pointer-events: auto;
+  overflow: hidden;
 }
 
 .toast.err { border-color: var(--red); color: var(--red); }
+
+/* Severity rail (v4 phase 5): a coloured bar reusing the same tone tokens as
+   everything else that encodes state by colour, not a second palette. */
+.toast-rail { align-self: stretch; width: 3px; border-radius: 2px; background: var(--border-2); flex-shrink: 0; }
+.toast.ok  .toast-rail { background: var(--green-2); }
+.toast.err .toast-rail { background: var(--red); }
+.toast.warn .toast-rail { background: var(--amber); }
+
+.toast-body { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+
+.toast-close {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--text-4);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.toast-close:hover { color: var(--text); }
+
+.toast.is-clickable { cursor: pointer; }
+.toast.is-clickable:hover { border-color: var(--border-2); background: var(--surface-2); }
+
+/* Sticky (v4 phase 5): case.escalated / case.waiting_on_support /
+   commitment.breached never auto-dismiss -- a toast that vanishes on its
+   own is indistinguishable from one that was dealt with. */
+.toast.is-sticky { border-width: 1px; box-shadow: var(--shadow-3); }
+.toast.is-sticky .toast-rail { width: 4px; }
 
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(8px); }
@@ -1293,6 +1328,88 @@ tr.row .copybtn:hover { color: var(--blue); }
   color: var(--text-4);
   font-family: var(--mono);
 }
+
+/* Notification centre (v4 phase 5) ---------------------------------------- */
+
+.notif-wrap { position: relative; }
+
+.notif-badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--red-2);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
+
+.notif-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 360px;
+  max-height: 70vh;
+  overflow-y: auto;
+  z-index: var(--z-dropdown);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-3);
+}
+
+.notif-panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+}
+
+.notif-loading { padding: var(--space-4); font-size: var(--fs-table-cell); text-align: center; }
+
+.notif-list { display: flex; flex-direction: column; }
+
+.notif-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-4);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.notif-item:hover { background: var(--surface-2); }
+.notif-item.is-unread { background: color-mix(in srgb, var(--blue-2) 6%, transparent); }
+.notif-item.is-unread:hover { background: color-mix(in srgb, var(--blue-2) 12%, transparent); }
+
+.notif-dot {
+  flex-shrink: 0;
+  margin-top: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--border-2);
+}
+.notif-dot.t-bad  { background: var(--red); }
+.notif-dot.t-warn { background: var(--amber); }
+
+.notif-item-body { min-width: 0; flex: 1 1 auto; }
+.notif-item-title { font-size: var(--fs-table-cell); color: var(--text); overflow-wrap: anywhere; }
+.notif-item-detail { font-size: var(--fs-meta); margin-top: 2px; overflow-wrap: anywhere; }
+.notif-item-time { font-size: 10.5px; margin-top: 3px; }
 
 /* ------------------------------------------------------- column picker */
 

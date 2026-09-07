@@ -11,6 +11,7 @@ import { api, onUnauthorized } from "./lib/api.js";
 import * as store from "./lib/store.js";
 import * as fmt from "./lib/fmt.js";
 import { toast, toastError, dialog, emptyState } from "./lib/ui.js";
+import { htmlToText } from "./lib/text.js";
 import { startNotifications } from "./lib/notify.js";
 import { route, setNotFound, onRouteChange, onQueryChange, navigate, start, resolve, currentRoute } from "./router.js";
 
@@ -158,7 +159,7 @@ function showApp(email) {
   // Started unconditionally: the module itself checks the preference and the
   // browser permission on every tick, so a toggle in Settings takes effect
   // without anything here needing to know about it.
-  startNotifications(navigate);
+  startNotifications(navigate, setNotifBadge);
 }
 
 /* ------------------------------------------------------------------- nav */
@@ -222,6 +223,82 @@ function wireTopbar() {
   });
   $("#helpBtn").addEventListener("click", showShortcuts);
   $("#riskBadge").addEventListener("click", () => navigate("/commitments?state=at-risk"));
+
+  $("#notifBellBtn").addEventListener("click", (e) => { e.stopPropagation(); toggleNotifPanel(); });
+  document.addEventListener("click", (e) => {
+    const panel = $("#notifPanel");
+    if (!panel.hidden && !panel.contains(e.target) && e.target !== $("#notifBellBtn")) closeNotifPanel();
+  });
+}
+
+/* ------------------------------------------------------- notification centre */
+
+const EVENT_ICON_TONE = {
+  "case.escalated": "t-bad",
+  "commitment.breached": "t-bad",
+  "case.waiting_on_support": "t-warn",
+  "commitment.due": "t-warn",
+};
+
+function setNotifBadge(unread) {
+  const el = $("#notifBadge");
+  el.hidden = !unread;
+  el.textContent = unread > 99 ? "99+" : String(unread || "");
+}
+
+async function paintNotifPanel() {
+  const panel = $("#notifPanel");
+  mount(panel, h("div", { class: "notif-loading dim", text: "Loading…" }));
+  let res;
+  try {
+    res = await api.eventsFeed({ limit: 30 });
+  } catch {
+    mount(panel, h("div", { class: "notif-loading dim", text: "Could not load notifications." }));
+    return;
+  }
+  const events = res.events || [];
+
+  mount(panel,
+    h("div", { class: "notif-panel-head" },
+      h("span", { class: "card-title", text: "Notifications" }),
+      h("div", { class: "spacer" }),
+      events.some((e) => !e.readAt)
+        ? h("button", {
+            class: "linkbtn", type: "button", text: "Mark all read",
+            onclick: async () => { await api.markEventsRead(); setNotifBadge(0); paintNotifPanel(); },
+          })
+        : null),
+    events.length
+      ? h("div", { class: "notif-list" }, events.map((e) => h("button", {
+          class: `notif-item ${e.readAt ? "" : "is-unread"}`,
+          type: "button",
+          onclick: async () => {
+            closeNotifPanel();
+            if (!e.readAt) await api.markEventsRead(e.id).catch(() => {});
+            if (e.caseNumber) navigate("/case/" + encodeURIComponent(e.caseNumber));
+          },
+        },
+          h("span", { class: `notif-dot ${EVENT_ICON_TONE[e.kind] || ""}` }),
+          h("div", { class: "notif-item-body" },
+            h("div", { class: "notif-item-title", text: e.title }),
+            // A commitment recorded before v4 phase 4's clean_body fix can
+            // still carry HTML in its raw_text (the events table caches a
+            // detail snapshot at insert time and is never revised in place);
+            // htmlToText() here is defensive against that debris rather than
+            // something new events actually need.
+            e.detail ? h("div", { class: "notif-item-detail dim", text: htmlToText(e.detail) }) : null,
+            h("div", { class: "notif-item-time dim", text: fmt.relative(e.createdAt) })))))
+      : h("div", { class: "notif-loading dim", text: "Nothing yet." }));
+}
+
+function toggleNotifPanel() {
+  const panel = $("#notifPanel");
+  if (panel.hidden) { panel.hidden = false; paintNotifPanel(); }
+  else closeNotifPanel();
+}
+
+function closeNotifPanel() {
+  $("#notifPanel").hidden = true;
 }
 
 function applyTheme(theme) {

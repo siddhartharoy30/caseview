@@ -13,6 +13,7 @@ import {
   SETTING_DEFAULTS,
   getSetting,
   getSettingNumber,
+  getSettingBool,
   getSyncState,
   cacheCounts,
   rebuildCache,
@@ -75,7 +76,7 @@ import {
 } from "./iqs/layer2Store";
 import { resolveRange, scorecard, saveManualMetric, deleteManualMetric } from "./metrics";
 import { syncOnce, startSync, reconcileCommitments } from "./sync";
-import { listEvents, sendWebhookTest } from "./notify";
+import { listEvents, unreadEventCount, markEventsRead, sendWebhookTest, EventKind } from "./notify";
 import { log, errText } from "./log";
 
 const app = express();
@@ -654,8 +655,25 @@ app.get("/api/coverage/backtest", requireAuth, async (_req, res) => {
  */
 app.get("/api/events", requireAuth, noStore, (req, res) => {
   const since = Number(req.query.since);
-  const events = listEvents(Number.isFinite(since) && since > 0 ? since : null);
-  res.json({ events, now: Date.now() });
+  const events = listEvents({
+    sinceMs: Number.isFinite(since) && since > 0 ? since : null,
+    kind: typeof req.query.kind === "string" ? (req.query.kind as EventKind) : null,
+    unreadOnly: req.query.unread === "1",
+    limit: 100,
+  });
+  res.json({ events, now: Date.now(), unread: unreadEventCount(), soundEnabled: getSettingBool("notifySoundEnabled") });
+});
+
+/**
+ * The notification centre's read state, per phase 5. There was no non-GET
+ * verb on /api/events at all before this -- POST with no id marks every
+ * currently-unread event read (the "mark all read" action); an id in the
+ * body marks just that one.
+ */
+app.post("/api/events/read", requireAuth, (req, res) => {
+  const id = typeof req.body?.id === "string" ? req.body.id : undefined;
+  const changed = markEventsRead(id);
+  res.json({ ok: true, changed, unread: unreadEventCount() });
 });
 
 /**
