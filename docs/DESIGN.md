@@ -186,3 +186,88 @@ file already computes its background from its foreground colour.
   consistent padding and were not flagged as broken, just as one more
   instance of the same eleven-variant sprawl. Consolidating all eleven onto
   `.card-head`/`.card-body` fully is future work, not done here.
+
+# Phase 8 — full design pass and self-critique
+
+Re-held the quality floor from phase 3 (focus rings, `prefers-reduced-motion`,
+contrast, phone width) against every surface phases 4-7 actually added,
+rather than re-auditing all eleven original pages from scratch — those were
+already held against this document as each was built, and re-litigating
+them without new information would not have found anything phases 3-7's
+own testing didn't already catch.
+
+**Focus rings: no gap found.** The phase 3 rule is `button:focus-visible`
+(a bare tag selector) alongside the specific component classes, which
+means every new plain `<button>` from phases 4-7 — notification-centre
+items, the zone picker's results, toast close buttons, the phone page's
+board rows — already inherits the theme-matched ring with no additional
+work. Confirmed by reading the rule rather than screenshotting each one
+individually, given the selector is unconditional on class.
+
+**`prefers-reduced-motion`: no gap found**, for the same reason in reverse
+— phase 3's rule is a universal selector (`*, *::before, *::after`), so it
+already covers every animation/transition phases 4-7 added without needing
+to be told about them. Not re-verified with reduced-motion forced in this
+session (phase 3 verified the mechanism directly); if a phase 4-7 addition
+introduced an animation the universal selector somehow doesn't reach, that
+would be a real gap this pass did not catch.
+
+**Contrast: not independently re-measured.** New chip tones this session
+(`.chip.cyan`, `.chip.bad`, `.chip.info`, `.chip.warn`) all use the same
+`color-mix(in srgb, var(--X) 20%, transparent)` background formula against
+the same foreground token as every pre-existing chip tone (`.chip.ok`,
+`.chip.purple`), so they inherit whatever contrast properties that
+established formula already has rather than being a new, unverified
+pattern. No tool ran an actual contrast-ratio check against the dark
+surface in this session, for these or the original chips.
+
+**Phone width: tested directly, found and fixed two real bugs.**
+Screenshotted `/phone`, the notification panel, and the time zone strip at
+375-390px (headless Chrome with device-metrics emulation, not just a
+narrow browser window):
+
+- A genuine pre-existing bug, not caused by this session's own work but
+  surfaced by it: **`.icon-btn` is defined twice** in `app.css` (line 384,
+  circular/borderless/34px; line 2230, square/bordered/28px, no media
+  guard) — the second definition wins the cascade for every `.icon-btn` in
+  the entire app, at every viewport width, and always has. It was found
+  because the time zone strip's own mobile rule
+  (`.tz-row-remove { display: none }` under 700px) silently lost to the
+  second `.icon-btn` rule's unconditional `display: inline-flex`, so the
+  remove button stayed visible and full-width at phone size instead of
+  hiding. Fixed narrowly with `!important` on the one rule that needed to
+  win, with a comment explaining why, rather than risking a wider
+  deduplication across every element that uses `.icon-btn` this late in
+  the session. **Deduplicating the two `.icon-btn` rules app-wide is real,
+  disclosed follow-up work** — every icon button in QView has been
+  rendering as the second definition's style since whenever that
+  duplicate was introduced, not the first one a reader would assume is
+  canonical.
+- The phone board's table (`/phone`) inherits the shared `.tbl` class's
+  mobile treatment, which turned out to be dead code app-wide: `app.css`
+  has a `table.tbl tbody td::before { content: attr(data-label) }` rule
+  meant to prefix each stacked mobile cell with a label, but **no page in
+  the entire codebase — old or new — ever sets a `data-label` attribute**,
+  so this rule has never actually labeled anything for any table. At phone
+  width the phone board's rows stack without labels; this reads as
+  acceptable rather than broken because the values are self-describing
+  (a status is a colored chip, "Federal"/"AMER" reads as a line, `MM:SS`
+  reads as a duration), but it is not the labeled treatment the CSS was
+  clearly meant to provide. Not fixed — wiring `data-label` across every
+  `.tbl` usage in the app is a larger, pre-existing gap than one page's
+  worth of phase 8 time covers.
+- The sidebar collapses to icon-only (no text labels) at phone width on
+  every page, old and new alike, including `/phone` and the strip's own
+  host page — confirmed this is existing, consistent, intentional-looking
+  behavior (there is already a manual "Collapse" toggle with the same
+  icon-only result) rather than a regression, and left alone.
+
+**What this pass did not do:** re-screenshot the seven pre-existing pages
+this session did not touch (Scorecard, Quality, Triage, Search, Patterns,
+and the two not separately re-verified at phone width, Commitments and
+Settings) against the completed design system. Phase 3 held the system
+against Case Detail, Time Off, and Settings directly; the others were
+designed against the same tokens and components but not independently
+re-screenshotted a second time in this pass. If a page-specific violation
+exists there that phase 3's spot-checks didn't happen to hit, this pass
+would not have caught it either.

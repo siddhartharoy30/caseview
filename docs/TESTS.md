@@ -504,3 +504,24 @@ none of which handle holidays either); account-timezone pinning was not
 wired to case context (no timezone field exists anywhere in the schema to
 derive from, and the manual per-account pin fallback itself was cut for
 time). All three recorded in `docs/PLAN_V4.md`.
+
+## Phase 8 — full design pass
+
+Screenshotted `/phone`, the notification panel, and the time zone strip at
+375-390px with real device-metrics emulation (not just a narrow window).
+Found and fixed a real, previously-undiscovered pre-existing bug:
+`.icon-btn` is defined twice in `app.css` (line 384 and line 2230,
+different sizes/shapes), and the second, unconditional definition has been
+winning the cascade for every icon button in the app at every width, not
+just at phone width. Surfaced because the time zone strip's own
+`display: none` mobile rule for its remove button silently lost to it;
+fixed narrowly for that one rule (`!important`, commented with why) rather
+than risk a wider app-wide dedup this late in the plan. Also found that
+`table.tbl`'s mobile `data-label` treatment is dead code everywhere in the
+app (no page, old or new, ever sets the attribute the CSS reads) --
+disclosed, not fixed, since it is a pre-existing gap larger than this
+page's share of phase 8. Full detail and what was *not* covered in this
+pass (confirmed via reading the phase-3 rules rather than re-screenshotting
+one by one: focus rings and reduced-motion already generalize to every
+phase 4-7 addition with no extra work needed) in `docs/DESIGN.md`'s phase 8
+section.

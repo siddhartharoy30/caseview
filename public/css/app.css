@@ -563,7 +563,15 @@ body.sidebar-collapsed .nav-item { position: relative; }
 
 @media (max-width: 700px) {
   .tz-row { grid-template-columns: 16px minmax(70px, 1fr) minmax(70px, 1fr); }
-  .tz-bar, .tz-row-remove { display: none; }
+  .tz-bar { display: none; }
+  /* !important: a pre-existing, previously-undiscovered duplicate .icon-btn
+     definition at app.css:2230 (display: inline-flex, no media guard) sits
+     later in the cascade than this rule and would otherwise win at equal
+     specificity regardless of source order within this file's history.
+     Found via testing this exact rule failing to hide the button at phone
+     width -- see docs/DESIGN.md's phase 8 self-critique; deduplicating the
+     two .icon-btn rules app-wide is real follow-up work, not done here. */
+  .tz-row-remove { display: none !important; }
 }
 
 .sync-chip {
