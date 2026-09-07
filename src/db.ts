@@ -1,5 +1,7 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
+import { parseEmailBody, EMAIL_PARSER_VERSION } from "./emailBody";
+import { log } from "./log";
 
 /**
  * Local cache and application state.
@@ -366,6 +368,60 @@ ensureColumn("suggested_replies", "self_check", "TEXT");
 // row stays -- it is still a record that the transition happened -- so this
 // is a timestamp, not a delete.
 ensureColumn("coverage_posts", "discarded_at", "INTEGER");
+
+// v4 phase 4: envelope parsing and quote stripping, moved server-side and
+// done once during sync instead of client-side on every paint. Same
+// `parser_version`-gated staleness precedent as iqs/store.ts's
+// `rubric_version` -- see backfillEmailBodies() below, run once at startup
+// rather than folded into a normal sync (existing rows need it too, and
+// "wait for a full resync" is not guaranteed to touch them).
+ensureColumn("comments", "envelope_from", "TEXT");
+ensureColumn("comments", "envelope_to", "TEXT");
+ensureColumn("comments", "envelope_cc", "TEXT");
+ensureColumn("comments", "clean_body", "TEXT");
+ensureColumn("comments", "quoted_body", "TEXT");
+ensureColumn("comments", "parser_version", "INTEGER");
+
+/**
+ * One-time (per parser-version bump) backfill of the columns above.
+ *
+ * `comments_au` fires on any UPDATE regardless of which columns changed, so
+ * this re-indexes every row's FTS entry even though `body` itself never
+ * changes here -- expected, not a bug, and only paid once per version bump.
+ * A single transaction: better a slower first startup than a half-migrated
+ * table if the process is killed partway through.
+ */
+function backfillEmailBodies(): void {
+  const stale = db
+    .prepare("SELECT id, body FROM comments WHERE parser_version IS NULL OR parser_version <> ?")
+    .all(EMAIL_PARSER_VERSION) as Array<{ id: string; body: string }>;
+  if (!stale.length) return;
+
+  const update = db.prepare(`
+    UPDATE comments SET
+      envelope_from = @envelope_from, envelope_to = @envelope_to, envelope_cc = @envelope_cc,
+      clean_body = @clean_body, quoted_body = @quoted_body, parser_version = @parser_version
+    WHERE id = @id
+  `);
+  const started = Date.now();
+  db.transaction(() => {
+    for (const row of stale) {
+      const parsed = parseEmailBody(row.body);
+      update.run({
+        id: row.id,
+        envelope_from: parsed.envelope?.from ?? null,
+        envelope_to: parsed.envelope ? JSON.stringify(parsed.envelope.to) : null,
+        envelope_cc: parsed.envelope ? JSON.stringify(parsed.envelope.cc) : null,
+        clean_body: parsed.cleanBody,
+        quoted_body: parsed.quotedBody,
+        parser_version: EMAIL_PARSER_VERSION,
+      });
+    }
+  })();
+  log.info("comments.backfill_email_bodies", { rows: stale.length, ms: Date.now() - started });
+}
+
+backfillEmailBodies();
 
 /* ------------------------------------------------------- suggested replies */
 

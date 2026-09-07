@@ -20,7 +20,7 @@ import * as fmt from "../lib/fmt.js";
 import {
   toast, emptyState, banner, button, skeletonRows, copyBtn, copyToast,
 } from "../lib/ui.js";
-import { htmlToText, splitQuoted, textNodes } from "../lib/text.js";
+import { htmlToText, textNodes } from "../lib/text.js";
 import {
   scoreMeter, bandChip, bandExplain,
   tone as iqsTone, KEYWORD_LABEL, KEYWORD_HINT,
@@ -107,6 +107,7 @@ export function render(ctx, host, shell) {
     draftBusy: false,       // generating or repairing — guards against overlap
     tab: TABS.some((t) => t.id === ctx.query.tab) ? ctx.query.tab : "timeline",
     find: ctx.query.q || "",
+    findMatchIndex: 0,
     expanded: new Set(),
     expandAll: false,
     vis: "all",
@@ -383,13 +384,26 @@ export function render(ctx, host, shell) {
         if (state.vis === "internal" && e.isPublic) return false;
         if (state.src !== "all" && e.source !== state.src) return false;
         if (!needle) return true;
-        return `${e.subject || ""}\n${e.author || ""}\n${e._text || ""}`.toLowerCase().includes(needle);
+        return `${e.subject || ""}\n${e.author || ""}\n${e.cleanBody || ""}\n${e.quotedBody || ""}`.toLowerCase().includes(needle);
       })
       .sort((a, b) => {
         const d = Date.parse(a.createdDate) - Date.parse(b.createdDate);
         return state.order === "desc" ? -d : d;
       });
   }
+
+  /** my replies / customer replies / internal notes / system entries -- the
+   * visual rank this phase adds. Order matters: internal (not public) wins
+   * over everything else, since "who can see this" is the fact that most
+   * changes how a reader should treat the text. */
+  function authorRank(e) {
+    if (!e.isPublic) return "internal";
+    if (e.isMine) return "mine";
+    if (e.isInbound) return "customer";
+    return "system";
+  }
+  const RANK_LABEL = { mine: "Me", customer: "Customer", internal: "Internal", system: "System" };
+  const RANK_TONE = { mine: "ok", customer: "cyan", internal: "purple", system: "neutral" };
 
   function paintTimeline() {
     if (!state.timeline) {
@@ -399,8 +413,6 @@ export function render(ctx, host, shell) {
     }
 
     const all = state.timeline.entries || [];
-    // Convert once rather than on every repaint — some bodies run to several KB.
-    for (const e of all) if (e._text === undefined) e._text = htmlToText(e.body);
 
     const pill = (group, value, label) => h("button", {
       class: `view-pill ${state[group] === value ? "active" : ""}`,
@@ -415,9 +427,15 @@ export function render(ctx, host, shell) {
       value: state.find,
       oninput: debounce((e) => {
         state.find = e.target.value;
+        state.findMatchIndex = 0;
         setQuery({ q: state.find || null });
         paintTimeline();
       }, 160),
+      onkeydown: (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        stepMatch(e.shiftKey ? -1 : 1);
+      },
     });
 
     const rows = visibleEntries();
@@ -433,16 +451,32 @@ export function render(ctx, host, shell) {
 
       h("div", { class: "toolbar" },
         h("div", { class: "toolbar-row" },
-          h("div", { class: "views" },
-            pill("vis", "all", "All"),
-            pill("vis", "public", "Public"),
-            pill("vis", "internal", "Internal")),
-          h("div", { class: "views" },
-            pill("src", "all", "Everything"),
-            pill("src", "comment", "Comments"),
-            pill("src", "email", "Email")),
+          h("div", { class: "tb-filter-group" },
+            h("span", { class: "tb-label", text: "Visibility" }),
+            h("div", { class: "views" },
+              pill("vis", "all", "All"),
+              pill("vis", "public", "Public"),
+              pill("vis", "internal", "Internal"))),
+          h("div", { class: "tb-filter-group" },
+            h("span", { class: "tb-label", text: "Source" }),
+            h("div", { class: "views" },
+              pill("src", "all", "All"),
+              pill("src", "comment", "Comments"),
+              pill("src", "email", "Email"))),
           h("div", { class: "spacer" }),
           findInput,
+          needle
+            ? h("div", { class: "tl-find-nav" },
+                h("span", { class: "tl-match-counter mono", text: "0 of 0" }),
+                h("button", {
+                  class: "icon-btn", type: "button", title: "Previous match (Shift+Enter, or N)",
+                  onclick: () => stepMatch(-1),
+                }, "N"),
+                h("button", {
+                  class: "icon-btn", type: "button", title: "Next match (Enter, or n)",
+                  onclick: () => stepMatch(1),
+                }, "n"))
+            : null,
           button(state.order === "desc" ? "Newest first" : "Oldest first", {
             small: true,
             title: "Flip the chronological order",
@@ -465,7 +499,9 @@ export function render(ctx, host, shell) {
         h("span", { class: "dim", text: `${internal} internal · ${all.length - internal} public` })),
 
       rows.length
-        ? h("div", { class: "tl" }, rows.map((e) => entryCard(e, needle)))
+        ? h("div", { class: "tl-layout" },
+            h("div", { class: "tl" }, dayGrouped(rows, needle)),
+            filmstrip(rows))
         : emptyState({
             title: needle ? "Nothing matches that" : "No entries with those filters",
             message: needle
@@ -480,6 +516,69 @@ export function render(ctx, host, shell) {
               },
             }),
           }));
+
+    if (needle) requestAnimationFrame(() => updateMatchCounter());
+  }
+
+  /** Sticky day separators between consecutive entries on different calendar
+   * days (owner's timezone, via fmt.dayKey -- the same key commitments and
+   * business-hours math already use). */
+  function dayGrouped(rows, needle) {
+    const out = [];
+    let lastKey = null;
+    for (const e of rows) {
+      const key = fmt.dayKey(e.createdDate);
+      if (key !== lastKey) {
+        out.push(h("div", { class: "tl-day-sep" }, h("span", {}, fmt.dateOnly(e.createdDate))));
+        lastKey = key;
+      }
+      out.push(entryCard(e, needle));
+    }
+    return out;
+  }
+
+  /** One tick per entry, coloured by author type, marked where a commitment
+   * was matched. A minimap of the whole case, and a second way to navigate
+   * it besides scrolling. */
+  function filmstrip(rows) {
+    return h("div", { class: "tl-filmstrip", title: "One tick per entry — click to jump" },
+      rows.map((e) => h("button", {
+        class: `tl-tick rank-${authorRank(e)} ${e.commitmentSentences?.length ? "has-commitment" : ""}`,
+        type: "button",
+        title: `${e.author || "Unknown"} · ${fmt.dateTime(e.createdDate)}${e.commitmentSentences?.length ? " · has a commitment" : ""}`,
+        onclick: () => {
+          const el = document.getElementById(`tl-${e.id}`);
+          if (!el) return;
+          el.scrollIntoView({ block: "center", behavior: "smooth" });
+          el.classList.add("tl-flash");
+          setTimeout(() => el.classList.remove("tl-flash"), 1600);
+        },
+      })));
+  }
+
+  /** All <mark> nodes in the timeline, in document order -- the match set for
+   * n/N stepping. Recomputed on demand rather than tracked incrementally:
+   * paintTimeline() already fully re-renders on every state change. */
+  function matchNodes() {
+    return Array.from(bodyHost.querySelectorAll(".tl mark"));
+  }
+
+  function updateMatchCounter() {
+    const marks = matchNodes();
+    const el = $(".tl-match-counter", bodyHost);
+    if (!el) return;
+    if (!marks.length) { el.textContent = "0 of 0"; return; }
+    const at = Math.min(state.findMatchIndex, marks.length - 1);
+    el.textContent = `${at + 1} of ${marks.length}`;
+    marks.forEach((m, i) => m.classList.toggle("tl-hit-active", i === at));
+  }
+
+  function stepMatch(delta) {
+    const marks = matchNodes();
+    if (!marks.length) return;
+    state.findMatchIndex = ((state.findMatchIndex + delta) % marks.length + marks.length) % marks.length;
+    updateMatchCounter();
+    marks[state.findMatchIndex].scrollIntoView({ block: "center", behavior: "smooth" });
   }
 
   /** The customer's original problem statement, pinned above the history. */
@@ -524,33 +623,102 @@ export function render(ctx, host, shell) {
       }));
   }
 
+  /**
+   * Structural truncation (v4 phase 4) — a collapsed entry keeps the first
+   * paragraph, and always keeps any sentence the commitment parser matched,
+   * pinned below and highlighted, wherever it actually sits in the body. A
+   * promise buried in paragraph nine of a long email used to vanish behind
+   * "Show all N lines" exactly like everything else past the fold; that is
+   * the one thing this fold is not allowed to hide.
+   */
+  function foldedBody(key, text, needle, forceOpen, commitmentSentences) {
+    const long = text.split("\n").length > FOLD_LINES || text.length > FOLD_CHARS;
+    if (!long) return textNodes(text, needle);
+
+    if (forceOpen || state.expanded.has(key)) {
+      return h("div", {},
+        textNodes(text, needle),
+        h("button", {
+          class: "linkbtn tl-more", type: "button", text: "Show less",
+          onclick: () => { state.expanded.delete(key); paintBody(); },
+        }));
+    }
+
+    const firstPara = (text.split(/\n[ \t]*\n/)[0] || "").trim();
+    const shown = firstPara.length >= 20 ? firstPara : text.split("\n").slice(0, FOLD_LINES).join("\n");
+    const pinned = (commitmentSentences || []).filter((s) => s && text.includes(s) && !shown.includes(s));
+
+    return h("div", { class: "tl-folded" },
+      textNodes(shown, needle),
+      pinned.map((s) => h("div", { class: "tl-pinned-commitment" },
+        h("span", { class: "chip warn", text: "Promise" }),
+        textNodes(s, needle, "tl-text tl-pinned-text"))),
+      h("button", {
+        class: "linkbtn tl-more",
+        type: "button",
+        text: `Show all ${text.split("\n").length} lines`,
+        onclick: () => { state.expanded.add(key); paintBody(); },
+      }));
+  }
+
+  /** Collapsed as `support@rubrik.com → Todd Hall  +9 cc`, expandable to the
+   * full To/Cc lists — the envelope emailBody.ts strips out of the visible
+   * body during sync. */
+  function envelopeStrip(env, key) {
+    if (!env || (!env.from && !env.to.length && !env.cc.length)) return null;
+    const openKey = `${key}:env`;
+    const open = state.expanded.has(openKey);
+    const toLabel = env.to.length
+      ? `${env.to[0]}${env.to.length > 1 ? `  +${env.to.length - 1}` : ""}`
+      : null;
+    const summary = [env.from || "?", toLabel].filter(Boolean).join("  →  ")
+      + (env.cc.length ? `  +${env.cc.length} cc` : "");
+
+    return h("div", { class: "tl-envelope" },
+      h("button", {
+        class: "linkbtn tl-envelope-toggle", type: "button",
+        text: open ? "Hide addresses" : summary,
+        onclick: () => {
+          if (open) state.expanded.delete(openKey); else state.expanded.add(openKey);
+          paintBody();
+        },
+      }),
+      open
+        ? h("div", { class: "tl-envelope-detail" },
+            env.from ? h("div", {}, h("span", { class: "dim" }, "From: "), env.from) : null,
+            env.to.length ? h("div", {}, h("span", { class: "dim" }, "To: "), env.to.join(", ")) : null,
+            env.cc.length ? h("div", {}, h("span", { class: "dim" }, "Cc: "), env.cc.join(", ")) : null)
+        : null);
+  }
+
   const entryAsText = (e) => [
     `${e.author || "Unknown"} · ${fmt.dateTime(e.createdDate)} · ${e.isPublic ? "public" : "internal"} ${e.source}`,
     e.subject ? `Subject: ${e.subject}` : "",
     "",
-    e._text || "",
+    e.cleanBody || "",
   ].filter(Boolean).join("\n");
 
   function entryCard(e, needle) {
     const key = `e:${e.id}`;
-    const split = splitQuoted(e._text || "");
+    const body = e.cleanBody || "";
+    const quoted = e.quotedBody || "";
     // A hit inside the quoted history is reason enough to open it.
-    const quoteHasHit = Boolean(needle) && split.quoted.toLowerCase().includes(needle.toLowerCase());
+    const quoteHasHit = Boolean(needle) && quoted.toLowerCase().includes(needle.toLowerCase());
     const quoteOpen = state.expanded.has(`${key}:q`) || quoteHasHit;
+    const rank = authorRank(e);
 
     return h("article", {
-      class: `tl-entry ${e.isPublic ? "is-public" : "is-internal"} ${e.isMine ? "is-mine" : ""}`,
+      class: `tl-entry rank-${rank} ${e.isPublic ? "is-public" : "is-internal"} ${e.isMine ? "is-mine" : ""}`,
       id: `tl-${e.id}`,
     },
       h("div", { class: "tl-rail" }),
       h("div", { class: "tl-main" },
         h("header", { class: "tl-head" },
           h("span", { class: "tl-author", text: e.author || "Unknown" }),
-          e.isMine ? h("span", { class: "chip ok tl-badge", text: "me" }) : null,
+          h("span", { class: `chip tl-badge ${RANK_TONE[rank]}`, text: RANK_LABEL[rank] }),
           h("span", { class: `chip tl-badge ${e.isPublic ? "neutral" : "purple"}`,
             text: e.isPublic ? "Public" : "Internal" }),
           h("span", { class: "chip tl-badge neutral", text: e.source === "email" ? "Email" : "Comment" }),
-          e.isInbound ? h("span", { class: "chip tl-badge", text: "Inbound" }) : null,
           h("div", { class: "spacer" }),
           h("time", { class: "mono tl-when", dateTime: e.createdDate, text: fmt.dateTime(e.createdDate) }),
           h("span", { class: "rel", text: fmt.relative(e.createdDate) }),
@@ -558,26 +726,28 @@ export function render(ctx, host, shell) {
 
         e.subject ? textNodes(e.subject, needle, "tl-subject") : null,
 
-        split.body
-          ? folded(key, split.body, needle, Boolean(needle) || state.expandAll)
+        envelopeStrip(e.envelope, key),
+
+        body
+          ? foldedBody(key, body, needle, Boolean(needle) || state.expandAll, e.commitmentSentences)
           : h("div", { class: "tl-empty dim", text: e.subject
               ? "No body on this message — the subject line is all Salesforce holds."
               : "This entry has no content in the cache." }),
 
-        split.quoted
+        quoted
           ? h("div", { class: "tl-quote" },
               h("button", {
                 class: "linkbtn", type: "button",
                 text: quoteOpen
                   ? "Hide quoted history"
-                  : `Show quoted history (${split.quoted.split("\n").length} lines)`,
+                  : `Show quoted history (${quoted.split("\n").length} lines)`,
                 onclick: () => {
                   const k = `${key}:q`;
                   if (state.expanded.has(k)) state.expanded.delete(k); else state.expanded.add(k);
                   paintBody();
                 },
               }),
-              quoteOpen ? textNodes(split.quoted, needle, "tl-text tl-quoted") : null)
+              quoteOpen ? textNodes(quoted, needle, "tl-text tl-quoted") : null)
           : null));
   }
 

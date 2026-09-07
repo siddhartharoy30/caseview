@@ -198,3 +198,86 @@ without any duplicate commitments being created (the dedupe index is keyed on
 had no prior row to collide with).
 
 No console errors were observed during any check in this section.
+
+## Phase 4 — timeline rebuild
+
+Files: `src/emailBody.ts` (new), `src/db.ts`, `src/sync.ts`, `src/queries.ts`,
+`public/js/pages/caseDetail.js`, `public/css/app.css`. Verified against real
+synced data via the same CDP-driven headless Chrome, against case 01273803
+(145 real timeline entries).
+
+### 4.1 — envelope parsing, server-side backfill
+
+**Repro (pre-fix).** A comment/email whose body opened with a pasted
+`From:`/`To:`/`Cc:` block rendered as ~400 raw characters of semicolon-joined
+addresses at the top of the entry — `splitQuoted`'s `QUOTE_RE` matches
+`From:\s*\S` but only checks lines at index ≥ 1 with 40+ preceding
+characters, so a body that *opens* with the block was never split.
+
+**Fix confirmed live:** first server boot after the schema migration
+backfilled all 6,339 existing comments in 1.49s (`comments.backfill_email_bodies`
+in the log, `rows: 6339`), zero errors. Real entry on 01273803 (Support Bot,
+Jul 28 2026): collapsed to `support@rubrik.com → todd.hall@saberhealth.com
++1 +10 cc`, expandable to the full To/Cc lists on click — matches the plan's
+example shape exactly.
+
+### 4.2 — a real bug the backfill surfaced: duplicate commitments
+
+**Not in the plan's own hazard list, but adjacent to correction 5.** Moving
+`parseCommitments()`'s input from raw HTML `body` to clean-text `clean_body`
+changed `raw_text` for nearly every existing parsed commitment — not by a
+trivial whitespace shift, but because the *old* parser, fed `<br/>`-laced
+HTML instead of real newlines, could not bound a sentence correctly and
+often captured several paragraphs (signature block included) as one
+"commitment." `idx_commitments_dedupe` keys on the literal `raw_text`, so
+each corrected sentence looked like a brand-new commitment instead of the
+same one re-observed. Confirmed on live data: case 01273803 went from 14 to
+31 commitment rows after the first full resync post-migration; DB-wide,
+15 comment/case pairs had duplicate parsed rows.
+
+**Fix:** `recomputeCase()` now reconciles per comment — computes what the
+parser produces right now, deletes any existing `source='parsed'` row for
+that comment whose `raw_text` isn't in the fresh set, then inserts what's
+missing. Re-ran a full resync (`POST /api/sync?full=1`, 251 cases, 6,693
+comments, 21.7s): case 01273803 settled at 16 commitments (up from the
+original 14, not the buggy 31 — the corrected parser catches a couple of
+promises the HTML-confused old one missed), zero duplicate comment/case
+pairs remain DB-wide (962 total commitments checked), and zero commitments
+anywhere still contain HTML artifacts (`<br`/`&nbsp;`) in `raw_text`. The 3
+remaining comment/case pairs with 2 commitment rows each were checked by
+hand — genuinely two distinct promises in the same email, not duplicates.
+
+### 4.3 — visual rank, day grouping, filmstrip
+
+Confirmed on 01273803: rank chips render Me (green) / Customer (cyan) /
+Internal (purple) / System (gray) correctly, including a "Support Bot"
+comment correctly ranked System (public, not mine, not a customer reply —
+an automated relay). Day separators appear between entries on different
+calendar days. The filmstrip renders one tick per visible entry, coloured to
+match rank, with 141+ entries visible as a scrollable minimap; clicking a
+tick scrolls to and flashes the corresponding entry.
+
+### 4.4 — never truncate through a commitment
+
+Structural fold (first paragraph, or first 14 lines when the "first
+paragraph" is too short to be useful) checked against a real 19-line reply
+whose commitment sentence ("I will follow up with you by 6:00 PM EST on
+Tuesday, July 28, 2026") happened to fall within the first 14 lines — the
+pinned-commitment block correctly did *not* render a second, redundant copy,
+confirming the `!shown.includes(s)` suppression works. A case where the
+promise is buried past line 14 was not separately screenshotted before
+moving to phase 5; the logic is the same code path and was reviewed by hand,
+but this specific scenario is not screenshot-confirmed.
+
+### 4.5 — find match count and n/N stepping
+
+Searching "Advanced Threat Hunt" on 01273803 shows "9 of 145 entries match"
+and a "1 of 14" match counter with N/n step buttons next to the find input;
+a hit inside collapsed quoted history force-opens that quote (pre-existing
+behaviour, confirmed unaffected).
+
+### 4.6 — filter row wording
+
+"Everything" renamed to "All" (now matches the Visibility group's first
+option); both groups now carry a label ("Visibility", "Source") above the
+pills, confirmed rendered in the toolbar.

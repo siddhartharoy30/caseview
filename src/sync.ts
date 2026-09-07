@@ -32,6 +32,7 @@ import {
 import { deriveProductArea } from "./productArea";
 import { extractArtifacts, errorSignature } from "./artifacts";
 import { parseCommitments } from "./commitments";
+import { parseEmailBody, EMAIL_PARSER_VERSION } from "./emailBody";
 import { scoreCases } from "./iqs/store";
 import { sweepTransitions } from "./coverage";
 import { zoned } from "./businessHours";
@@ -111,10 +112,12 @@ ON CONFLICT(id) DO UPDATE SET
 const upsertComment = db.prepare(`
 INSERT INTO comments (
   id, case_id, case_number, source, body, author, author_email,
-  is_public, is_mine, is_inbound, subject, created_date, synced_at
+  is_public, is_mine, is_inbound, subject, created_date, synced_at,
+  envelope_from, envelope_to, envelope_cc, clean_body, quoted_body, parser_version
 ) VALUES (
   @id, @case_id, @case_number, @source, @body, @author, @author_email,
-  @is_public, @is_mine, @is_inbound, @subject, @created_date, @synced_at
+  @is_public, @is_mine, @is_inbound, @subject, @created_date, @synced_at,
+  @envelope_from, @envelope_to, @envelope_cc, @clean_body, @quoted_body, @parser_version
 )
 ON CONFLICT(id) DO UPDATE SET
   body = excluded.body,
@@ -125,8 +128,29 @@ ON CONFLICT(id) DO UPDATE SET
   is_inbound = excluded.is_inbound,
   subject = excluded.subject,
   created_date = excluded.created_date,
-  synced_at = excluded.synced_at
+  synced_at = excluded.synced_at,
+  envelope_from = excluded.envelope_from,
+  envelope_to = excluded.envelope_to,
+  envelope_cc = excluded.envelope_cc,
+  clean_body = excluded.clean_body,
+  quoted_body = excluded.quoted_body,
+  parser_version = excluded.parser_version
 `);
+
+/** Envelope/quote fields shared by commentRow() and emailRow() -- computed
+ * once here so a re-synced comment (edited, or re-pulled after a retry)
+ * always carries a fresh parse rather than whatever an older sync wrote. */
+function parsedBodyFields(body: string) {
+  const parsed = parseEmailBody(body);
+  return {
+    envelope_from: parsed.envelope?.from ?? null,
+    envelope_to: parsed.envelope ? JSON.stringify(parsed.envelope.to) : null,
+    envelope_cc: parsed.envelope ? JSON.stringify(parsed.envelope.cc) : null,
+    clean_body: parsed.cleanBody,
+    quoted_body: parsed.quotedBody,
+    parser_version: EMAIL_PARSER_VERSION,
+  };
+}
 
 const insertArtifact = db.prepare(`
 INSERT OR IGNORE INTO artifacts (id, case_id, case_number, kind, value, created_at)
@@ -142,6 +166,11 @@ INSERT OR IGNORE INTO commitments (
   @state, @created_at, @updated_at
 )
 `);
+
+const selectParsedForComment = db.prepare(
+  "SELECT id, raw_text FROM commitments WHERE case_id = ? AND source_comment_id = ? AND source = 'parsed'",
+);
+const deleteCommitmentById = db.prepare("DELETE FROM commitments WHERE id = ?");
 
 function caseRow(c: SalesforceCase, syncedAt: number) {
   return {
@@ -181,12 +210,13 @@ function caseRow(c: SalesforceCase, syncedAt: number) {
 function commentRow(c: SalesforceCaseComment, caseNumber: string, syncedAt: number) {
   const author = c.CreatedBy ? c.CreatedBy.Name : null;
   const mine = authoredByMe(author);
+  const body = c.CommentBody || "";
   return {
     id: c.Id,
     case_id: c.ParentId,
     case_number: caseNumber,
     source: "comment",
-    body: c.CommentBody || "",
+    body,
     author,
     author_email: c.CreatedBy ? c.CreatedBy.Email : null,
     is_public: c.IsPublished ? 1 : 0,
@@ -198,18 +228,20 @@ function commentRow(c: SalesforceCaseComment, caseNumber: string, syncedAt: numb
     subject: null as string | null,
     created_date: c.CreatedDate,
     synced_at: syncedAt,
+    ...parsedBodyFields(body),
   };
 }
 
 function emailRow(e: SalesforceEmail, caseNumber: string, syncedAt: number) {
   const author = e.FromName || e.FromAddress;
   const mine = !e.Incoming && authoredByMe(author);
+  const body = e.TextBody || "";
   return {
     id: e.Id,
     case_id: e.ParentId,
     case_number: caseNumber,
     source: "email",
-    body: e.TextBody || "",
+    body,
     author,
     author_email: e.FromAddress,
     is_public: 1,
@@ -218,6 +250,7 @@ function emailRow(e: SalesforceEmail, caseNumber: string, syncedAt: number) {
     subject: e.Subject,
     created_date: e.MessageDate || e.CreatedDate,
     synced_at: syncedAt,
+    ...parsedBodyFields(body),
   };
 }
 
@@ -229,11 +262,12 @@ interface TouchRow {
   is_inbound: number;
   is_public: number;
   body: string;
+  clean_body: string | null;
   id: string;
 }
 
 const selectTimeline = db.prepare(
-  "SELECT id, created_date, is_mine, is_inbound, is_public, body FROM comments WHERE case_id = ? ORDER BY created_date ASC",
+  "SELECT id, created_date, is_mine, is_inbound, is_public, body, clean_body FROM comments WHERE case_id = ? ORDER BY created_date ASC",
 );
 
 const updateDerived = db.prepare(`
@@ -290,10 +324,32 @@ function recomputeCase(caseId: string, caseNumber: string, isClosed: boolean, se
     });
   }
 
+  // Correction 6: a promise the customer quotes back from my own earlier
+  // email must not re-mint as a fresh commitment. clean_body has the quoted
+  // history already stripped (see emailBody.ts); body is the fallback only
+  // for a row somehow not yet backfilled.
+  //
+  // Correction 5's hazard, actually hit: switching the parser's input from
+  // raw HTML body to clean_body changes raw_text for basically every
+  // existing commitment (the old parser, fed "<br/>"-laced HTML instead of
+  // real newlines, could not bound a sentence correctly and often captured
+  // several paragraphs instead of one). idx_commitments_dedupe is keyed on
+  // the literal raw_text, so a shifted value looks like a brand new
+  // commitment instead of the same one re-observed -- confirmed against
+  // real data (case 01273803 went from 14 to 31 rows on the first sync after
+  // this change). Reconciling per comment -- delete whatever no longer
+  // matches the current parse, insert whatever's missing -- fixes this
+  // without discarding met/breached history for commitments whose raw_text
+  // happens to still match.
   let added = 0;
   for (const r of rows) {
-    if (!r.is_mine || !r.body) continue;
-    const found = parseCommitments(r.body, new Date(r.created_date));
+    if (!r.is_mine) continue;
+    const text = r.clean_body ?? r.body;
+    const found = text ? parseCommitments(text, new Date(r.created_date)) : [];
+    const freshTexts = new Set(found.map((p) => p.raw));
+    const existing = selectParsedForComment.all(caseId, r.id) as Array<{ id: string; raw_text: string }>;
+    for (const ex of existing) if (!freshTexts.has(ex.raw_text)) deleteCommitmentById.run(ex.id);
+
     for (const p of found) {
       const info = insertCommitment.run({
         id: newId(),

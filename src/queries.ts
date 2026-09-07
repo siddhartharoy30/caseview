@@ -220,14 +220,19 @@ export function getCaseRow(caseNumber: string): CaseRow | undefined {
 export function getTimeline(caseNumber: string) {
   const rows = db
     .prepare(
-      `SELECT id, source, body, author, author_email, is_public, is_mine, is_inbound,
-              subject, created_date
+      `SELECT id, source, body, clean_body, quoted_body, envelope_from, envelope_to, envelope_cc,
+              author, author_email, is_public, is_mine, is_inbound, subject, created_date
        FROM comments WHERE case_number = ? ORDER BY created_date ASC`,
     )
     .all(caseNumber) as Array<{
     id: string;
     source: string;
     body: string;
+    clean_body: string | null;
+    quoted_body: string | null;
+    envelope_from: string | null;
+    envelope_to: string | null;
+    envelope_cc: string | null;
     author: string | null;
     author_email: string | null;
     is_public: number;
@@ -237,10 +242,33 @@ export function getTimeline(caseNumber: string) {
     created_date: string;
   }>;
 
+  // v4 phase 4: "never truncate through a commitment" -- the client locates
+  // the matched sentence by text match against the cleaned body, but it
+  // needs to know what that sentence *is*. commitments.raw_text is verbatim
+  // from sync.ts, keyed by source_comment_id.
+  const commitmentRows = db
+    .prepare("SELECT source_comment_id, raw_text FROM commitments WHERE case_number = ? AND source_comment_id IS NOT NULL")
+    .all(caseNumber) as Array<{ source_comment_id: string; raw_text: string }>;
+  const commitmentsByComment = new Map<string, string[]>();
+  for (const c of commitmentRows) {
+    if (!commitmentsByComment.has(c.source_comment_id)) commitmentsByComment.set(c.source_comment_id, []);
+    commitmentsByComment.get(c.source_comment_id)!.push(c.raw_text);
+  }
+
+  const parseAddrList = (json: string | null): string[] => {
+    if (!json) return [];
+    try { return JSON.parse(json); } catch { return []; }
+  };
+
   return rows.map((r) => ({
     id: r.id,
     source: r.source,
     body: r.body,
+    cleanBody: r.clean_body ?? r.body,
+    quotedBody: r.quoted_body ?? "",
+    envelope: r.envelope_from || r.envelope_to || r.envelope_cc
+      ? { from: r.envelope_from, to: parseAddrList(r.envelope_to), cc: parseAddrList(r.envelope_cc) }
+      : null,
     author: r.author,
     authorEmail: r.author_email,
     isPublic: !!r.is_public,
@@ -248,6 +276,7 @@ export function getTimeline(caseNumber: string) {
     isInbound: !!r.is_inbound,
     subject: r.subject,
     createdDate: r.created_date,
+    commitmentSentences: commitmentsByComment.get(r.id) || [],
   }));
 }
 

@@ -666,6 +666,7 @@ body.sidebar-collapsed .nav-item { position: relative; }
 .chip.ok           { background: color-mix(in srgb, var(--green) 20%, transparent);  color: var(--green); }
 .chip.neutral      { background: var(--surface-3);                                   color: var(--text-3); }
 .chip.purple       { background: color-mix(in srgb, var(--purple) 20%, transparent); color: var(--purple); }
+.chip.warn         { background: color-mix(in srgb, var(--amber) 20%, transparent);  color: var(--amber); }
 
 .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .muted { color: var(--text-3); }
@@ -1556,10 +1557,19 @@ tr.row .copybtn:hover { color: var(--blue); }
 }
 
 .tl-rail { background: var(--border-2); border-radius: 8px 0 0 8px; }
-.tl-entry.is-public .tl-rail { background: var(--blue-2); }
-.tl-entry.is-internal .tl-rail { background: var(--purple); }
 .tl-entry.is-internal { background: var(--surface-2); }
-.tl-entry.is-mine .tl-rail { background: var(--green-2); }
+
+/* Visual rank (v4 phase 4): my replies / customer replies / internal notes /
+   system entries. The rail was already colouring by public/internal/mine
+   before this phase -- rank is the same idea made complete, since a public,
+   not-mine, not-customer entry (an automated Salesforce/Rubrik notification)
+   used to get the same blue as a real customer reply. */
+.tl-entry.rank-mine .tl-rail     { background: var(--green-2); }
+.tl-entry.rank-customer .tl-rail { background: var(--blue-2); }
+.tl-entry.rank-internal .tl-rail { background: var(--purple); }
+.tl-entry.rank-system .tl-rail   { background: var(--text-4); }
+
+.chip.cyan { background: color-mix(in srgb, var(--cyan) 20%, transparent); color: var(--cyan); }
 
 .tl-main { min-width: 0; padding-left: 12px; }
 
@@ -1649,6 +1659,101 @@ tr.row .copybtn:hover { color: var(--blue); }
 }
 
 .tl-empty { font-size: 12px; color: var(--text-4); font-style: italic; }
+
+/* Envelope strip (v4 phase 4): collapsed to one line by default -- the
+   "support@rubrik.com → Todd Hall +9 cc" summary a leading From:/To:/Cc:
+   block used to dump into the body as ~400 characters of raw addresses. */
+.tl-envelope { margin: 2px 0 6px; }
+.tl-envelope-toggle {
+  font-size: 12px;
+  color: var(--text-4);
+  font-style: italic;
+}
+.tl-envelope-detail {
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-sunken);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+
+/* A commitment sentence pinned into an otherwise-collapsed body (v4 phase
+   4) -- "never truncate through a commitment." */
+.tl-pinned-commitment {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+}
+.tl-pinned-commitment .chip.warn { margin-bottom: 4px; }
+.tl-pinned-text { font-size: 12.5px; }
+
+/* Day grouping (v4 phase 4): a sticky separator between calendar days, so a
+   141-entry case reads as "what happened each day" rather than one
+   undifferentiated scroll. */
+.tl-day-sep {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky-group);
+  margin: 4px 0;
+  padding: 4px 0;
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  color: var(--text-4);
+  background: var(--bg);
+}
+
+.tl-layout { display: grid; grid-template-columns: 1fr 14px; gap: 10px; align-items: start; }
+
+/* Filmstrip (v4 phase 4): one tick per entry, coloured by author rank,
+   marked where a commitment landed -- a minimap of the whole case and a
+   second way to navigate it besides scrolling. */
+.tl-filmstrip {
+  position: sticky;
+  top: 44px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: calc(100vh - 160px);
+  overflow: hidden;
+}
+.tl-tick {
+  width: 10px;
+  height: 4px;
+  padding: 0;
+  border: none;
+  border-radius: 2px;
+  background: var(--border-2);
+  cursor: pointer;
+  flex: 1 1 auto;
+  min-height: 3px;
+  max-height: 10px;
+}
+.tl-tick.rank-mine     { background: var(--green-2); }
+.tl-tick.rank-customer { background: var(--blue-2); }
+.tl-tick.rank-internal { background: var(--purple); }
+.tl-tick.rank-system   { background: var(--text-4); }
+.tl-tick.has-commitment { outline: 2px solid var(--amber); outline-offset: 1px; }
+
+@media (max-width: 900px) {
+  .tl-layout { grid-template-columns: 1fr; }
+  .tl-filmstrip { display: none; }
+}
+
+.tb-filter-group { display: flex; align-items: center; gap: 6px; }
+
+.tl-find-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.tl-match-counter { font-size: 11px; color: var(--text-4); margin-right: 4px; white-space: nowrap; }
+mark.tl-hit-active { background: var(--amber); color: var(--bg); }
 
 /* The description is the start of the story, so it sits at the top of the
    timeline permanently rather than sorting away under 140 comments. */
