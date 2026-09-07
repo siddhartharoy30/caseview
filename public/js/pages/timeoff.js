@@ -21,7 +21,7 @@ import { h, mount, debounce } from "../lib/dom.js";
 import { api } from "../lib/api.js";
 import * as fmt from "../lib/fmt.js";
 import { toast, banner, button, field, emptyState, skeletonRows, confirmDialog } from "../lib/ui.js";
-import { pageHead, page } from "./_shared.js";
+import { pageHead, page, cardHead, eyebrow } from "./_shared.js";
 
 const todayKey = () => fmt.dayKey(new Date());
 
@@ -149,15 +149,16 @@ export function render(ctx, host, shell) {
   });
 
   const addCard = h("div", { class: "card to-add-card" },
-    h("div", { class: "art-head" }, h("span", { class: "art-title", text: "Declare time off" })),
-    h("div", { class: "hint", style: { marginBottom: "10px" } },
-      "Pick a range to see what's due while you're out, before you save it. This only surfaces commitments — nothing here posts anywhere or notifies anyone."),
-    h("div", { class: "to-fields" },
-      field("Start", startInput),
-      field("End", endInput),
-      field("Note (optional)", noteInput)),
-    previewHost,
-    h("div", { class: "to-add-actions" }, saveBtn));
+    cardHead(eyebrow("Declare time off")),
+    h("div", { class: "card-body" },
+      h("div", { class: "hint" },
+        "Pick a range to see what's due while you're out, before you save it. This only surfaces commitments — nothing here posts anywhere or notifies anyone."),
+      h("div", { class: "to-fields" },
+        field("Start", startInput),
+        field("End", endInput),
+        field("Note (optional)", noteInput)),
+      previewHost,
+      h("div", { class: "to-add-actions" }, saveBtn)));
 
   requestPreview();
 
@@ -177,7 +178,7 @@ export function render(ctx, host, shell) {
     }
 
     return h("div", { class: `card to-range-card is-${status}` },
-      h("div", { class: "art-head" },
+      cardHead(
         h("span", { class: `chip ${meta.tone}`, text: meta.label }),
         h("span", { class: "to-range-dates", text: `${fmt.dateOnly(range.startDate)} → ${fmt.dateOnly(range.endDate)}` }),
         h("span", { class: "dim", text: `${days} day${days === 1 ? "" : "s"}` }),
@@ -197,7 +198,7 @@ export function render(ctx, host, shell) {
             load();
           },
         })),
-      status !== "past" ? rangePreview : null);
+      status !== "past" ? h("div", { class: "card-body" }, rangePreview) : null);
   }
 
   function paint() {
@@ -221,7 +222,7 @@ export function render(ctx, host, shell) {
     mount(bodyHost,
       addCard,
       h("div", { class: "to-sec-head" },
-        h("span", { class: "art-title", text: "Declared ranges" }),
+        eyebrow("Declared ranges"),
         h("span", { class: "cd-tab-count mono", text: String(ranges.length) })),
       ranges.length
         ? h("div", { class: "to-list" }, ranges.map(rangeCard))
@@ -497,13 +498,13 @@ export function render(ctx, host, shell) {
   function paintCoverage() {
     if (covState.loading) {
       mount(coverageHost,
-        h("div", { class: "to-sec-head" }, h("span", { class: "art-title", text: "Coverage" })),
+        h("div", { class: "to-sec-head" }, eyebrow("Coverage")),
         skeletonRows(3, [140, 200, 100]));
       return;
     }
     if (covState.error) {
       mount(coverageHost,
-        h("div", { class: "to-sec-head" }, h("span", { class: "art-title", text: "Coverage" })),
+        h("div", { class: "to-sec-head" }, eyebrow("Coverage")),
         banner("error", covState.error.message || "Could not load coverage settings",
           button("Retry", { small: true, onclick: () => loadCoverage() })));
       return;
@@ -513,59 +514,57 @@ export function render(ctx, host, shell) {
     triggerStatusesInput.value = covState.triggerStatuses;
 
     mount(coverageHost,
-      h("div", { class: "to-sec-head" }, h("span", { class: "art-title", text: "Coverage" })),
+      h("div", { class: "to-sec-head" }, eyebrow("Coverage")),
 
       covState.dryRun
         ? banner("info", "Dry run is on — coverage posts are composed and recorded, but nothing is sent to Slack, and none are offered for sending.")
         : banner("warn", "Dry run is off. A matching status change during declared time off will compose a post and place it in the queue below — nothing sends until you click Send on it."),
 
       h("div", { class: "card cov-card" },
-        h("div", { class: "art-head" }, h("span", { class: "art-title", text: "Channels" })),
-        h("div", { class: "hint", style: { marginBottom: "10px" } },
-          "One channel is active at a time — that's where a real, non-dry-run post goes. Any channel can be tested regardless of which one is active."),
-        covState.channels.length
-          ? h("div", { class: "cov-channels" }, covState.channels.map(channelRow))
-          : h("div", { class: "hint" }, "No channel added yet."),
-        h("div", { class: "cov-add-channel" }, newChannelLabel, newChannelUrl, addChannelBtn)),
+        cardHead(eyebrow("Channels")),
+        h("div", { class: "card-body" },
+          h("div", { class: "hint" },
+            "One channel is active at a time — that's where a real, non-dry-run post goes. Any channel can be tested regardless of which one is active."),
+          covState.channels.length
+            ? h("div", { class: "cov-channels" }, covState.channels.map(channelRow))
+            : h("div", { class: "hint" }, "No channel added yet."),
+          h("div", { class: "cov-add-channel" }, newChannelLabel, newChannelUrl, addChannelBtn))),
 
       h("div", { class: "card cov-card" },
-        h("div", { class: "art-head" }, h("span", { class: "art-title", text: "Trigger" })),
-        h("label", { class: "checkline" }, dryRunInput,
-          h("span", { text: "Dry run (recommended until you've tested a channel)" })),
-        field("Trigger statuses (comma-separated)", triggerStatusesInput,
-          "A status transition into one of these, while time off is active, is what composes a coverage post."),
-        saveTriggerBtn),
+        cardHead(eyebrow("Trigger")),
+        h("div", { class: "card-body" },
+          h("label", { class: "checkline" }, dryRunInput,
+            h("span", { text: "Dry run (recommended until you've tested a channel)" })),
+          field("Trigger statuses (comma-separated)", triggerStatusesInput,
+            "A status transition into one of these, while time off is active, is what composes a coverage post."),
+          saveTriggerBtn)),
 
       h("div", { class: "card cov-card" },
-        h("div", { class: "art-head" },
-          h("span", { class: "art-title", text: "30-day backtest" }),
-          h("div", { class: "spacer" }),
-          backtestBtn),
-        h("div", { class: "hint", style: { marginBottom: "8px" } },
-          "Checks real Salesforce Status history against the trigger list above and your declared time off — not a simulation."),
-        backtestHost),
+        cardHead(eyebrow("30-day backtest"), h("div", { class: "spacer" }), backtestBtn),
+        h("div", { class: "card-body" },
+          h("div", { class: "hint" },
+            "Checks real Salesforce Status history against the trigger list above and your declared time off — not a simulation."),
+          backtestHost)),
 
       (() => {
         const queue = covState.posts.filter((p) => p.status === "pending" || p.status === "failed");
         const history = covState.posts.filter((p) => p.status !== "pending" && p.status !== "failed");
         return h("div", {},
           h("div", { class: "card cov-card" },
-            h("div", { class: "art-head" },
-              h("span", { class: "art-title", text: "Approval queue" }),
-              h("span", { class: "cd-tab-count mono", text: String(queue.length) })),
-            h("div", { class: "hint", style: { marginBottom: "10px" } },
-              "Nothing here sends itself. Edit the text if you want, then Send or Discard each one."),
-            queue.length
-              ? h("div", { class: "cov-posts" }, queue.map(queuePostRow))
-              : h("div", { class: "hint" }, "Nothing waiting on you right now.")),
+            cardHead(eyebrow("Approval queue"), h("span", { class: "cd-tab-count mono", text: String(queue.length) })),
+            h("div", { class: "card-body" },
+              h("div", { class: "hint" },
+                "Nothing here sends itself. Edit the text if you want, then Send or Discard each one."),
+              queue.length
+                ? h("div", { class: "cov-posts" }, queue.map(queuePostRow))
+                : h("div", { class: "hint" }, "Nothing waiting on you right now."))),
 
           h("div", { class: "card cov-card" },
-            h("div", { class: "art-head" },
-              h("span", { class: "art-title", text: "History" }),
-              h("span", { class: "cd-tab-count mono", text: String(history.length) })),
-            history.length
-              ? h("div", { class: "cov-posts" }, history.map(historyPostRow))
-              : h("div", { class: "hint" }, "Nothing recorded yet.")));
+            cardHead(eyebrow("History"), h("span", { class: "cd-tab-count mono", text: String(history.length) })),
+            h("div", { class: "card-body" },
+              history.length
+                ? h("div", { class: "cov-posts" }, history.map(historyPostRow))
+                : h("div", { class: "hint" }, "Nothing recorded yet."))));
       })());
   }
 

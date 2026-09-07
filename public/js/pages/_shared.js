@@ -39,6 +39,18 @@ export function tile({ label, value, sub, href, tone = "", hint }) {
     : h("div", { class: "tile" }, inner);
 }
 
+/** A card's header row: a title (plain text or an eyebrow()) plus whatever
+ * trailing controls the caller passes (a spacer div, a count chip, buttons).
+ * Pairs with a `.card-body` div for whatever follows. */
+export function cardHead(...content) {
+  return h("div", { class: "card-head" }, content);
+}
+
+/** The one non-uppercase micro-label role -- see `.eyebrow` in app.css. */
+export function eyebrow(text, extraClass) {
+  return h("span", { class: extraClass ? `eyebrow ${extraClass}` : "eyebrow", text });
+}
+
 export function notBuiltYet(host, title, message) {
   mount(host, page(
     pageHead(title),

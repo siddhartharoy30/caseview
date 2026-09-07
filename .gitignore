@@ -6,3 +6,4 @@ certs/
 *.log
 out.html
 .DS_Store
+docs/shots/

@@ -25,7 +25,7 @@ import {
   scoreMeter, bandChip, bandExplain,
   tone as iqsTone, KEYWORD_LABEL, KEYWORD_HINT,
 } from "../lib/iqs.js";
-import { page } from "./_shared.js";
+import { page, cardHead, eyebrow } from "./_shared.js";
 import { navigate, setQuery } from "../router.js";
 
 /* ------------------------------------------------------------------ config */
@@ -196,12 +196,17 @@ export function render(ctx, host, shell) {
       .sort((a, b) => Date.parse(b.createdDate) - Date.parse(a.createdDate))[0];
     const contactEmail = inbound?.authorEmail || null;
 
+    const quality = c.iqs;
+
     mount(headHost,
+      /* Primary: case number, subject, priority, status -- the four facts
+         that identify the case, all at title weight (v4 phase 3.3). */
       h("div", { class: "cd-title-row" },
         h("span", { class: `chip ${fmt.priorityClass(c.priority)}`, text: c.priority || "—" }),
         h("span", { class: "cd-num mono", text: c.caseNumber }),
         copyBtn(c.caseNumber, "Case number copied", "Copy case number"),
         h("h1", { class: "cd-subject", text: c.subject || "(no subject)", title: c.subject || "" }),
+        h("span", { class: "chip neutral", text: c.status || "—" }),
         c.isEscalated ? h("span", { class: "chip p0", text: "Escalated" }) : null,
         c.isClosed ? h("span", { class: "chip neutral", text: "Closed" }) : null,
         h("div", { class: "cd-title-actions" },
@@ -226,34 +231,41 @@ export function render(ctx, host, shell) {
             onclick: () => window.open(`/go/case/${encodeURIComponent(c.caseNumber)}`, "_blank", "noopener"),
           }))),
 
-      h("div", { class: "cd-meta" },
-        metaItem("Account", h("span", { text: c.account || "—" })),
-        metaItem("Contact",
-          h("span", { text: c.contactName || "—" }),
-          contactEmail
-            ? h("a", { class: "cd-mail", href: `mailto:${contactEmail}`, text: contactEmail })
-            : null),
-        metaItem("Status",
-          h("span", { text: c.status || "—" }),
-          c.needsMyReply ? h("span", { class: "chip ok", text: "Waiting on me" }) : null),
-        metaItem("Created",
-          h("span", { class: "mono", text: fmt.dateTime(c.createdDate) }),
-          h("span", { class: `rel ${age.band ? "age-" + age.band : ""}`, text: age.days === null ? "" : `${age.days}d old` })),
-        metaItem("Last activity",
-          h("span", { class: "mono", text: act ? fmt.dateTime(act) : "—" }),
-          h("span", { class: "rel", text: act ? fmt.relative(act) : "" })),
+      /* Secondary: what needs acting on and who it's for -- next commitment,
+         quality score, account, contact. */
+      h("div", { class: "cd-meta cd-meta-secondary" },
         metaItem("Next commitment",
           nc?.dueAt
             ? h("div", { class: "due-cell" },
                 h("span", { class: `cd ${dueTone(nc.dueAt)}`, dataset: { countdown: nc.dueAt }, text: fmt.countdown(nc.dueAt) }),
                 h("span", { class: "abs", text: fmt.dateTime(nc.dueAt) }))
             : h("span", { class: "dim", text: "None parsed" })),
+        quality && quality.overall !== null && quality.overall !== undefined
+          ? metaItem("Quality score", h("span", { class: "mono", text: `${Math.round(quality.overall)}` }), bandChip(quality.band))
+          : metaItem("Quality score", h("span", { class: "dim", text: "Not scored" })),
+        metaItem("Account", h("span", { text: c.account || "—" })),
+        metaItem("Contact",
+          h("span", { text: c.contactName || "—" }),
+          contactEmail
+            ? h("a", { class: "cd-mail", href: `mailto:${contactEmail}`, text: contactEmail })
+            : null)),
+
+      /* Tertiary: background facts, muted -- created/age, last activity,
+         product area, next customer contact. */
+      h("div", { class: "cd-meta cd-meta-tertiary" },
+        metaItem("Created",
+          h("span", { class: "mono", text: fmt.dateTime(c.createdDate) }),
+          h("span", { class: `rel ${age.band ? "age-" + age.band : ""}`, text: age.days === null ? "" : `${age.days}d old` })),
+        metaItem("Last activity",
+          h("span", { class: "mono", text: act ? fmt.dateTime(act) : "—" }),
+          h("span", { class: "rel", text: act ? fmt.relative(act) : "" })),
+        metaItem("Product area", h("span", { text: c.productArea || "—" })),
         c.ncc
           ? metaItem("Next customer contact",
               h("span", { class: "mono", text: fmt.dateTime(c.ncc) }),
               h("span", { class: "rel", text: "Salesforce field" }))
           : null,
-        metaItem("Product area", h("span", { text: c.productArea || "—" }))));
+        c.needsMyReply ? metaItem("Waiting on", h("span", { class: "chip ok", text: "Me" })) : null));
 
     tickCountdowns();
   }
@@ -625,8 +637,8 @@ export function render(ctx, host, shell) {
         "Cluster IDs, versions and node counts pulled out of the case history, next to the Salesforce fields. Every value copies with one click."),
 
       h("div", { class: "art-grid" }, groups.map((g) => h("div", { class: "card art-card" },
-        h("div", { class: "art-head" },
-          h("span", { class: "art-title", text: g.label }),
+        cardHead(
+          eyebrow(g.label),
           h("div", { class: "spacer" }),
           button("Copy all", {
             small: true,
@@ -634,10 +646,11 @@ export function render(ctx, host, shell) {
               g.pairs.map(([k, v]) => (g.flat ? String(v) : `${k}: ${v}`)).join("\n"),
               `${g.label} copied`),
           })),
-        h("div", { class: "art-rows" }, g.pairs.map(([k, v]) => h("div", { class: "art-row" },
-          g.flat ? null : h("span", { class: "art-key", text: k }),
-          h("span", { class: `art-val mono ${g.flat ? "wide" : ""}`, text: String(v) }),
-          copyBtn(String(v), `${g.flat ? g.label : k} copied`))))))),
+        h("div", { class: "card-body" },
+          h("div", { class: "art-rows" }, g.pairs.map(([k, v]) => h("div", { class: "art-row" },
+            g.flat ? null : h("span", { class: "art-key", text: k }),
+            h("span", { class: `art-val mono ${g.flat ? "wide" : ""}`, text: String(v) }),
+            copyBtn(String(v), `${g.flat ? g.label : k} copied`)))))))),
 
       extracted.length ? null : h("div", { class: "art-none" }, emptyState({
         title: "Nothing extracted yet",
@@ -744,40 +757,38 @@ export function render(ctx, host, shell) {
     }
 
     mount(bodyHost,
-      [...groups].map(([label, items]) => h("div", { class: "card rel-card" },
-        h("div", { class: "art-head" },
-          h("span", { class: "art-title", text: label }),
-          h("span", { class: "cd-tab-count mono", text: String(items.length) })),
-        h("table", { class: "tbl" },
-          h("tbody", {}, items.map((c) => h("tr", { class: "row" },
-            h("td", { class: "cell-num" },
-              h("span", { class: `chip ${fmt.priorityClass(c.priority)}`, text: c.priority || "—" })),
-            h("td", { class: "cell-num" },
-              h("a", { class: "mono", href: `/case/${encodeURIComponent(c.caseNumber)}`, text: c.caseNumber })),
-            h("td", { class: "cell-subject", text: c.subject || "—", title: c.subject || "" }),
-            h("td", { class: "nowrap muted", text: c.account || "" }),
-            h("td", { class: "nowrap muted", text: c.status || "" }),
-            h("td", { class: "nowrap mono dim", text: fmt.dateShort(c.createdDate) }),
-            h("td", { class: "right" },
-              c.isClosed ? h("span", { class: "chip neutral", text: "Closed" }) : null))))))),
+      [...groups].map(([label, items]) => h("div", { class: "card relgrp-card" },
+        cardHead(eyebrow(label), h("span", { class: "cd-tab-count mono", text: String(items.length) })),
+        h("div", { class: "card-body" },
+          h("table", { class: "tbl" },
+            h("tbody", {}, items.map((c) => h("tr", { class: "row" },
+              h("td", { class: "cell-num" },
+                h("span", { class: `chip ${fmt.priorityClass(c.priority)}`, text: c.priority || "—" })),
+              h("td", { class: "cell-num" },
+                h("a", { class: "mono", href: `/case/${encodeURIComponent(c.caseNumber)}`, text: c.caseNumber })),
+              h("td", { class: "cell-subject", text: c.subject || "—", title: c.subject || "" }),
+              h("td", { class: "nowrap muted", text: c.account || "" }),
+              h("td", { class: "nowrap muted", text: c.status || "" }),
+              h("td", { class: "nowrap mono dim", text: fmt.dateShort(c.createdDate) }),
+              h("td", { class: "right" },
+                c.isClosed ? h("span", { class: "chip neutral", text: "Closed" }) : null)))))))),
 
       jira.length
-        ? h("div", { class: "card rel-card" },
-            h("div", { class: "art-head" },
-              h("span", { class: "art-title", text: "Engineering tickets" }),
-              h("span", { class: "cd-tab-count mono", text: String(jira.length) })),
-            h("div", { class: "hint jira-warn" },
-              "Internal reference only. Do not put a ticket ID in a customer-facing reply — describe the fix and the version it lands in instead."),
-            h("div", { class: "art-rows" }, jira.map((j) => {
-              const key = j.key || j.id || String(j);
-              const url = typeof j.url === "string" && /^https?:\/\//.test(j.url) ? j.url : null;
-              return h("div", { class: "art-row" },
-                url
-                  ? h("a", { class: "mono", href: url, target: "_blank", rel: "noopener noreferrer", text: key })
-                  : h("span", { class: "mono", text: key }),
-                h("span", { class: "art-val", text: j.summary || j.status || "" }),
-                copyBtn(key, "Ticket key copied"));
-            })))
+        ? h("div", { class: "card relgrp-card" },
+            cardHead(eyebrow("Engineering tickets"), h("span", { class: "cd-tab-count mono", text: String(jira.length) })),
+            h("div", { class: "card-body" },
+              h("div", { class: "hint jira-warn" },
+                "Internal reference only. Do not put a ticket ID in a customer-facing reply — describe the fix and the version it lands in instead."),
+              h("div", { class: "art-rows" }, jira.map((j) => {
+                const key = j.key || j.id || String(j);
+                const url = typeof j.url === "string" && /^https?:\/\//.test(j.url) ? j.url : null;
+                return h("div", { class: "art-row" },
+                  url
+                    ? h("a", { class: "mono", href: url, target: "_blank", rel: "noopener noreferrer", text: key })
+                    : h("span", { class: "mono", text: key }),
+                  h("span", { class: "art-val", text: j.summary || j.status || "" }),
+                  copyBtn(key, "Ticket key copied"));
+              }))))
         : null);
   }
 
@@ -1136,8 +1147,8 @@ export function render(ctx, host, shell) {
 
     mount(bodyHost,
       h("div", { class: "card draft-card" },
-        h("div", { class: "art-head" },
-          h("span", { class: "art-title", text: "Draft" }),
+        cardHead(
+          eyebrow("Draft"),
           h("div", { class: "spacer" }),
           keywordSelect,
           generateBtn,
@@ -1145,43 +1156,44 @@ export function render(ctx, host, shell) {
           button("UPDATE", { small: true, onclick: () => insert("UPDATE") }),
           button("CLOSURE", { small: true, onclick: () => insert("CLOSURE") })),
 
-        h("div", { class: "hint", style: { marginBottom: "10px" } },
-          "This tab stages and copies text. It does not write the reply for you and it never sends anything — paste the finished version into Salesforce yourself."),
+        h("div", { class: "card-body" },
+          h("div", { class: "hint" },
+            "This tab stages and copies text. It does not write the reply for you and it never sends anything — paste the finished version into Salesforce yourself."),
 
-        artifactsHost,
+          artifactsHost,
 
-        h("div", { class: "draft-area-wrap" }, area, busyOverlay),
-        meta,
-        scoreHost,
+          h("div", { class: "draft-area-wrap" }, area, busyOverlay),
+          meta,
+          scoreHost,
 
-        h("div", { class: "draft-actions" },
-          button("Copy draft", {
-            kind: "primary", small: true,
-            onclick: () => {
-              if (!area.value.trim()) { toast("Nothing to copy"); return; }
-              copyToast(area.value, "Draft copied");
-            },
-          }),
-          button("Copy case summary", {
-            small: true,
-            title: "Case number, account, status and the next deadline",
-            onclick: () => copyToast(summaryText(c), "Summary copied"),
-          }),
-          repairBtn,
-          h("div", { class: "spacer" }),
-          button("Clear", {
-            small: true, kind: "danger",
-            onclick: () => {
-              if (!area.value) return;
-              if (!confirm("Discard the staged draft for this case?")) return;
-              area.value = "";
-              store.remove(key);
-              paintMeta();
-              state.draftScore = null;
-              paintScorePanel();
-              repairBtn.hidden = true;
-            },
-          }))));
+          h("div", { class: "draft-actions" },
+            button("Copy draft", {
+              kind: "primary", small: true,
+              onclick: () => {
+                if (!area.value.trim()) { toast("Nothing to copy"); return; }
+                copyToast(area.value, "Draft copied");
+              },
+            }),
+            button("Copy case summary", {
+              small: true,
+              title: "Case number, account, status and the next deadline",
+              onclick: () => copyToast(summaryText(c), "Summary copied"),
+            }),
+            repairBtn,
+            h("div", { class: "spacer" }),
+            button("Clear", {
+              small: true, kind: "danger",
+              onclick: () => {
+                if (!area.value) return;
+                if (!confirm("Discard the staged draft for this case?")) return;
+                area.value = "";
+                store.remove(key);
+                paintMeta();
+                state.draftScore = null;
+                paintScorePanel();
+                repairBtn.hidden = true;
+              },
+            })))));
 
     paintScorePanel();
     if (area.value.trim().length >= 20) requestScore();
@@ -1288,12 +1300,13 @@ export function render(ctx, host, shell) {
     };
 
     return h("div", { class: "card iqs-card" },
-      h("div", { class: "art-head" },
-        h("span", { class: "art-title", text: "What / Why / When" }),
+      cardHead(
+        eyebrow("What / Why / When"),
         h("span", { class: "cd-tab-count mono", text: String(comments.length) }),
         h("div", { class: "spacer" }),
         h("span", { class: "hint", text: "Every comment of mine, scored out of 3" })),
 
+      h("div", { class: "card-body" },
       h("div", { class: "iqs-www-scroll" },
         h("table", { class: "tbl iqs-www" },
           /*
@@ -1327,17 +1340,18 @@ export function render(ctx, host, shell) {
             cell(cm.when, cm.whenWaived),
             h("td", { class: "right mono", text: `${pts(cm.earned)}/3` }),
             h("td", { class: "iqs-www-ex" },
-              cm.excerpt ? textNodes(cm.excerpt, "", "iqs-ex") : h("span", { class: "dim", text: "—" }))))))));
+              cm.excerpt ? textNodes(cm.excerpt, "", "iqs-ex") : h("span", { class: "dim", text: "—" })))))))));
   }
 
   function violationsCard(violations) {
     return h("div", { class: "card iqs-card iqs-viol-card" },
-      h("div", { class: "art-head" },
-        h("span", { class: "art-title", text: "Language deductions" }),
+      cardHead(
+        eyebrow("Language deductions"),
         h("span", { class: "cd-tab-count mono t-bad", text: String(violations.length) }),
         h("div", { class: "spacer" }),
         h("span", { class: "hint", text: "Phrases the rubric marks down, and what to write instead" })),
 
+      h("div", { class: "card-body" },
       h("div", { class: "iqs-viols" }, violations.map((v) => h("div", { class: "iqs-viol" },
         h("div", { class: "iqs-viol-top" },
           h("span", { class: "chip iqs-band t-bad", text: v.label }),
@@ -1353,7 +1367,7 @@ export function render(ctx, host, shell) {
 
         h("div", { class: "iqs-viol-fix" },
           h("span", { class: "iqs-viol-fix-tag", text: "Instead" }),
-          h("span", { text: v.replacement }))))));
+          h("span", { text: v.replacement })))))));
   }
 
   async function paintQuality() {
@@ -1458,7 +1472,7 @@ export function render(ctx, host, shell) {
       (score.notes || []).map((n) => banner("info", n)),
 
       h("div", { class: "iqs-sec-head" },
-        h("span", { class: "art-title", text: "Dimensions" }),
+        eyebrow("Dimensions"),
         h("div", { class: "spacer" }),
         h("button", {
           class: "linkbtn", type: "button",

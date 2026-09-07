@@ -48,6 +48,41 @@
 
   --row-h: 40px;
   --speed: 120ms;
+
+  /* Type scale (v4 phase 3.4) -- six named steps, each mapped to a role
+     rather than a component, so a new component picks a role instead of a
+     number. Values match what the highest-traffic existing selectors
+     (.page-title, .card-title, body, table.tbl, .page-sub, .eyebrow)
+     already used, so adopting the token is not itself a visual change. */
+  --fs-page-title:    21px;
+  --fs-section-title: 14px;
+  --fs-body:          13px;
+  --fs-table-cell:    12px;
+  --fs-meta:          11px;
+  --fs-micro:         10px;
+
+  /* Spacing scale, 4px-based. Card insets and gaps converge on these instead
+     of each picking its own value from the 9-18px range they were spread
+     across. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* z-index scale. Two low, closely-coupled sticky layers inside the queue
+     table (the grouped-row divider sits just under the column header when
+     both are pinned during a scroll), then the overlays in ascending order
+     of "how completely this covers the screen". */
+  --z-sticky-table:  2;
+  --z-sticky-group:  1;
+  --z-sticky-head:   20;
+  --z-dropdown:      80;
+  --z-toast:         400;
+  --z-overlay:       500;
+  --z-login:         600;
 }
 
 body.light {
@@ -85,6 +120,24 @@ body.compact { --row-h: 32px; }
 body.roomy   { --row-h: 52px; }
 
 * { box-sizing: border-box; }
+
+/* Quality floor (v4 phase 3.4): honour the OS-level motion preference.
+ * `prefers-reduced-motion` was previously handled nowhere in this
+ * stylesheet -- the only block in the repo was in the now-deleted
+ * dashboard.css, which nothing loaded. The three infinite loops this
+ * matters most for are the skeleton shimmer, the sync-health pulse, and the
+ * draft-busy blink; `!important` here is deliberate, the same reasoning as
+ * the `[hidden]` rule above -- a system-level accessibility preference has
+ * to outrank whatever a component sets on itself.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 /* The `hidden` attribute has to actually hide things.
  *
@@ -129,6 +182,23 @@ button {
   font-size: inherit;
   color: inherit;
   cursor: pointer;
+}
+
+/* Quality floor (v4 phase 3.4): a visible, theme-consistent keyboard focus
+   ring for everything that had no author focus style at all -- buttons, nav
+   items, tabs, segmented controls, plain links. Elements that already define
+   their own :focus-visible treatment (text inputs' box-shadow ring; the
+   chart/tile/bar-row/drill-x/iqs-delta-row outline copies) win on
+   specificity and are unaffected. */
+a:focus-visible,
+button:focus-visible,
+.btn:focus-visible,
+.icon-btn:focus-visible,
+.nav-item:focus-visible,
+.seg-btn:focus-visible,
+.cd-tab:focus-visible {
+  outline: 2px solid var(--blue-2);
+  outline-offset: 2px;
 }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -204,7 +274,6 @@ body.sidebar-collapsed #app { grid-template-columns: var(--sidebar-w-collapsed);
 
 .nav-section {
   font-size: 10px;
-  text-transform: uppercase;
   letter-spacing: .8px;
   color: var(--text-4);
   padding: 14px 10px 6px;
@@ -233,7 +302,7 @@ body.sidebar-collapsed #app { grid-template-columns: var(--sidebar-w-collapsed);
   font-weight: 600;
 }
 
-body.light .nav-item.active { background: #e8f0fe; color: var(--blue-2); }
+body.light .nav-item.active { background: color-mix(in srgb, var(--blue-2) 10%, transparent); color: var(--blue-2); }
 
 .nav-icon {
   width: 20px;
@@ -525,6 +594,58 @@ body.sidebar-collapsed .nav-item { position: relative; }
   box-shadow: var(--shadow-1);
 }
 
+/* Unified card header/body pattern (v4 phase 3.1). `.card` itself carries no
+   padding, deliberately -- a header that owns a full-bleed border-bottom
+   cannot coexist with padding on its parent, so every card's non-head
+   content gets its own `.card-body` instead of relying on the container.
+   This replaces eleven ad hoc per-variant padding values (9-18px, no two
+   agreeing) that had silently produced a real bug: 12 of the app's 13
+   `.art-head`-style card headers had no horizontal inset at all, because
+   only one of them happened to sit inside a card that supplied its own. */
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+.card-head .btn { margin-left: auto; }
+
+.card-title {
+  margin: 0;
+  font-size: var(--fs-section-title);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+
+.card-sub {
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-table-cell);
+  line-height: 1.5;
+  color: var(--text-4);
+  max-width: 74ch;
+}
+
+.card-body {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* The one non-uppercase micro-label role (v4 phase 3.2): a quiet caption
+   above a value or a card-head title, sentence case. Replaces 24 ad hoc
+   uppercase reimplementations that had drifted onto slightly different
+   size/spacing/color triples. Table header cells keep real uppercase --
+   that's a different job, separating header from data in a dense grid. */
+.eyebrow {
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text-3);
+}
+
 .chip {
   display: inline-flex;
   align-items: center;
@@ -637,7 +758,7 @@ body.sidebar-collapsed .nav-item { position: relative; }
   display: flex;
   flex-direction: column;
   gap: 8px;
-  z-index: 400;
+  z-index: var(--z-toast);
   pointer-events: none;
 }
 
@@ -666,7 +787,7 @@ body.sidebar-collapsed .nav-item { position: relative; }
   background: rgba(0, 0, 0, .55);
   display: grid;
   place-items: center;
-  z-index: 500;
+  z-index: var(--z-overlay);
   padding: 24px;
   animation: fade 120ms ease;
 }
@@ -713,7 +834,6 @@ body.sidebar-collapsed .nav-item { position: relative; }
   font-weight: 600;
   color: var(--text-3);
   margin-bottom: 5px;
-  text-transform: uppercase;
   letter-spacing: .5px;
 }
 
@@ -749,7 +869,6 @@ textarea.input { min-height: 120px; resize: vertical; line-height: 1.6; font-fam
 .keys-grid h4 {
   margin: 0 0 8px;
   font-size: 11px;
-  text-transform: uppercase;
   letter-spacing: .6px;
   color: var(--text-4);
 }
@@ -784,7 +903,7 @@ kbd {
   display: grid;
   place-items: center;
   background: var(--bg-sunken);
-  z-index: 600;
+  z-index: var(--z-login);
   padding: 24px;
 }
 
@@ -873,7 +992,7 @@ kbd {
   background: transparent;
   color: var(--text-2);
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   cursor: pointer;
   white-space: nowrap;
   transition: background var(--speed) ease, color var(--speed) ease;
@@ -905,7 +1024,7 @@ kbd {
   height: 30px;
   max-width: 190px;
   padding: 0 26px 0 10px;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface);
@@ -925,7 +1044,7 @@ kbd {
   height: 30px;
   width: 200px;
   padding: 0 10px;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface);
@@ -1000,13 +1119,13 @@ table.tbl {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
 }
 
 table.tbl thead th {
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: var(--z-sticky-table);
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
   text-align: left;
@@ -1121,19 +1240,18 @@ tr.row .copybtn:hover { color: var(--blue); }
 .due-cell .cd.red   { color: var(--red); font-weight: 600; }
 .due-cell .cd.amber { color: var(--amber); }
 .due-cell .cd.dim   { color: var(--text-4); }
-.due-cell .abs { font-size: 10.5px; color: var(--text-4); }
+.due-cell .abs { font-size: var(--fs-meta); color: var(--text-4); }
 
 .group-row td {
   background: var(--bg-sunken) !important;
   font-size: 11px;
   font-weight: 500;
   letter-spacing: .04em;
-  text-transform: uppercase;
   color: var(--text-3);
   height: 28px;
   position: sticky;
   top: 34px;
-  z-index: 1;
+  z-index: var(--z-sticky-group);
 }
 .group-row .gcount { color: var(--text-4); margin-left: 6px; font-family: var(--mono); }
 
@@ -1141,7 +1259,7 @@ tr.row .copybtn:hover { color: var(--blue); }
 
 .ctxmenu {
   position: fixed;
-  z-index: 80;
+  z-index: var(--z-dropdown);
   min-width: 210px;
   padding: 6px;
   border-radius: var(--radius);
@@ -1162,7 +1280,7 @@ tr.row .copybtn:hover { color: var(--blue); }
   background: none;
   color: var(--text-2);
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   text-align: left;
   cursor: pointer;
 }
@@ -1225,7 +1343,6 @@ tr.row .copybtn:hover { color: var(--blue); }
     flex: 0 0 96px;
     color: var(--text-4);
     font-size: 11px;
-    text-transform: uppercase;
     letter-spacing: .04em;
   }
   .queue-find { width: 100%; }
@@ -1243,7 +1360,7 @@ tr.row .copybtn:hover { color: var(--blue); }
 .cd-head {
   position: sticky;
   top: 0;
-  z-index: 20;
+  z-index: var(--z-sticky-head);
   padding: 14px 0 10px;
   margin-bottom: 2px;
   background: var(--bg);
@@ -1258,7 +1375,7 @@ tr.row .copybtn:hover { color: var(--blue); }
 }
 
 .cd-num {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   font-size: 15px;
   font-weight: 600;
   color: var(--text-2);
@@ -1301,13 +1418,29 @@ tr.row .copybtn:hover { color: var(--blue); }
 }
 
 /* The meta grid. Fixed-width columns would wrap badly on a long account name,
-   so the columns size to content and the grid reflows instead. */
+   so the columns size to content and the grid reflows instead. Three tiers
+   (v4 phase 3.3): the title row above is primary, `.cd-meta-secondary` is
+   what needs acting on and who it's for (larger, full-strength text), and
+   `.cd-meta-tertiary` is background detail (smaller, muted, visually set
+   apart by its own top border) -- previously all eight items carried
+   identical weight regardless of how often they mattered. */
 .cd-meta {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
-  gap: 10px 22px;
-  margin-top: 12px;
+  gap: var(--space-3) var(--space-6);
+  margin-top: var(--space-3);
 }
+
+.cd-meta-secondary .cd-meta-value { font-size: var(--fs-body); color: var(--text); }
+
+.cd-meta-tertiary {
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: var(--space-2) var(--space-5);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+.cd-meta-tertiary .cd-meta-value { font-size: var(--fs-table-cell); color: var(--text-3); }
 
 .cd-meta-item { min-width: 0; }
 
@@ -1316,7 +1449,6 @@ tr.row .copybtn:hover { color: var(--blue); }
   font-size: 10px;
   font-weight: 600;
   letter-spacing: .06em;
-  text-transform: uppercase;
   color: var(--text-4);
   margin-bottom: 3px;
 }
@@ -1402,7 +1534,7 @@ tr.row .copybtn:hover { color: var(--blue); }
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
-.cd-tab.active .cd-tab-count { background: rgba(66, 133, 244, .18); color: var(--blue); }
+.cd-tab.active .cd-tab-count { background: color-mix(in srgb, var(--blue) 18%, transparent); color: var(--blue); }
 
 .cd-body { padding-bottom: 40px; }
 
@@ -1449,7 +1581,6 @@ tr.row .copybtn:hover { color: var(--blue); }
   font-size: 10px;
   font-weight: 600;
   letter-spacing: .05em;
-  text-transform: uppercase;
 }
 .tl-badge.internal { background: rgba(197, 138, 249, .16); color: var(--purple); }
 .tl-badge.email { background: rgba(120, 217, 236, .14); color: var(--cyan); }
@@ -1537,7 +1668,6 @@ tr.row .copybtn:hover { color: var(--blue); }
   font-size: 10px;
   font-weight: 600;
   letter-spacing: .06em;
-  text-transform: uppercase;
   color: var(--text-4);
 }
 
@@ -1562,30 +1692,7 @@ mark {
   gap: 12px;
 }
 
-.art-card {
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-}
-
-.art-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 9px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
-}
-
-.art-title {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .05em;
-  text-transform: uppercase;
-  color: var(--text-3);
-}
-.art-head .btn { margin-left: auto; }
+.art-card { border-radius: 8px; }
 
 .art-rows { display: flex; flex-direction: column; gap: 7px; }
 
@@ -1602,7 +1709,7 @@ mark {
 /* Cluster IDs and versions get copied into CLI commands constantly — monospace
    so a transposed character is visible before it is pasted. */
 .art-val {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   font-size: 12px;
   color: var(--text-2);
   overflow-wrap: anywhere;
@@ -1653,25 +1760,12 @@ mark {
 
 /* --- related -------------------------------------------------------------- */
 
-.rel-card {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 10px 13px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  color: inherit;
-  text-decoration: none;
-}
-.rel-card:hover { border-color: var(--border-2); background: var(--surface-2); }
-.rel-card .cname {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  color: var(--blue);
-}
-.rel-card .rsubject { flex: 1 1 240px; min-width: 0; font-size: 13px; color: var(--text-2); }
+/* Was `.rel-card` -- renamed after finding it collided with an unrelated,
+   unused rule of the same name (a flex/baseline link-chip: display:flex +
+   align-items:baseline on a card meant to stack a card-head over a table,
+   which the flex row broke). Nothing referenced the old rule once these two
+   call sites moved off it, so it was deleted rather than left dead. */
+.relgrp-card { border-radius: 8px; }
 
 .jira-warn { margin-top: 8px; }
 
@@ -1693,7 +1787,7 @@ mark {
   border-radius: 7px;
   background: var(--bg-sunken);
   color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   font-size: 13px;
   line-height: 1.6;
   resize: vertical;
@@ -1925,7 +2019,7 @@ mark {
 .cmp-band-note {
   margin: 0 0 10px 17px;
   max-width: 74ch;
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   line-height: 1.6;
   color: var(--text-4);
 }
@@ -1966,7 +2060,7 @@ mark {
 .cmp-subject {
   flex: 0 1 auto;
   min-width: 0;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1988,7 +2082,7 @@ mark {
   margin-top: 9px;
   padding-top: 9px;
   border-top: 1px solid var(--border);
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
 }
 /* Renegotiating is the action this page most wants you to reach for when a
    deadline is slipping, so it is the one that is not grey. */
@@ -2005,7 +2099,7 @@ mark {
 
 .cmp-preview {
   margin-top: 8px;
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   line-height: 1.55;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
@@ -2025,14 +2119,13 @@ mark {
 }
 .cmp-old-label {
   font-size: 10px;
-  text-transform: uppercase;
   letter-spacing: .07em;
   color: var(--text-4);
   margin-bottom: 3px;
 }
 .cmp-old-text {
   margin-top: 6px;
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   line-height: 1.5;
   color: var(--text-4);
 }
@@ -2111,7 +2204,7 @@ mark {
 body.light .seg-btn.on { color: #fff; }
 
 .sc-range {
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
@@ -2174,10 +2267,9 @@ a.tile:focus-visible {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   font-weight: 600;
   letter-spacing: .05em;
-  text-transform: uppercase;
   color: var(--text-3);
 }
 
@@ -2308,7 +2400,7 @@ a.tile:focus-visible {
   gap: 14px;
   flex-wrap: wrap;
   margin: 6px 0 0;
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   color: var(--text-3);
 }
 
@@ -2345,7 +2437,7 @@ a.tile:focus-visible {
 
 .chart .axis {
   fill: var(--text-4);
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   font-family: inherit;
 }
 
@@ -2424,7 +2516,7 @@ a.tile:focus-visible {
   padding: 5px 6px;
   margin: 0 -6px;
   border-radius: 6px;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   color: var(--text-2);
   text-decoration: none;
 }
@@ -2501,10 +2593,9 @@ a.bar-row:focus-visible {
 }
 
 .manual-label {
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   font-weight: 600;
   letter-spacing: .05em;
-  text-transform: uppercase;
   color: var(--text-3);
 }
 
@@ -2518,7 +2609,7 @@ a.bar-row:focus-visible {
 .manual-card .hint { margin: 0; line-height: 1.5; }
 
 .manual-meta {
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   color: var(--text-4);
   font-variant-numeric: tabular-nums;
 }
@@ -2539,7 +2630,7 @@ a.bar-row:focus-visible {
   background: rgba(242, 139, 130, .12);
   border: 1px solid rgba(242, 139, 130, .35);
   color: var(--red);
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   line-height: 1.45;
 }
 
@@ -2559,7 +2650,7 @@ a.bar-row:focus-visible {
   background: rgba(66, 133, 244, .14);
   border: 1px solid rgba(138, 180, 248, .38);
   color: var(--blue);
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -2607,7 +2698,7 @@ a.bar-row:focus-visible {
   /* The name column is the first thing that has to give on a phone. */
   .bar-row { grid-template-columns: minmax(0, 9ch) 1fr auto; }
 
-  .mini-table { font-size: 12.5px; }
+  .mini-table { font-size: var(--fs-body); }
   .mini-table th, .mini-table td { padding: 8px 10px; }
 }
 
@@ -2658,8 +2749,7 @@ a.link:hover { color: var(--blue); }
 .tri-card,
 .esc-card,
 .sr-card,
-.pt-card,
-.set-card {
+.pt-card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -2681,7 +2771,6 @@ a.link:hover { color: var(--blue); }
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--text-4);
   white-space: nowrap;
 }
@@ -2742,7 +2831,7 @@ a.link:hover { color: var(--blue); }
   border-radius: 999px;
   background: var(--surface-3);
   border: 1px solid var(--border);
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--text-3);
@@ -2833,7 +2922,7 @@ a.link:hover { color: var(--blue); }
 .tri-subject {
   display: block;
   margin: 6px 0 0;
-  font-size: 14.5px;
+  font-size: var(--fs-section-title);
   line-height: 1.4;
   color: var(--text);
   text-decoration: none;
@@ -2913,7 +3002,7 @@ a.link:hover { color: var(--blue); }
 .tri-left.dim   { color: var(--text-4); }
 
 .tri-target {
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   line-height: 1.35;
   color: var(--text-4);
 }
@@ -3007,10 +3096,9 @@ body.light .esc-card.overdue {
 
 .esc-due-label {
   margin-top: 2px;
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   font-weight: 600;
   letter-spacing: 0.05em;
-  text-transform: uppercase;
   color: var(--text-4);
   white-space: nowrap;
 }
@@ -3029,7 +3117,7 @@ body.light .esc-card.overdue {
 
 .esc-account {
   margin-top: 4px;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   color: var(--text-2);
 }
 
@@ -3048,10 +3136,9 @@ body.light .esc-card.overdue {
 .esc-fact { min-width: 0; }
 
 .esc-fact-label {
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   font-weight: 600;
   letter-spacing: 0.055em;
-  text-transform: uppercase;
   color: var(--text-4);
 }
 
@@ -3080,7 +3167,7 @@ body.light .esc-card.overdue {
   border-left: 2px solid var(--border-2);
   border-radius: 0 8px 8px 0;
   background: var(--surface-2);
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   line-height: 1.55;
   color: var(--text-2);
   white-space: pre-wrap;
@@ -3137,7 +3224,7 @@ body.light .esc-card.overdue {
   border: 1px solid var(--border);
   border-radius: 9px;
   color: var(--text);
-  font-size: 13.5px;
+  font-size: var(--fs-section-title);
   font-family: inherit;
   outline: none;
 }
@@ -3196,7 +3283,7 @@ body.light .esc-card.overdue {
 .sr-count {
   margin-left: auto;
   flex: none;
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   font-variant-numeric: tabular-nums;
   color: var(--text-4);
   white-space: nowrap;
@@ -3205,7 +3292,7 @@ body.light .esc-card.overdue {
 .sr-subject {
   display: block;
   margin: 7px 0 0;
-  font-size: 14.5px;
+  font-size: var(--fs-section-title);
   line-height: 1.4;
   color: var(--text);
   text-decoration: none;
@@ -3256,7 +3343,7 @@ body.light .esc-card.overdue {
 
 .sr-snippet {
   margin: 3px 0 0;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   line-height: 1.55;
   color: var(--text-2);
   overflow-wrap: anywhere;
@@ -3314,7 +3401,7 @@ a.sr-more:hover { color: var(--blue); }
   padding: 1px 6px;
   border-radius: 999px;
   background: var(--surface-3);
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   font-variant-numeric: tabular-nums;
   color: var(--text-3);
 }
@@ -3351,7 +3438,7 @@ a.sr-more:hover { color: var(--blue); }
 .pt-key {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 13.5px;
+  font-size: var(--fs-section-title);
   line-height: 1.45;
   color: var(--text);
 }
@@ -3424,7 +3511,7 @@ a.sr-more:hover { color: var(--blue); }
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface-2);
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   color: var(--text-2);
   text-decoration: none;
   white-space: nowrap;
@@ -3442,7 +3529,7 @@ a.sr-more:hover { color: var(--blue); }
 }
 
 .pt-member-p {
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   font-weight: 700;
   letter-spacing: 0.04em;
   color: var(--text-4);
@@ -3456,7 +3543,7 @@ a.sr-more:hover { color: var(--blue); }
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   color: var(--text-4);
 }
 
@@ -3477,38 +3564,10 @@ a.sr-more:hover { color: var(--blue); }
   max-width: 880px;
 }
 
-.set-card { padding: 0; }
-
-.set-head {
-  padding: 15px 18px 13px;
-  border-bottom: 1px solid var(--border);
-}
-
-.set-title {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  color: var(--text);
-}
-
-/* Every section says what it is for. These settings change how the app
-   behaves rather than how it looks, and a number with no sentence attached
-   is a number nobody dares touch. */
-.set-sub {
-  margin: 5px 0 0;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-4);
-  max-width: 74ch;
-}
-
-.set-body {
-  padding: 16px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 15px;
-}
+/* Settings sections use the unified `.card`/`.card-head`/`.card-title`/
+   `.card-sub`/`.card-body` classes directly (see settings.js's section()) --
+   this used to be a parallel `.set-*` family with identical shape, kept in
+   sync by hand. */
 
 /* --- read-only fact rows -------------------------------------------------- */
 
@@ -3549,7 +3608,7 @@ a.sr-more:hover { color: var(--blue); }
 
 .set-error-text {
   color: var(--red);
-  font-size: 12.5px;
+  font-size: var(--fs-body);
 }
 
 .set-actions {
@@ -3575,16 +3634,15 @@ a.sr-more:hover { color: var(--blue); }
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 5px;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   font-weight: 500;
   color: var(--text-2);
 }
 
 .set-unit {
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   font-weight: 500;
   letter-spacing: 0.03em;
-  text-transform: uppercase;
   color: var(--text-4);
   white-space: nowrap;
 }
@@ -3596,7 +3654,7 @@ a.sr-more:hover { color: var(--blue); }
 
 .set-field-hint {
   margin: 5px 0 0;
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   line-height: 1.45;
   color: var(--text-4);
 }
@@ -3606,7 +3664,7 @@ a.sr-more:hover { color: var(--blue); }
    turned red. */
 .set-err {
   margin-top: 5px;
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   line-height: 1.4;
   color: var(--red);
 }
@@ -3651,7 +3709,7 @@ a.sr-more:hover { color: var(--blue); }
 }
 
 .set-toggle-hint {
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   line-height: 1.45;
   color: var(--text-4);
   max-width: 72ch;
@@ -3670,10 +3728,9 @@ a.sr-more:hover { color: var(--blue); }
 
 .set-subgroup-label {
   margin: 0;
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   font-weight: 600;
   letter-spacing: 0.055em;
-  text-transform: uppercase;
   color: var(--text-4);
 }
 
@@ -3704,7 +3761,7 @@ a.sr-more:hover { color: var(--blue); }
 .set-url .input {
   flex: 1 1 300px;
   min-width: 200px;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
 }
 
 /* --- cache counts --------------------------------------------------------- */
@@ -3734,10 +3791,9 @@ a.sr-more:hover { color: var(--blue); }
 }
 
 .set-count-label {
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   font-weight: 600;
   letter-spacing: 0.05em;
-  text-transform: uppercase;
   color: var(--text-4);
 }
 
@@ -3867,7 +3923,7 @@ body.light .set-danger {
 .iqs-cell { display: inline-flex; align-items: center; gap: 8px; }
 
 .iqs-kw {
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   font-weight: 600;
   letter-spacing: .07em;
   color: var(--text-4);
@@ -4005,7 +4061,7 @@ body.compact .iqs-kw { display: none; }
 
 .iqs-dim-score {
   min-width: 8ch;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--tone);
   white-space: nowrap;
@@ -4072,7 +4128,7 @@ body.compact .iqs-kw { display: none; }
 .iqs-sig-main { min-width: 0; }
 
 .iqs-sig-label {
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   line-height: 1.45;
   color: var(--text-2);
 }
@@ -4081,7 +4137,7 @@ body.compact .iqs-kw { display: none; }
 
 .iqs-sig-note {
   margin-top: 3px;
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   line-height: 1.5;
   color: var(--text-4);
 }
@@ -4093,7 +4149,7 @@ body.compact .iqs-kw { display: none; }
   padding: 5px 0 5px 10px;
   max-width: 96ch;
   border-left: 2px solid color-mix(in srgb, var(--sig) 45%, transparent);
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   line-height: 1.55;
   color: var(--text-3);
   white-space: pre-wrap;
@@ -4103,7 +4159,7 @@ body.compact .iqs-kw { display: none; }
 .iqs-sig-w {
   min-width: 3.5ch;
   padding-top: 3px;
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   color: var(--sig);
   text-align: right;
 }
@@ -4157,7 +4213,7 @@ body.compact .iqs-kw { display: none; }
   padding-left: 10px;
   max-width: 96ch;
   border-left: 2px solid var(--border-2);
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   line-height: 1.55;
   color: var(--text-3);
   white-space: pre-wrap;
@@ -4179,7 +4235,6 @@ body.compact .iqs-kw { display: none; }
   font-size: 10px;
   font-weight: 600;
   letter-spacing: .06em;
-  text-transform: uppercase;
   color: var(--green);
 }
 
@@ -4206,7 +4261,7 @@ body.compact .iqs-kw { display: none; }
 
 .iqs-ex {
   max-width: 46ch;
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   color: var(--text-3);
   white-space: nowrap;
   overflow: hidden;
@@ -4290,10 +4345,9 @@ body.compact .iqs-kw { display: none; }
 .l2-fact { display: flex; flex-direction: column; gap: 1px; }
 
 .l2-fact dt {
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   font-weight: 500;
   letter-spacing: .04em;
-  text-transform: uppercase;
   color: var(--text-4);
 }
 
@@ -4322,10 +4376,9 @@ body.compact .iqs-kw { display: none; }
 }
 
 .l2-tok-label {
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   font-weight: 500;
   letter-spacing: .04em;
-  text-transform: uppercase;
   color: var(--text-4);
 }
 
@@ -4399,7 +4452,7 @@ body.compact .iqs-kw { display: none; }
 }
 
 .scorer-when {
-  font-size: 11.5px;
+  font-size: var(--fs-table-cell);
   color: var(--text-4);
   white-space: nowrap;
 }
@@ -4432,7 +4485,6 @@ body.compact .iqs-kw { display: none; }
   font-size: 11px;
   font-weight: 500;
   letter-spacing: .04em;
-  text-transform: uppercase;
   color: var(--text-4);
 }
 
@@ -4510,7 +4562,7 @@ body.compact .iqs-kw { display: none; }
 
 .iqs-delta-row { cursor: pointer; }
 .iqs-delta-row:focus-visible {
-  outline: 2px solid var(--blue);
+  outline: 2px solid var(--blue-2);
   outline-offset: -2px;
 }
 
@@ -4527,7 +4579,7 @@ body.compact .iqs-kw { display: none; }
 .iqs-delta-row .iqs-delta {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--tone);
 }
@@ -4594,7 +4646,7 @@ body.compact .iqs-kw { display: none; }
 
 .l2-act .spacer { flex: 1 1 auto; }
 
-.l2-act-cost, .l2-act-ms { flex: 0 0 auto; font-size: 11.5px; }
+.l2-act-cost, .l2-act-ms { flex: 0 0 auto; font-size: var(--fs-table-cell); }
 .l2-act-cost { color: var(--text-2); }
 
 .l2-act-src {
@@ -4662,7 +4714,6 @@ body.compact .iqs-kw { display: none; }
 
 .to-list { display: flex; flex-direction: column; gap: 12px; }
 
-.to-range-card { padding: 13px 14px; }
 .to-range-card.is-past { opacity: 0.6; }
 .to-range-dates { font-weight: 500; }
 .to-range-note { font-style: italic; }
@@ -4707,8 +4758,8 @@ body.compact .iqs-kw { display: none; }
   background: var(--bg-sunken);
   border: 1px solid var(--border);
   border-radius: 6px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11.5px;
+  font-family: var(--mono);
+  font-size: var(--fs-table-cell);
   line-height: 1.6;
   white-space: pre-wrap;
   color: var(--text-2);
@@ -4729,7 +4780,7 @@ body.compact .iqs-kw { display: none; }
   width: 100%;
   min-height: 100px;
   padding: 8px 10px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   font-size: 12px;
   line-height: 1.6;
   resize: vertical;
@@ -4795,7 +4846,7 @@ table.tbl th.check-col input {
 
 .recap-text {
   margin: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   font-size: 13px;
   line-height: 1.7;
   white-space: pre-wrap;

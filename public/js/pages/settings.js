@@ -132,11 +132,12 @@ const CACHE_ROWS = [
 /* -------------------------------------------------------------------- bits */
 
 function section(title, subtitle, ...children) {
-  return h("section", { class: "set-card card" },
-    h("header", { class: "set-head" },
-      h("h2", { class: "set-title", text: title }),
-      subtitle ? h("p", { class: "set-sub", text: subtitle }) : null),
-    h("div", { class: "set-body" }, children));
+  return h("section", { class: "card" },
+    h("header", { class: "card-head" },
+      h("div", {},
+        h("h2", { class: "card-title", text: title }),
+        subtitle ? h("p", { class: "card-sub", text: subtitle }) : null)),
+    h("div", { class: "card-body" }, children));
 }
 
 function row(label, value, opts) {
