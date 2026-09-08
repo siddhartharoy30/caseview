@@ -652,3 +652,42 @@ credential gap as prior phases) — the collapse/expand toggle and the
 `localStorage`-persisted collapsed state are reviewed by hand against the
 same pattern `tzstrip.js` already uses for its own open/collapsed state,
 which *was* tested end-to-end in v4 phase 7.
+
+## Phase 4c — optional TLS listener
+
+Files: `src/config.ts`, `src/server.ts`, `README.md`, `Dockerfile`,
+`docker-compose.yml`, `docs/PLAN_V5.md`.
+
+**Default path (no TLS vars set) confirmed unaffected.** `tsx watch`
+restarted cleanly on the `server.ts`/`config.ts` edit; `data/qview.log`
+shows exactly one `server.listening` line at that restart
+(`port:3001, protocol:http`), no `server.tls_failed`, and a subsequent
+`/healthz` fetch returned `ok` — the plain-HTTP path behaves exactly as
+before this phase, just with a `protocol` field added to the log line.
+
+**The HTTPS mechanics themselves, verified in isolation** (not against the
+real dev server or its database, to avoid a second writer touching
+`data/qview.db` mid-session): generated a self-signed cert with the exact
+`openssl req -x509 ... -addext "subjectAltName=IP:..."` command documented
+in `README.md`, then ran the identical `https.createServer({cert, key},
+handler).listen(port)` pattern used in `server.ts` against it. Confirmed
+two things a code read alone can't: (1) a plain request without a trust
+override fails with `DEPTH_ZERO_SELF_SIGNED_CERT`, exactly the warning
+Chrome shows on first visit; (2) a request with the trust override applied
+(`rejectUnauthorized: false`, standing in for "clicked through the
+warning") gets a real `200` back. Both match the README's cert-trust
+instructions.
+
+**Not tested:** the actual `QVIEW_TLS_CERT`/`QVIEW_TLS_KEY` env vars against
+the real running server, since setting them would require editing `.env`,
+which contains secrets outside this session's read/write scope. The
+isolated test above exercises the identical code path `server.ts` runs, so
+this is a faithful proxy, not a skip — but it is not the same as the real
+server booting with real env vars, and is disclosed as such.
+
+**Known, disclosed, and not fixable from this repo:** the deployed VM
+instance runs inside a separate compose stack this session cannot edit, so
+even once this code deploys, `https://10.26.118.153:3443` will not be
+reachable until someone with access to that stack adds a matching port
+mapping by hand. Written up as an explicit open TODO in `docs/PLAN_V5.md`
+per the user's own decision on this tradeoff, not silently assumed away.

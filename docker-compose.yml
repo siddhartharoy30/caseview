@@ -22,6 +22,10 @@ services:
       # QView must not be reachable from an untrusted network. Put it behind a
       # reverse proxy that does real authentication before changing this.
       - "127.0.0.1:3001:3001"
+      # v5 phase 4c: only opens a real listener inside the container if both
+      # QVIEW_TLS_CERT and QVIEW_TLS_KEY are set in .env -- see README.md's
+      # Security section. Loopback-only, same reasoning as port 3001 above.
+      - "127.0.0.1:3443:3443"
 
     env_file:
       - .env

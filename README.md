@@ -190,6 +190,43 @@ client. `.env`, `data/` and `certs/` are gitignored.
 suggestions are drafted into a textarea for you to copy — nothing is posted
 back to a case.
 
+**Optional HTTPS, for Document Picture-in-Picture (v5 phase 4c).** The phone
+queue's pop-out window needs a secure context, which plain `http://` on a
+bare IP is not — `localhost` is secure by definition and needs nothing
+below, but a box reached by IP (as QView's own deployment is) needs a real
+listener. Set both `QVIEW_TLS_CERT` and `QVIEW_TLS_KEY` in `.env` to a
+certificate and key file and QView boots a second, HTTPS listener on
+`QVIEW_TLS_PORT` (default `3443`) **alongside** the existing HTTP one —
+plain HTTP never goes away, so nothing that already points at port 3001
+breaks. Neither variable is set by default; leaving both unset is a
+complete, supported configuration, not a degraded one.
+
+Generate a self-signed certificate (replace the IP with QView's own):
+
+```sh
+mkdir -p certs
+openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
+  -keyout certs/qview.key -out certs/qview.crt \
+  -subj "/CN=10.26.118.153" \
+  -addext "subjectAltName=IP:10.26.118.153"
+```
+
+Then in `.env`:
+
+```
+QVIEW_TLS_CERT=/app/certs/qview.crt
+QVIEW_TLS_KEY=/app/certs/qview.key
+```
+
+The bundled compose file already mounts `./certs` read-only into the
+container, so no volume change is needed. The first visit to
+`https://<host>:3443` shows Chrome's self-signed-certificate warning —
+clicking through it once ("Advanced → Proceed") is enough for Chrome to
+treat that origin as secure from then on; no OS keychain import is
+required. A bad or missing cert/key logs `server.tls_failed` and leaves the
+plain-HTTP listener running untouched — it can never take the whole process
+down.
+
 ---
 
 ## API

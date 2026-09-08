@@ -18,4 +18,7 @@ COPY public ./public
 
 ENV NODE_ENV=production
 EXPOSE 3001
+# v5 phase 4c: only listens if QVIEW_TLS_CERT/QVIEW_TLS_KEY are both set --
+# documentation only, does not itself open the port.
+EXPOSE 3443
 CMD ["node", "dist/server.js"]

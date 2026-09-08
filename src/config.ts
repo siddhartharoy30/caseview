@@ -21,6 +21,15 @@ const anthropic = {
 
 export const config = {
   port: Number(process.env.PORT || 3001),
+  // v5 phase 4c: optional. Document Picture-in-Picture (phase 4d) needs a
+  // secure context, and this box is plain http:// on a bare IP. Both unset
+  // (the default) means no HTTPS listener starts at all -- see
+  // server.ts's app.listen() for how the two listeners coexist.
+  tls: {
+    certPath: process.env.QVIEW_TLS_CERT || "",
+    keyPath: process.env.QVIEW_TLS_KEY || "",
+    port: num("QVIEW_TLS_PORT", 3443),
+  },
   salesforce: {
     clientId: required("SALESFORCE_CLIENT_ID"),
     clientSecret: required("SALESFORCE_CLIENT_SECRET"),

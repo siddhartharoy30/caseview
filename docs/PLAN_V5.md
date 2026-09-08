@@ -41,3 +41,25 @@ whether any particular surface (page, dock, pop-out) is currently watching
 survive leaving `/phone`) and the not-yet-built multi-surface requirement
 from Phase 4b/4d. **There is no separate Phase 4a commit or code.** A later
 reader looking for a second monitor module should stop here: this is it.
+
+## Phase 4c — the deployed instance needs a manual step this repo can't do
+
+The HTTPS listener and cert-generation steps ship in this repo's own code
+and `README.md` (see the Security section). But `docker-compose.yml`'s own
+header says the deployed VM instance doesn't actually run from this repo's
+compose file at all — it runs as one service inside a sibling
+`salesforce-case-tracker` compose stack, in a different repository this
+plan has no access to. That sibling stack's `qview` container currently
+publishes port 3001 as `0.0.0.0:3001->3001` — **not** loopback-only like
+this repo's own standalone file, so whoever adds the matching TLS mapping
+there should follow *that* stack's existing pattern, not copy this file's
+`127.0.0.1:3443:3443` line verbatim.
+
+**Open TODO, not yet done:** add a `3443:3443` (or `0.0.0.0:3443:3443`,
+matching the existing port-3001 mapping) entry to the sibling stack's
+compose file, generate a real cert for `10.26.118.153` on the VM, and set
+`QVIEW_TLS_CERT`/`QVIEW_TLS_KEY` in that deployment's own `.env`. Until
+that happens, `https://10.26.118.153:3443` is not reachable even though
+the code to serve it is live — Phase 4d's Document PiP tier will correctly
+report `insecure-context` and fall back to the popup/dock tiers on the real
+deployed instance until this is done by hand.
