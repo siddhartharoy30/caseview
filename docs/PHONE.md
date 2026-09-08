@@ -62,6 +62,47 @@ real board, not a screenshot-to-screenshot comparison of a number Case Desk
 prints. If Case Desk's UI ever grows an explicit position number, that
 would be the stronger check to run.
 
+## Region discovery (v5)
+
+The federal/non-federal split above is real and correct, but AMER is not one
+pool: US-based agents and India-based agents working AMER hours sit on
+different lines and do not compete for the same calls. A real screenshot
+made this concrete — a US agent idle over an hour, the India-based owner
+idle 34 minutes, both AMER/available, and QView said the owner was #2 when
+they would actually take the next call.
+
+Checked three avenues before writing any code, per the plan's own
+instruction not to guess:
+
+1. **Sibling reportrunner endpoints.** Probed roughly 18 plausible paths
+   under `reportrunner.colo.rubrik.com/cgi-bin/` — regional variants, a
+   `roster.pl`, a `routing_profile.pl`, a `federal/` sibling directory. Only
+   the known `amer/phone_now_et.pl` exists; everything else 404s, directory
+   listing is 403. No sibling endpoint exposes region or routing profile.
+2. **Case Desk.** Re-fetched its live `/api/phone-queue` response and its own
+   `app.js`. Its agent objects carry exactly `name`, `status_text`,
+   `status_class`, `duration`, `federal` — no region field, no mention of
+   "region" or "routing profile" anywhere in its code. **Case Desk shares
+   this exact flaw** — it would also read #2 when a US agent is idle longer
+   than an India-based one on the same line. This is a documented
+   divergence QView now corrects, not a silent disagreement: Case Desk was
+   never wrong on purpose, the dimension simply doesn't exist anywhere
+   machine-readable.
+3. **The Amazon Connect CCP routing-profile panel.** Behind Okta SSO in a
+   real browser session — not checkable by an automated read. Not required
+   either way: both machine-readable avenues above came up empty, so the
+   explicit roster below is necessary regardless of what that panel would
+   have said.
+
+**Conclusion: the roster (`phone_roster` in `src/db.ts`) is not a fallback,
+it is the only option.** Region is never inferred from an agent's name,
+timezone, or idle pattern — per the plan's own explicit constraint, a guess
+here would reproduce the exact failure this phase exists to fix. An agent
+absent from the roster reads `region: "unknown"` and, if they are available
+on my own line, makes my own position uncertain rather than silently wrong
+— see `src/phone.ts:positionOf()`'s `uncertain`/`unclassified` fields and
+the banner on `/phone`.
+
 ## Status vocabulary
 
 Matched to the board's own CSS classes (from the fetched page's `<style>`

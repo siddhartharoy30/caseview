@@ -16,8 +16,8 @@
 
 import { h, mount } from "../lib/dom.js";
 import { api } from "../lib/api.js";
-import { toast } from "../lib/ui.js";
-import { banner, emptyState, button } from "../lib/ui.js";
+import { toast, toastError } from "../lib/ui.js";
+import { banner, emptyState, button, dialog, field, select } from "../lib/ui.js";
 import { page, pageHead, cardHead, eyebrow } from "./_shared.js";
 
 const POLL_MS = 10000;
@@ -51,7 +51,7 @@ export function render(ctx, host, shell) {
     error: null,
     board: null,
     myName: null,
-    myPosition: null,
+    position: null,
     enabled: false,
     threshold: ALERT_THRESHOLD_DEFAULT,
     lastNotifiedPosition: null,
@@ -81,7 +81,7 @@ export function render(ctx, host, shell) {
   function maybeAlert() {
     const board = state.board;
     if (!board || !board.ok || !state.enabled) return;
-    const pos = state.myPosition;
+    const pos = state.position ? state.position.position : null;
     const mine = board.agents.find((a) => a.name === state.myName);
 
     // Auto-off after 5 minutes reading "offline" -- so it does not nag after
@@ -119,7 +119,7 @@ export function render(ctx, host, shell) {
       if (disposed) return;
       state.board = res;
       state.myName = res.myName;
-      state.myPosition = res.myPosition;
+      state.position = res.position;
       state.error = null;
       maybeAlert();
     } catch (err) {
@@ -134,6 +134,34 @@ export function render(ctx, host, shell) {
   function stopPolling() {
     if (timer) clearTimeout(timer);
     timer = null;
+  }
+
+  /** v5 phase 2: any non-federal row is clickable, so a wrong classification
+   * can always be corrected later, not just an unclassified one. */
+  function openClassifyDialog(name, currentRegion) {
+    const sel = select(
+      [{ value: "india", label: "India" }, { value: "us", label: "US" }, { value: "unknown", label: "Unclassified" }],
+      currentRegion || "unknown",
+      () => {},
+    );
+    const d = dialog({
+      title: "Classify " + name,
+      body: h("div", {}, field("Region", sel)),
+      actions: (close) => [
+        h("button", { class: "btn", onclick: () => close(null) }, "Cancel"),
+        h("button", { class: "btn primary", onclick: () => close(sel.value) }, "Save"),
+      ],
+    });
+    d.onClose(async (region) => {
+      if (!region) return;
+      try {
+        await api.savePhoneRoster({ name, region });
+        toast(name + " classified as " + (region === "unknown" ? "unclassified" : region === "us" ? "US" : "India"));
+        if (state.enabled) poll();
+      } catch (err) {
+        toastError(err);
+      }
+    });
   }
 
   function statusCard() {
@@ -160,24 +188,28 @@ export function render(ctx, host, shell) {
           banner("info", "\"" + state.myName + "\" is not on the board right now — off shift, or the name doesn't match how it renders there.")));
     }
 
-    const pos = state.myPosition;
+    const r = state.position;
+    const pos = r ? r.position : null;
     return h("div", { class: "card phn-status-card" },
       h("div", { class: "card-body" },
         board.stale ? banner("warn", "Showing the last successful read — the board did not respond just now.") : null,
+        r && r.uncertain
+          ? banner("warn",
+              r.unclassified.length + " unclassified — " + r.unclassified.join(", ") + " — position may be wrong",
+              button("Classify", { small: true, onclick: () => openClassifyDialog(r.unclassified[0]) }))
+          : null,
         h("div", { class: "phn-status-grid" },
           h("div", { class: "phn-position" },
             eyebrow("Position in queue"),
             h("div", { class: `phn-position-num ${pos != null && pos <= state.threshold ? "is-urgent" : ""}`, text: pos != null ? "#" + pos : "—" }),
-            h("div", { class: "dim", text: pos != null
-              ? (pos === 1 ? "You're next for the next call" : pos + (pos === 2 ? "nd" : pos === 3 ? "rd" : "th") + " for the next call")
+            r ? h("div", { class: "dim", text: "of " + r.poolSize + " in " + r.poolLabel }) : null,
+            h("div", { class: "dim", text: r
+              ? (r.ahead === 0 ? "Ahead of you: nobody" : "Ahead of you: " + r.ahead)
               : "Not counted (Federal line, or off the board)" })),
           h("div", { class: "phn-fact" },
             eyebrow("My status"),
             h("div", {}, h("span", { class: `chip ${statusTone(mine.statusClass)}`, text: mine.statusText }), h("span", { class: "dim", text: "  " + mine.duration })),
             mine.federal ? h("div", { class: "chip neutral", text: "Federal line" }) : null),
-          h("div", { class: "phn-fact" },
-            eyebrow("Ahead of me"),
-            h("div", { class: "mono", text: pos != null ? String(pos - 1) : "—" })),
           h("div", { class: "phn-fact" },
             eyebrow("Queued callers"),
             h("div", { class: "mono", text: board.queuedAgents + " AMER · " + board.queuedFederal + " Federal" })))));
@@ -199,7 +231,14 @@ export function render(ctx, host, shell) {
             class: `row ${a.name === state.myName ? "phn-me-row" : ""}`,
           },
             h("td", { text: a.name }),
-            h("td", {}, a.federal ? h("span", { class: "chip neutral", text: "Federal" }) : h("span", { class: "dim", text: "AMER" })),
+            h("td", {},
+              a.federal
+                ? h("span", { class: "chip neutral", text: "Federal" })
+                : h("span", {
+                    class: `chip is-clickable ${a.region === "unknown" ? "warn" : "neutral"}`,
+                    onclick: () => openClassifyDialog(a.name, a.region),
+                    text: "AMER · " + (a.region === "unknown" ? "Unclassified" : a.region === "us" ? "US" : "India"),
+                  })),
             h("td", {}, h("span", { class: `chip ${statusTone(a.statusClass)}`, text: a.statusText })),
             h("td", { class: "right mono", text: a.duration })))))));
   }

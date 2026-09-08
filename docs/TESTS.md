@@ -543,3 +543,47 @@ argument at the call site.
 
 **Confirmed gone.** `/phone`'s header reads "Phone Queue" with no second
 line. `grep -rn "matched against Case Desk" public/` returns nothing.
+
+## Phase 2 — region-aware position
+
+Files: `src/db.ts`, `src/phone.ts`, `src/server.ts`, `public/js/pages/phone.js`,
+`public/js/pages/settings.js`, `public/js/lib/api.js`, `public/css/app.css`.
+
+**Discovery, before any code:** confirmed via a live probe that neither
+sibling `reportrunner` endpoints nor Case Desk's own code expose an agent's
+region — Case Desk shares the exact same bug this phase fixes. Full writeup
+in `docs/PHONE.md`'s new "Region discovery (v5)" section.
+
+**Verified against the real running dev server** (`data/qview.db`, 262
+cases, tsx watch already running and picked up every change with no crash —
+confirmed via `data/qview.log`, no error/fatal lines introduced). The roster
+seeded correctly on boot: `SELECT * FROM phone_roster` shows exactly the two
+rows Section 0 named (`Siddhartha` → india, `Luke` → us), nothing guessed.
+
+**The real bug report, reproduced and confirmed fixed** by importing
+`positionOf()` directly (via `tsx`, no HTTP layer — this dev session has no
+login credentials available to script a browser session, disclosed here
+rather than glossed over) against a synthetic board matching the exact
+screenshot that motivated this phase: Luke (US) idle 1:05:49, the owner
+(India) idle 34:32, both AMER/available.
+
+- **Before this phase:** `positionOf()` returned `2`.
+- **After:** returns `{"position":1,"poolSize":1,"poolLabel":"AMER · India","ahead":0,"uncertain":false,"unclassified":[]}`.
+
+Three more scenarios run the same way: an unclassified available AMER agent
+ahead of me sets `uncertain: true` and names them in `unclassified`; a
+federal agent is excluded from the pool entirely regardless of duration
+(`poolSize` unaffected by adding one); a name absent from the live board
+returns `null`, unchanged from v4's behavior. All four matched their
+expected values exactly.
+
+**Real board, real data:** fetched the actual live board (16 real agents,
+0 queued) through `getPhoneBoard()` — 14 of 16 non-federal agents render as
+region `unknown` (nobody but the two seeded names has been classified yet),
+confirming the uncertainty path is real and live on this board today, not
+just in a synthetic test.
+
+**Persistence:** the roster is a normal table in the same SQLite file the
+running server already has open — read back after the fact with a separate
+connection while the dev server kept running throughout, confirming this is
+a real database, not an in-memory cache that would reset on restart.

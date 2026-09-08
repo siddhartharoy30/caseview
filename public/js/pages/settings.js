@@ -40,6 +40,7 @@ import {
   button,
   confirmDialog,
   emptyState,
+  select,
   skeletonCards,
   toast,
   toastError,
@@ -173,7 +174,7 @@ function segmented(options, current, onpick) {
 /* ------------------------------------------------------------------ render */
 
 export function render(_ctx, host, shell) {
-  const state = { data: null, loading: true, error: null };
+  const state = { data: null, loading: true, error: null, roster: [] };
   const bodyHost = h("div", {});
   let disposed = false;
 
@@ -183,9 +184,10 @@ export function render(_ctx, host, shell) {
     state.loading = true;
     paint();
     try {
-      const data = await api.settings();
+      const [data, rosterRes] = await Promise.all([api.settings(), api.phoneRoster().catch(() => ({ roster: [] }))]);
       if (disposed) return;
       state.data = data;
+      state.roster = (rosterRes && rosterRes.roster) || [];
       state.error = null;
     } catch (err) {
       state.error = err;
@@ -521,6 +523,64 @@ export function render(_ctx, host, shell) {
     return section("Webhook", "Optional, and off unless you switch it on.", children);
   }
 
+  /**
+   * v5 phase 2: nothing on the wire tells QView an agent's region (see
+   * docs/PHONE.md's discovery section), so classification is either done
+   * here or from the board table on /phone directly -- this is the "before
+   * they've ever appeared on a fetched board" path.
+   */
+  function phoneRosterSection() {
+    const nameInput = h("input", { class: "input", type: "text", placeholder: "Agent name, as it appears on the board" });
+    const regionSelect = select(
+      [{ value: "india", label: "India" }, { value: "us", label: "US" }, { value: "unknown", label: "Unclassified" }],
+      "india", () => {},
+    );
+
+    async function saveEntry(name, region) {
+      try {
+        await api.savePhoneRoster({ name, region });
+        await load();
+        toast(name + " saved");
+      } catch (err) {
+        toastError(err);
+      }
+    }
+
+    const rows = state.roster.map((r) =>
+      h("div", { class: "set-row" },
+        h("span", { class: "set-row-label", text: r.name }),
+        select(
+          [{ value: "india", label: "India" }, { value: "us", label: "US" }, { value: "unknown", label: "Unclassified" }],
+          r.region,
+          (region) => saveEntry(r.name, region),
+        ),
+        button("Remove", {
+          small: true,
+          onclick: async () => {
+            await api.deletePhoneRoster(r.name).catch(toastError);
+            load();
+          },
+        })));
+
+    return section(
+      "Phone roster",
+      "Which region each AMER-line agent works from, since nothing the phone board or Case Desk exposes says so — see docs/PHONE.md. Never inferred from a name or timezone.",
+      h("div", { class: "set-rows" }, rows.length ? rows : h("p", { class: "dim", text: "No one classified yet." })),
+      h("div", { class: "set-inline" },
+        nameInput,
+        regionSelect,
+        button("Add", {
+          small: true,
+          kind: "primary",
+          onclick: async () => {
+            const name = nameInput.value.trim();
+            if (!name) return toast("Name is required", "err");
+            await saveEntry(name, regionSelect.value);
+            nameInput.value = "";
+          },
+        })));
+  }
+
   function appearanceSection() {
     const theme = store.get("theme", "dark");
     const density = store.get("density", "default");
@@ -632,6 +692,7 @@ export function render(_ctx, host, shell) {
       thresholdSection(),
       notificationSection(),
       webhookSection(),
+      phoneRosterSection(),
       appearanceSection(),
       cacheSection()));
   }

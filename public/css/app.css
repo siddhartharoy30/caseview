@@ -5214,6 +5214,9 @@ table.tbl th.check-col input {
   font-weight: 600;
 }
 
+/* v5 phase 2: every non-federal Line cell opens the classify dialog. */
+.phn-board tbody tr .chip.is-clickable { cursor: pointer; }
+
 @media (max-width: 700px) {
   .phn-status-grid { grid-template-columns: 1fr 1fr; }
 }

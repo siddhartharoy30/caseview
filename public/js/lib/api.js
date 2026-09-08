@@ -133,6 +133,10 @@ export const api = {
 
   /* phone queue monitor (v4 phase 6) */
   phoneBoard: () => request("GET", "/api/phone/board"),
+  /* v5 phase 2: explicit region roster, since nothing on the wire exposes it */
+  phoneRoster: () => request("GET", "/api/phone/roster"),
+  savePhoneRoster: (patch) => request("POST", "/api/phone/roster", patch),
+  deletePhoneRoster: (name) => request("DELETE", "/api/phone/roster/" + encodeURIComponent(name)),
 
   /* AI draft — generates into the same staging area the Draft tab already owns.
      Nothing here sends anything; every result still goes through the tab's own

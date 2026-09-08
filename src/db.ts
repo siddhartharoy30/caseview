@@ -544,6 +544,51 @@ export function allSettings(): Record<string, string> {
   return out;
 }
 
+/* --------------------------------------------------------- v5 phase 2: phone roster */
+
+/**
+ * The missing dimension. federal/non-federal already comes from the board's
+ * own `fed` CSS class (src/phone.ts's PhoneAgent.federal) and stays the
+ * authority for "line" -- this table only ever supplies `region`, which
+ * nothing on the wire exposes (confirmed: no sibling reportrunner endpoint,
+ * no field on Case Desk's own agent objects, see docs/PHONE.md). `line` here
+ * is descriptive metadata only, useful for pre-classifying someone before
+ * they've ever appeared on a fetched board -- position math never reads it.
+ * `updated_at` is INTEGER epoch-ms via now(), matching every other timestamp
+ * column in this file.
+ *
+ * Placed after the settings section (not up with the other schema, alongside
+ * `ensureColumn`) because the seed below calls `getSetting()`, whose fallback
+ * path reads the `SETTING_DEFAULTS` const -- that binding is in its temporal
+ * dead zone until its own declaration above has executed, so seeding earlier
+ * in module-load order would throw on a fresh database with no `settings`
+ * row yet.
+ */
+db.exec(`
+CREATE TABLE IF NOT EXISTS phone_roster (
+  name       TEXT PRIMARY KEY,
+  line       TEXT,
+  region     TEXT NOT NULL DEFAULT 'unknown',
+  note       TEXT,
+  updated_at INTEGER NOT NULL
+);
+`);
+
+/**
+ * Seed exactly what v5's plan section 0 states explicitly -- never more.
+ * INSERT OR IGNORE so a later human classification is never clobbered on
+ * restart.
+ */
+function seedPhoneRoster(): void {
+  const me = getSetting("phoneBoardName");
+  const seed = db.prepare(
+    `INSERT OR IGNORE INTO phone_roster (name, line, region, note, updated_at) VALUES (?, 'amer', ?, ?, ?)`,
+  );
+  seed.run(me, "india", "seeded — MY_LINE_AND_REGION, v5 section 0", now());
+  seed.run("Luke", "us", "seeded — KNOWN_US_AGENTS, v5 section 0", now());
+}
+seedPhoneRoster();
+
 /* -------------------------------------------------------------- sync state */
 
 export interface SyncState {

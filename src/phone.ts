@@ -32,6 +32,7 @@
  */
 
 import { log, errText } from "./log";
+import { db, now } from "./db";
 
 export type AgentStatus =
   | "available" | "ringing" | "accepting_call" | "inbound" | "outbound"
@@ -164,11 +165,136 @@ export async function getPhoneBoard(): Promise<PhoneBoard | PhoneBoardError> {
   return result;
 }
 
-/** 1-based position among non-federal agents, in the board's own row order
- * -- see POSITION DISCOVERY above. Null if the name is not on the board at
- * all (off shift, or a name mismatch worth knowing about separately). */
-export function positionOf(board: PhoneBoard, name: string): number | null {
-  const nonFederal = board.agents.filter((a) => !a.federal);
-  const idx = nonFederal.findIndex((a) => a.name === name);
-  return idx === -1 ? null : idx + 1;
+/* -------------------------------------------------------- v5 phase 2: roster */
+
+/**
+ * v5 phase 2 discovery, before any of this was written: probed ~18 sibling
+ * `reportrunner` CGI paths (regional variants, a routing-profile report, a
+ * federal/ sibling directory) -- only the known amer/phone_now_et.pl exists,
+ * everything else 404s or 403s on directory listing. Re-fetched Case Desk's
+ * own app.js and its live /api/phone-queue response: its agent objects carry
+ * exactly name/status_text/status_class/duration/federal -- no region field
+ * anywhere, meaning Case Desk shares this exact bug (see docs/PHONE.md).
+ * Both machine-readable avenues came up empty, so the explicit roster below
+ * is the only option, not a fallback.
+ */
+export type Region = "us" | "india" | "unknown";
+const VALID_REGIONS = new Set<Region>(["us", "india", "unknown"]);
+
+export interface RosterEntry {
+  name: string;
+  line: string | null;
+  region: Region;
+  note: string | null;
+  updatedAt: number;
+}
+
+interface RosterRow {
+  name: string;
+  line: string | null;
+  region: string;
+  note: string | null;
+  updated_at: number;
+}
+
+function toRosterEntry(r: RosterRow): RosterEntry {
+  return { name: r.name, line: r.line, region: r.region as Region, note: r.note, updatedAt: r.updated_at };
+}
+
+export function listRoster(): RosterEntry[] {
+  return (db.prepare("SELECT * FROM phone_roster ORDER BY name ASC").all() as RosterRow[]).map(toRosterEntry);
+}
+
+function rosterMap(): Map<string, RosterEntry> {
+  return new Map(listRoster().map((r) => [r.name, r]));
+}
+
+export function regionOf(name: string, map?: Map<string, RosterEntry>): Region {
+  return (map ?? rosterMap()).get(name)?.region ?? "unknown";
+}
+
+export function upsertRosterEntry(
+  name: string,
+  patch: { line?: string | null; region: Region; note?: string | null },
+): RosterEntry {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Name is required");
+  if (!VALID_REGIONS.has(patch.region)) throw new Error("Region must be us, india, or unknown");
+  const row: RosterRow = {
+    name: trimmed,
+    line: patch.line ?? null,
+    region: patch.region,
+    note: patch.note ?? null,
+    updated_at: now(),
+  };
+  db.prepare(
+    `INSERT INTO phone_roster (name, line, region, note, updated_at) VALUES (@name, @line, @region, @note, @updated_at)
+     ON CONFLICT(name) DO UPDATE SET line = excluded.line, region = excluded.region, note = excluded.note, updated_at = excluded.updated_at`,
+  ).run(row);
+  // Counts/region at info, the name itself at debug -- same split phone.board_fetched already uses.
+  log.info("phone.roster_updated", { region: patch.region });
+  log.debug("phone.roster_updated_name", { name: trimmed });
+  return toRosterEntry(row);
+}
+
+export function deleteRosterEntry(name: string): void {
+  db.prepare("DELETE FROM phone_roster WHERE name = ?").run(name);
+}
+
+export interface PositionResult {
+  /** 1-based rank in my pool, board's own row order. Null if I'm not on the board. */
+  position: number | null;
+  /** Pool members on this snapshot, any live status -- not just available ones. */
+  poolSize: number;
+  poolLabel: string; // "Federal" | "AMER · India" | "AMER · US" | "AMER · Unclassified"
+  ahead: number;
+  uncertain: boolean;
+  /** Available same-line agents with region 'unknown', excluding me. */
+  unclassified: string[];
+}
+
+function poolLabelFor(region: Region): string {
+  return region === "unknown" ? "AMER · Unclassified" : "AMER · " + (region === "us" ? "US" : "India");
+}
+
+/**
+ * Same mechanism as v4, narrowed. Filter the board's own agent order --
+ * first to non-federal, then to my own region -- and take a 1-based index.
+ * No re-sort, no duration-string parsing: the source board already lists
+ * available agents duration-descending with other statuses trailing (see
+ * POSITION DISCOVERY above and docs/PHONE.md), and filtering a subset of an
+ * already-correctly-ordered list preserves that order. This is provably
+ * equal to "1 + count of same-pool available agents idle longer than me,"
+ * the same reasoning that made the original federal/non-federal split
+ * correct, just narrowed by one more dimension.
+ */
+export function positionOf(
+  board: PhoneBoard,
+  name: string,
+  map: Map<string, RosterEntry> = rosterMap(),
+): PositionResult | null {
+  const mine = board.agents.find((a) => a.name === name);
+  if (!mine) return null;
+
+  if (mine.federal) {
+    return { position: null, poolSize: 0, poolLabel: "Federal", ahead: 0, uncertain: false, unclassified: [] };
+  }
+
+  const myRegion = regionOf(name, map);
+  const sameLine = board.agents.filter((a) => !a.federal);
+  const pool = sameLine.filter((a) => regionOf(a.name, map) === myRegion);
+  const idx = pool.findIndex((a) => a.name === name);
+
+  const unclassified = sameLine
+    .filter((a) => a.name !== name && a.statusClass === "available" && regionOf(a.name, map) === "unknown")
+    .map((a) => a.name);
+
+  return {
+    position: idx === -1 ? null : idx + 1,
+    poolSize: pool.length,
+    poolLabel: poolLabelFor(myRegion),
+    ahead: idx === -1 ? 0 : idx,
+    uncertain: unclassified.length > 0,
+    unclassified,
+  };
 }

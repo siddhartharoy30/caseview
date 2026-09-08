@@ -77,7 +77,8 @@ import {
 import { resolveRange, scorecard, saveManualMetric, deleteManualMetric } from "./metrics";
 import { syncOnce, startSync, reconcileCommitments } from "./sync";
 import { listEvents, unreadEventCount, markEventsRead, sendWebhookTest, EventKind } from "./notify";
-import { getPhoneBoard, positionOf } from "./phone";
+import { getPhoneBoard, positionOf, listRoster, upsertRosterEntry, deleteRosterEntry } from "./phone";
+import type { Region } from "./phone";
 import { log, errText } from "./log";
 
 const app = express();
@@ -846,15 +847,42 @@ app.post("/api/intelligence/repair-reply", requireAuth, async (req, res) => {
  * `getPhoneBoard()` itself enforces the 10s-minimum-interval/serve-cached
  * contract, so this route is a thin proxy: no request from the browser (the
  * monitor toggled off, or no tab open) means no upstream fetch at all.
+ *
+ * v5 phase 2: every non-federal agent is decorated with its roster region
+ * (built once, shared with the position calculation) so the board table can
+ * render the two-part Line column without a second lookup.
  */
 app.get("/api/phone/board", requireAuth, noStore, async (_req, res) => {
   const board = await getPhoneBoard();
   const myName = getSetting("phoneBoardName");
-  res.json({
-    ...board,
-    myName,
-    myPosition: board.ok ? positionOf(board, myName) : null,
-  });
+  const map = board.ok ? new Map(listRoster().map((r) => [r.name, r])) : undefined;
+  const position = board.ok ? positionOf(board, myName, map!) : null;
+  const agents = board.ok
+    ? board.agents.map((a) => ({ ...a, region: a.federal ? null : (map!.get(a.name)?.region ?? "unknown") }))
+    : [];
+  res.json({ ...board, agents, myName, position });
+});
+
+app.get("/api/phone/roster", requireAuth, noStore, (_req, res) => {
+  res.json({ roster: listRoster() });
+});
+
+app.post("/api/phone/roster", requireAuth, (req, res) => {
+  try {
+    const entry = upsertRosterEntry(String(req.body?.name || ""), {
+      line: req.body?.line ?? null,
+      region: req.body?.region as Region,
+      note: req.body?.note ?? null,
+    });
+    res.json({ ok: true, entry });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete("/api/phone/roster/:name", requireAuth, (req, res) => {
+  deleteRosterEntry(req.params.name);
+  res.json({ ok: true });
 });
 
 /* ------------------------------------------------------------------ health */
