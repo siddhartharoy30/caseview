@@ -20,6 +20,7 @@ import { page, pageHead, cardHead, eyebrow } from "./_shared.js";
 import * as phoneMonitor from "../lib/phoneMonitor.js";
 import { statusTone } from "../lib/phoneMonitor.js";
 import * as phonePip from "../lib/phonePip.js";
+import { connectButton } from "../lib/connectLauncher.js";
 
 /** v5 phase 2: any non-federal row is clickable, so a wrong classification
  * can always be corrected later, not just an unclassified one. */
@@ -97,7 +98,8 @@ function statusCard(state) {
           mine.federal ? h("div", { class: "chip neutral", text: "Federal line" }) : null),
         h("div", { class: "phn-fact" },
           eyebrow("Queued callers"),
-          h("div", { class: "mono", text: board.queuedAgents + " AMER · " + board.queuedFederal + " Federal" })))));
+          h("div", { class: "mono", text: board.queuedAgents + " AMER · " + board.queuedFederal + " Federal" }))),
+      connectButton(state)));
 }
 
 /**
@@ -160,7 +162,8 @@ function pipContent(host, state) {
             h("span", { text: a.name }),
             h("span", { class: "dim mono", text: a.duration }))))
       : null,
-    board.stale ? h("p", { class: "dim", text: "Stale — the board did not respond just now." }) : null));
+    board.stale ? h("p", { class: "dim", text: "Stale — the board did not respond just now." }) : null,
+    connectButton(state)));
 }
 
 /** Pop-out control: shows the best available tier and never renders a

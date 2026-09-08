@@ -18,6 +18,7 @@ import { h, mount } from "./dom.js";
 import * as store from "./store.js";
 import * as phoneMonitor from "./phoneMonitor.js";
 import { statusTone } from "./phoneMonitor.js";
+import { connectButton } from "./connectLauncher.js";
 
 const KEY_COLLAPSED = "phoneDock.collapsed";
 
@@ -56,7 +57,8 @@ export function initPhoneDock() {
         h("span", { class: `chip ${statusTone(mine.statusClass)}`, text: mine.statusText }),
         h("span", { class: "dim", text: "  " + mine.duration })),
       h("div", { class: "dim mono", text: board.queuedAgents + " AMER · " + board.queuedFederal + " Federal" }),
-      board.stale ? h("div", { class: "dim", text: "Stale — last good read" }) : null);
+      board.stale ? h("div", { class: "dim", text: "Stale — last good read" }) : null,
+      connectButton(state));
   }
 
   function paint(state) {

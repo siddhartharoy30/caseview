@@ -518,6 +518,14 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   // pick up a live call is a different category from a case update.
   toastDurationMs: "5000",
   phoneSoundEnabled: "true",
+
+  // v5 phase 5: three ways into the Amazon Connect softphone, in priority
+  // order. Tier 3 (Okta dashboard) is the one that always works, at the
+  // cost of an extra click -- the UI warns if it's ever cleared, since
+  // that's the one field this feature can't function without.
+  ccpUrl: "https://it-apps-rubrik-cs.my.connect.aws/ccp-v2",
+  oktaAppUrl: "https://sso.rubrik.com/home/amazon_aws/0oaouu295sKnMl21Y357/272",
+  oktaDashboardUrl: "https://sso.rubrik.com/app/UserHome?session_hint=AUTHENTICATED",
 };
 
 export function getSetting(key: string): string {

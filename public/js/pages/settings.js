@@ -604,6 +604,46 @@ export function render(_ctx, host, shell) {
         })));
   }
 
+  /**
+   * v5 phase 5. Three independent fields rather than one form/button, same
+   * reasoning as the numeric settings above: each saves and reports on its
+   * own. `oktaDashboardUrl` is the one tier that must never be empty (it's
+   * the fallback that always works, at the cost of an extra click) --
+   * enforced as a client-side warning, not a hard block, matching how the
+   * webhook URL's own https-only rule is checked here rather than trusted
+   * to the server.
+   */
+  function connectSection() {
+    const urlField = (key, label, hint, warnIfEmpty) => {
+      const input = h("input", {
+        class: "input", type: "url", value: settingOf(key) || "", autocomplete: "off", spellcheck: "false",
+      });
+      return h("div", { class: "set-field" },
+        h("label", { class: "set-field-label" }, h("span", { text: label })),
+        h("div", { class: "set-url" },
+          input,
+          button("Save", {
+            small: true,
+            onclick: async () => {
+              const url = input.value.trim();
+              if (!url && warnIfEmpty) {
+                toast(label + " should not be empty — it's the one link this feature can't function without", "err");
+                return;
+              }
+              await save({ [key]: url }, label + " saved");
+            },
+          })),
+        h("p", { class: "set-field-hint", text: hint }));
+    };
+
+    return section(
+      "Amazon Connect",
+      "Three ways into the CCP softphone, in priority order. QView cannot see the CCP session itself — this only opens a window.",
+      urlField("ccpUrl", "CCP URL", "Works when the SSO session is already live.", false),
+      urlField("oktaAppUrl", "Okta app link", "Always initiates SSO. The trailing link index can drift if an admin reorders the app catalogue.", false),
+      urlField("oktaDashboardUrl", "Okta dashboard", "Always works, at the cost of one extra click. Never leave this empty.", true));
+  }
+
   function appearanceSection() {
     const theme = store.get("theme", "dark");
     const density = store.get("density", "default");
@@ -716,6 +756,7 @@ export function render(_ctx, host, shell) {
       notificationSection(),
       webhookSection(),
       phoneRosterSection(),
+      connectSection(),
       appearanceSection(),
       cacheSection()));
   }

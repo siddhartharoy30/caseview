@@ -732,3 +732,36 @@ awaited before the caller's `buildContent` first runs, which is the
 documented fix, not just a description of one. Recorded here as an honest
 gap rather than claimed as verified; if a real browser session becomes
 available later, this is the first thing to check end-to-end.
+
+## Phase 5 — Amazon Connect launcher
+
+Files: `src/db.ts`, `public/js/lib/connectLauncher.js` (new),
+`public/js/pages/phone.js`, `public/js/lib/phoneDock.js`,
+`public/js/pages/settings.js`, `public/css/app.css`.
+
+**Defaults confirmed against the live database**, read back via `getSetting()`
+exactly as Section 0 of the source prompt states them verbatim: `ccpUrl`
+→ `https://it-apps-rubrik-cs.my.connect.aws/ccp-v2`, `oktaAppUrl` →
+`https://sso.rubrik.com/home/amazon_aws/0oaouu295sKnMl21Y357/272`,
+`oktaDashboardUrl` → `https://sso.rubrik.com/app/UserHome?session_hint=AUTHENTICATED`.
+
+**No false claims about the CCP session, confirmed by grep, not just
+intent:** `grep -in "connected\|session" public/js/lib/connectLauncher.js`
+finds three hits, all inside doc comments explaining *why* no such claim is
+made — zero in user-facing button/label text. The only status hint anywhere
+("Board shows you offline") is sourced from the phone board's own row for
+me, worded to attribute the claim to the board, never to Connect.
+
+**`connectButton()` is one component, not three**, imported verbatim into
+`phone.js`'s `statusCard()`/`pipContent()` and `phoneDock.js`'s `body()` —
+confirmed by reading each call site rather than assuming from the plan; all
+three pass it the same `phoneMonitor` state shape.
+
+`npm run build` and `node --check` pass on every touched file; `tsx watch`
+restarted cleanly on the `db.ts` edit with no new error/fatal lines.
+
+**Not exercised in a real browser this session** (same credential gap
+throughout this whole plan): the named-window focus-reuse behavior
+(`ccpWindowRef`/`.closed` check) and the two plain Okta links opening in a
+new tab. Both are small, direct applications of `window.open()` with no
+novel logic — reviewed by hand rather than claimed as tested end-to-end.
