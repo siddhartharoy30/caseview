@@ -80,6 +80,8 @@
   --z-sticky-group:  1;
   --z-sticky-head:   20;
   --z-dropdown:      80;
+  --z-dock:          90; /* v5 phase 4b: above dropdowns, below toasts/overlays -- a persistent
+                            corner widget must never block a modal or a time-critical toast */
   --z-toast:         400;
   --z-overlay:       500;
   --z-login:         600;
@@ -5216,6 +5218,35 @@ table.tbl th.check-col input {
 
 /* v5 phase 2: every non-federal Line cell opens the classify dialog. */
 .phn-board tbody tr .chip.is-clickable { cursor: pointer; }
+
+/* v5 phase 4b: docked mini-panel, survives every route change. Reuses the
+   existing card surface/shadow tokens rather than a third visual language. */
+.phn-dock {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 220px;
+  z-index: var(--z-dock);
+  background: var(--surface-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-3);
+  padding: var(--space-3);
+}
+.phn-dock-head { display: flex; align-items: center; gap: var(--space-2); }
+.phn-dock-body { margin-top: var(--space-2); }
+.phn-dock-pos {
+  font-family: var(--mono);
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text);
+}
+.phn-dock-pos.is-urgent { color: var(--red); }
+.phn-dock-status { margin-top: var(--space-1); }
+
+@media (max-width: 620px) {
+  .phn-dock { left: 12px; right: 12px; bottom: 12px; width: auto; }
+}
 
 @media (max-width: 700px) {
   .phn-status-grid { grid-template-columns: 1fr 1fr; }

@@ -630,3 +630,25 @@ sticky/eviction behavior was tested in v4 phase 3) rather than new logic
 built from scratch, and are reviewed by hand against the plan's own code
 sketch line by line. Recorded here as an honest gap, per this project's own
 disclosure convention, rather than claimed as verified.
+
+## Phase 4b — docked mini-panel
+
+Files: `public/js/lib/phoneDock.js` (new), `public/index.html`,
+`public/js/app.js`, `public/css/app.css`.
+
+Modeled directly on `tzstrip.js`'s already-shipped, already-tested pattern
+(a fixed top-level slot, initialized once at boot, independent of route
+changes) rather than a new architecture. `phoneDock.js` has no fetch or
+alert call anywhere in it — `grep -n "api\.\|toast(\|notify\." public/js/lib/phoneDock.js`
+returns nothing beyond the `phoneMonitor.subscribe`/`getState` calls,
+confirming by construction (not just by intent) that a second surface adds
+zero additional requests or alerts, which is the whole point of the
+singleton from Phase 3.
+
+`npm run build` and `node --check` pass on every touched file; `/healthz`
+confirms the server (untouched in this phase — no `.ts` files changed)
+stayed healthy throughout. Not exercised visually in a real browser (same
+credential gap as prior phases) — the collapse/expand toggle and the
+`localStorage`-persisted collapsed state are reviewed by hand against the
+same pattern `tzstrip.js` already uses for its own open/collapsed state,
+which *was* tested end-to-end in v4 phase 7.
