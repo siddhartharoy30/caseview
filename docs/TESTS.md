@@ -525,3 +525,21 @@ pass (confirmed via reading the phase-3 rules rather than re-screenshotting
 one by one: focus rings and reduced-motion already generalize to every
 phase 4-7 addition with no extra work needed) in `docs/DESIGN.md`'s phase 8
 section.
+
+# QView v5 — Test Log
+
+Continues the v4 log above under the same verification discipline (real
+synced data via `npm run dev`, `npm run build` as the typecheck gate before
+every commit).
+
+## Phase 1 — copy fix
+
+`pageHead("Phone Queue", "Live position in the AMER phone queue, matched
+against Case Desk's own logic.")` at `public/js/pages/phone.js:219` (old line
+number) described how the page was built, not what it does for the reader.
+`pageHead()` itself already rendered nothing for a falsy `subtitle`
+(`_shared.js:11-17`), so the only change needed was dropping the second
+argument at the call site.
+
+**Confirmed gone.** `/phone`'s header reads "Phone Queue" with no second
+line. `grep -rn "matched against Case Desk" public/` returns nothing.

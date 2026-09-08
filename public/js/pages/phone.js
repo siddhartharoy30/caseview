@@ -215,9 +215,7 @@ export function render(ctx, host, shell) {
       boardTable());
   }
 
-  mount(host, page(
-    pageHead("Phone Queue", "Live position in the AMER phone queue, matched against Case Desk's own logic."),
-    bodyHost));
+  mount(host, page(pageHead("Phone Queue"), bodyHost));
 
   loadSettings().then(() => {
     if (state.enabled) { poll(); return; }
