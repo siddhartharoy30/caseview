@@ -10,7 +10,7 @@ import { navigate } from "../router.js";
 
 /* ------------------------------------------------------------------ toasts */
 
-const MAX_TOASTS = 3;
+const MAX_TOASTS = 4; // v5 phase 3: was 3 -- longer durations (below) make 3 concurrent toasts more likely
 
 function dismissToast(el) {
   if (!el || !el.isConnected) return;
@@ -20,12 +20,29 @@ function dismissToast(el) {
 }
 
 /**
+ * v5 phase 3: `toastDurationMs` (default 5000) is the base -- warn and err
+ * add fixed offsets on top, so the default reproduces the spec's
+ * 5000/6000/8000 table exactly and moving the setting shifts all three
+ * together, preserving the escalation ordering. Sticky is unaffected --
+ * `duration` stays `null`, meaning "never."
+ */
+let toastDurationBase = 5000;
+export function setToastDurationBase(ms) {
+  if (Number.isFinite(ms) && ms > 0) toastDurationBase = ms;
+}
+function defaultDuration(kind) {
+  return kind === "err" ? toastDurationBase + 3000 : kind === "warn" ? toastDurationBase + 1000 : toastDurationBase;
+}
+
+/**
  * `opts.sticky` (v4 phase 5) never auto-dismisses -- for case.escalated,
  * case.waiting_on_support and commitment.breached, a toast that vanishes on
  * its own is indistinguishable from one you dealt with. `opts.caseNumber`
- * adds an Open button and makes the whole toast clickable. Hovering any
- * toast holds its timer, sticky or not, so reading one does not race its own
- * dismissal.
+ * adds an Open button and makes the whole toast clickable. Hovering *or*
+ * keyboard-focusing a toast holds its timer (v5 phase 3 added focus; hover
+ * already existed) -- through the close button, the only real `<button>`
+ * inside, since adding `tabindex` to the outer div would pull every
+ * ephemeral toast into the page's tab order.
  */
 export function toast(message, kind = "", opts = {}) {
   const host = document.getElementById("toasts");
@@ -33,12 +50,12 @@ export function toast(message, kind = "", opts = {}) {
 
   const existing = Array.from(host.children);
   if (existing.length >= MAX_TOASTS) {
-    const evict = existing.find((el) => !el.classList.contains("is-sticky")) || existing[0];
+    const evict = existing.find((el) => !el.classList.contains("is-sticky") && !el.classList.contains("is-held")) || existing[0];
     dismissToast(evict);
   }
 
   const { caseNumber = null, sticky = false } = opts;
-  const duration = opts.duration ?? (sticky ? null : kind === "err" ? 4200 : 2200);
+  const duration = opts.duration ?? (sticky ? null : defaultDuration(kind));
 
   const el = h("div", {
     class: `toast ${kind} ${sticky ? "is-sticky" : ""} ${caseNumber ? "is-clickable" : ""}`,
@@ -54,10 +71,21 @@ export function toast(message, kind = "", opts = {}) {
   host.append(el);
 
   let timer = null;
-  const arm = () => { if (duration != null) timer = setTimeout(() => dismissToast(el), duration); };
+  let hovering = false;
+  let focused = false;
   const disarm = () => { if (timer) clearTimeout(timer); timer = null; };
-  el.addEventListener("mouseenter", disarm);
-  el.addEventListener("mouseleave", arm);
+  const arm = () => { if (!hovering && !focused && duration != null) timer = setTimeout(() => dismissToast(el), duration); };
+  const setHeld = () => el.classList.toggle("is-held", hovering || focused);
+  el.addEventListener("mouseenter", () => { hovering = true; setHeld(); disarm(); });
+  el.addEventListener("mouseleave", () => { hovering = false; setHeld(); disarm(); arm(); });
+  el.addEventListener("focusin", () => { focused = true; setHeld(); disarm(); });
+  el.addEventListener("focusout", (e) => {
+    if (el.contains(e.relatedTarget)) return;
+    focused = false;
+    setHeld();
+    disarm();
+    arm();
+  });
   arm();
 }
 

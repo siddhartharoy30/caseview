@@ -14,6 +14,7 @@ import { toast, toastError, dialog, emptyState } from "./lib/ui.js";
 import { htmlToText } from "./lib/text.js";
 import { startNotifications } from "./lib/notify.js";
 import { initTzStrip } from "./lib/tzstrip.js";
+import { init as initPhoneMonitor } from "./lib/phoneMonitor.js";
 import { route, setNotFound, onRouteChange, onQueryChange, navigate, start, resolve, currentRoute } from "./router.js";
 
 /* ------------------------------------------------------------- navigation */
@@ -165,6 +166,11 @@ function showApp(email) {
   // browser permission on every tick, so a toggle in Settings takes effect
   // without anything here needing to know about it.
   startNotifications(navigate, setNotifBadge);
+
+  // v5 phase 3: started here too, not from pages/phone.js -- this is what
+  // makes phone alerts survive leaving /phone. Both need auth, so both start
+  // only once showApp() knows the session is real.
+  initPhoneMonitor();
 }
 
 /* ------------------------------------------------------------------- nav */

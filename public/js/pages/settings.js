@@ -439,6 +439,29 @@ export function render(_ctx, host, shell) {
       },
     ));
 
+    // v5 phase 3: separate from the toggle above on purpose -- a live call
+    // is a different category of interruption than a case update, so it
+    // defaults on instead of off.
+    controls.push(toggle(
+      "Play a sound for phone alerts",
+      boolOf("phoneSoundEnabled"),
+      "Reaching position 2 or 1 in the phone queue, or a call ringing. On by default.",
+      async (checked, el) => {
+        el.disabled = true;
+        await save({ phoneSoundEnabled: String(checked) });
+        el.disabled = false;
+      },
+    ));
+
+    controls.push(numericField({
+      key: "toastDurationMs",
+      label: "Toast duration",
+      unit: "ms",
+      min: 3000,
+      max: 15000,
+      hint: "How long a normal toast stays up before it auto-dismisses. Warning and error toasts stay up 1s and 3s longer than this; sticky ones are unaffected.",
+    }));
+
     return section(
       "Notifications",
       "Six things are worth an interruption: a new case, a customer reply, an escalation, a move to waiting-on-support, a commitment about to come due, and one already missed.",

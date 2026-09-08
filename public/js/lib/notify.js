@@ -24,7 +24,7 @@
 
 import * as store from "./store.js";
 import { api } from "./api.js";
-import { toast } from "./ui.js";
+import { toast, setToastDurationBase } from "./ui.js";
 
 const KEY_PREFS = "notify.prefs";
 const POLL_MS = 30000; // was 60000 -- v4 phase 5 also polls immediately on tab focus, see startNotifications()
@@ -99,12 +99,22 @@ let onUnreadChange = null;
 let soundEnabled = false;
 let audioCtx = null;
 
-function show(title, body, caseNumber) {
+/**
+ * v5 phase 3: generalized from a hardcoded caseNumber third argument to an
+ * options bag, and exported -- phoneMonitor.js needs the same OS-notification
+ * primitive for a live queue position, which has no case number and no event
+ * kind at all, so forcing it through this module's kind system (built for a
+ * flat on/off toggle list) would be a worse fit than sharing the primitive
+ * directly. Both features still share one permission path via
+ * permission()/requestPermission() below.
+ */
+export function show(title, body, opts = {}) {
+  const { tag, onClick } = opts;
   let n;
   try {
     n = new Notification(title, {
       body: body || "",
-      tag: caseNumber || undefined, // a second event on the same case replaces the first
+      tag: tag || undefined, // a second notification with the same tag replaces the first
       icon: "/favicon.svg",
     });
   } catch {
@@ -112,16 +122,17 @@ function show(title, body, caseNumber) {
   }
   n.onclick = () => {
     window.focus();
-    if (caseNumber && navigateTo) navigateTo("/case/" + encodeURIComponent(caseNumber));
+    if (onClick) onClick();
     n.close();
   };
 }
 
 /**
  * A short two-tone chime via Web Audio -- no asset file, no new dependency.
- * Default off; even on, it only ever plays for the priority kinds (phase 5).
+ * Default off; even on, it only ever plays for the priority kinds (phase 5)
+ * or phone alerts (v5 phase 3, its own separate default-on setting).
  */
-function chime() {
+export function chime() {
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
     const t0 = audioCtx.currentTime;
@@ -141,6 +152,24 @@ function chime() {
   } catch { /* Web Audio unsupported or blocked -- silence is an acceptable fallback */ }
 }
 
+/**
+ * v5 phase 3: autoplay needs a prior user gesture. Toggling the phone
+ * monitor on is that gesture -- calling this from inside that click handler
+ * creates (or resumes) the one shared AudioContext both chime() call sites
+ * use, so phone alerts aren't blocked the first time they try to play.
+ * Returns whether audio is usable, so the caller can say so once rather than
+ * failing quietly.
+ */
+export function primeAudio() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function poll() {
   const p = prefs();
 
@@ -153,6 +182,7 @@ async function poll() {
   const events = (res && res.events) || [];
   if (onUnreadChange && res && typeof res.unread === "number") onUnreadChange(res.unread);
   soundEnabled = res && res.soundEnabled === true;
+  if (res && typeof res.toastDurationMs === "number") setToastDurationBase(res.toastDurationMs);
 
   const fresh = events.filter((e) => !seen.has(e.id));
   for (const e of events) seen.add(e.id);
@@ -171,9 +201,14 @@ async function poll() {
 
   if (p.enabled && permission() === "granted") {
     if (wanted.length > MAX_PER_POLL) {
-      show("QView: " + wanted.length + " new events", "Open QView to see what moved.", null);
+      show("QView: " + wanted.length + " new events", "Open QView to see what moved.");
     } else {
-      for (const e of wanted) show(e.title, e.detail || "", e.caseNumber);
+      for (const e of wanted) {
+        show(e.title, e.detail || "", {
+          tag: e.caseNumber,
+          onClick: () => e.caseNumber && navigateTo && navigateTo("/case/" + encodeURIComponent(e.caseNumber)),
+        });
+      }
     }
   }
 
@@ -216,6 +251,6 @@ export function stopNotifications() {
 /** Lets Settings prove the permission path works without waiting for an event. */
 export function testNotification() {
   if (permission() !== "granted") return false;
-  show("QView", "Test notification. Notifications are working.", null);
+  show("QView", "Test notification. Notifications are working.");
   return true;
 }

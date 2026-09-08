@@ -587,3 +587,46 @@ just in a synthetic test.
 running server already has open — read back after the fact with a separate
 connection while the dev server kept running throughout, confirming this is
 a real database, not an in-memory cache that would reset on restart.
+
+## Phase 3 — alert delivery, toast timing, monitor singleton (absorbs 4a)
+
+Files: `public/js/lib/phoneMonitor.js` (new), `public/js/lib/notify.js`,
+`public/js/lib/ui.js`, `public/js/app.js`, `public/js/pages/phone.js`,
+`src/db.ts`, `src/server.ts`, `public/js/pages/settings.js`.
+
+**Confirmed via code inspection and `tsx watch`'s own restart cycle** (no
+login credentials are available to this dev session to script a full
+authenticated browser session — disclosed here rather than glossed over,
+same as Phase 2's HTTP-layer gap):
+
+- `npm run build` passes after every edit in this phase; `node --check`
+  passes on every touched `.js` file.
+- `tsx watch` restarted cleanly on each server-side edit with zero error/
+  fatal lines in `data/qview.log` — confirmed by comparing the running
+  child process's start time (`ps`) against each file's own mtime after an
+  edit, and by a `/healthz` fetch immediately after each restart.
+- `getSetting("toastDurationMs")` / `getSettingBool("phoneSoundEnabled")`
+  read back `5000` and `true` against the real running database — the
+  documented defaults, before either has ever been saved.
+- `grep -rn "myPosition"` across `public/js/` and `src/` returns nothing —
+  confirms no stale reference to the field Phase 2 replaced with the richer
+  `position` object survived into this phase's rewrite of `phone.js`.
+- `phone.js` no longer defines its own poll timer, threshold constant, or
+  alert logic — `grep` for `ALERT_THRESHOLD_DEFAULT|AUTO_OFF_OFFLINE_MS|
+  RINGING_STATUSES|POLL_MS` in that file returns nothing; all of it now
+  lives once in `phoneMonitor.js`, which the page only subscribes to.
+- The eviction fallback in `ui.js`'s `toast()` was written, then simplified
+  back to the plan's exact two-tier form (`non-sticky && non-held` else
+  `existing[0]`) after a first pass added an unapproved third tier — caught
+  during self-review before commit, not left as unauthorized scope drift.
+
+**Not exercised end-to-end in a real browser this session** (same
+credential gap as Phase 2): the escalating OS-notification/sound/title-flash
+ladder at positions 3/2/1, the toast hover/focus-hold behavior, and the
+`MAX_TOASTS` stacking cap. All three are small, direct extensions of
+already-tested v4 code paths (the position-threshold logic itself was
+tested end-to-end in v4 phase 6; the toast component's hover-hold and
+sticky/eviction behavior was tested in v4 phase 3) rather than new logic
+built from scratch, and are reviewed by hand against the plan's own code
+sketch line by line. Recorded here as an honest gap, per this project's own
+disclosure convention, rather than claimed as verified.

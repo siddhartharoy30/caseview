@@ -663,7 +663,13 @@ app.get("/api/events", requireAuth, noStore, (req, res) => {
     unreadOnly: req.query.unread === "1",
     limit: 100,
   });
-  res.json({ events, now: Date.now(), unread: unreadEventCount(), soundEnabled: getSettingBool("notifySoundEnabled") });
+  res.json({
+    events,
+    now: Date.now(),
+    unread: unreadEventCount(),
+    soundEnabled: getSettingBool("notifySoundEnabled"),
+    toastDurationMs: getSettingNumber("toastDurationMs"),
+  });
 });
 
 /**

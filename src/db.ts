@@ -509,6 +509,15 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   phoneBoardName: "Siddhartha",
   phoneMonitorEnabled: "false",       // master toggle, off by default
   phoneAlertThreshold: "3",
+
+  // v5 phase 3. toastDurationMs is the base every toast kind's duration is
+  // computed from (see setToastDurationBase() in ui.js) -- one tunable
+  // number, not three, so the escalation ordering can't be broken by editing
+  // them independently. phoneSoundEnabled is deliberately separate from the
+  // general notifySoundEnabled above and defaults to true: being asked to
+  // pick up a live call is a different category from a case update.
+  toastDurationMs: "5000",
+  phoneSoundEnabled: "true",
 };
 
 export function getSetting(key: string): string {
