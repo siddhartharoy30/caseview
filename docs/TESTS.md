@@ -691,3 +691,44 @@ even once this code deploys, `https://10.26.118.153:3443` will not be
 reachable until someone with access to that stack adds a matching port
 mapping by hand. Written up as an explicit open TODO in `docs/PLAN_V5.md`
 per the user's own decision on this tradeoff, not silently assumed away.
+
+## Phase 4d — Document PiP pop-out, with `window.open` fallback
+
+Files: `public/js/lib/phonePip.js` (new), `public/js/pages/phone.js`,
+`public/css/app.css`.
+
+**Structural guarantees confirmed by code inspection, matching the "one
+poll, one alert" constraint:** `phonePip.js` never imports `api.js` or
+`ui.js`'s `toast` — `grep -n "api\.\|toast(" public/js/lib/phonePip.js`
+returns nothing. `openPip()`'s content callback is wired through
+`phoneMonitor.subscribe()`, the same singleton the page and the dock already
+use, so opening a pop-out adds a renderer, not a second poller.
+
+**Feature detection, not sniffing:** `tier()`'s only two reads are
+`window.documentPictureInPicture` and `window.isSecureContext` — confirmed
+by re-reading the function body directly; neither it nor anything else in
+`phonePip.js`/`phone.js` reads `navigator.userAgent` anywhere (the only
+appearance of the word "userAgent" in either file is `tier()`'s own doc
+comment stating that it deliberately does not use it).
+
+**Auto-close on monitor-off, confirmed by construction:** the module-level
+`phoneMonitor.subscribe((state) => { if (!state.enabled) ... close ... })`
+at the bottom of `phonePip.js` runs independent of whether any window is
+open — closing a window that doesn't exist is a no-op (`isPipOpen()`/
+`isPopupOpen()` guard both branches), so this can never throw even if the
+monitor turns off with nothing open.
+
+**Not exercised in a real browser this session** — same credential gap as
+every prior phase, compounded here by the fact that Document PiP itself
+also needs a secure context this dev instance doesn't have (plain
+`http://localhost:3001` — wait, `localhost` *is* secure by definition, so
+`tier()` would actually resolve to `"pip"` in this exact dev environment;
+what's missing is the ability to script a real Chrome tab with DevTools
+Protocol without a login cookie, not the API's own availability). The
+stylesheet-cloning mechanics (`cloneStylesheets()`) were reviewed by hand
+against the exact failure mode the plan calls out (a naive "append and go"
+producing a flash of unstyled content) — every clone's `load`/`error` is
+awaited before the caller's `buildContent` first runs, which is the
+documented fix, not just a description of one. Recorded here as an honest
+gap rather than claimed as verified; if a real browser session becomes
+available later, this is the first thing to check end-to-end.

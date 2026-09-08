@@ -5251,3 +5251,28 @@ table.tbl th.check-col input {
 @media (max-width: 700px) {
   .phn-status-grid { grid-template-columns: 1fr 1fr; }
 }
+
+/* v5 phase 4d: Document PiP pop-out content. The pip window's own body is
+   the class target for the ringing state below -- its stylesheet is a
+   clone of this one (see phonePip.js), so these rules apply there exactly
+   as they do everywhere else, no second copy to keep in sync. */
+.phn-pip { padding: var(--space-3); }
+.phn-pip-pos {
+  font-family: var(--mono);
+  font-size: 40px;
+  font-weight: 700;
+  color: var(--text);
+}
+.phn-pip-pos.is-urgent { color: var(--red); }
+.phn-pip-status { margin-top: var(--space-2); }
+.phn-pip-ahead { margin-top: var(--space-3); }
+.phn-pip-ahead-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 2px 0;
+}
+
+/* A call arriving is the one moment this window exists for -- it must be
+   impossible to miss from peripheral vision. */
+body.phn-ringing { background: color-mix(in srgb, var(--red) 18%, var(--bg)); }
