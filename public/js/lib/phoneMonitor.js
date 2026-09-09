@@ -27,6 +27,7 @@
 import { api } from "./api.js";
 import { toast } from "./ui.js";
 import * as notify from "./notify.js";
+import * as tabSync from "./tabSync.js";
 
 const POLL_MS = 10000;
 const ALERT_THRESHOLD_DEFAULT = 3;
@@ -83,6 +84,45 @@ function emit() {
 }
 
 export function getState() { return state; }
+
+/** v6 phase 2: only the leader tab polls and alerts; followers mirror the
+ * leader's broadcasts into their own local `state` so every existing
+ * subscribe(paint) caller keeps working untouched. A lone tab is always its
+ * own leader (see tabSync.js's single-participant election), so this whole
+ * mechanism is a no-op with one tab open. */
+let isLeaderTab = true;
+
+function handleLeaderChange(leaderTabId) {
+  const wasLeader = isLeaderTab;
+  isLeaderTab = leaderTabId === tabSync.tabId;
+  if (isLeaderTab && !wasLeader && state.enabled) poll(); // promoted mid-session: no gap
+  if (!isLeaderTab && wasLeader) stopPolling();
+}
+
+/** A follower receiving the leader's board snapshot. Mirrors
+ * lastNotifiedPosition/offlineSince (never acted on here) so a mid-session
+ * leadership handoff doesn't make the newly-promoted leader re-fire an
+ * alert for a transition the previous leader already announced. Never calls
+ * maybeAlert() -- followers show, they don't announce. */
+function handleBoardBroadcast(payload) {
+  if (isLeaderTab) return;
+  state.board = payload.board;
+  state.myName = payload.myName;
+  state.position = payload.position;
+  state.error = payload.error;
+  state.lastNotifiedPosition = payload.lastNotifiedPosition;
+  state.offlineSince = payload.offlineSince;
+  state.loading = false;
+  emit();
+}
+
+function handleEnabledBroadcast(payload) {
+  if (state.enabled === payload.enabled) return;
+  state.enabled = payload.enabled;
+  emit();
+  if (!payload.enabled) stopPolling();
+  else if (isLeaderTab) poll();
+}
 
 let timer = null;
 let flashTimer = null;
@@ -170,7 +210,7 @@ function maybeAlert() {
 }
 
 async function poll() {
-  if (!state.enabled) return;
+  if (!state.enabled || !isLeaderTab) return;
   try {
     const res = await api.phoneBoard();
     state.board = res;
@@ -178,12 +218,20 @@ async function poll() {
     state.position = res.position;
     state.error = null;
     maybeAlert();
+    tabSync.broadcast("board", {
+      board: state.board,
+      myName: state.myName,
+      position: state.position,
+      error: null,
+      lastNotifiedPosition: state.lastNotifiedPosition,
+      offlineSince: state.offlineSince,
+    });
   } catch (err) {
     state.error = err.message || "Could not reach the phone monitor.";
   }
   state.loading = false;
   emit();
-  if (state.enabled) timer = setTimeout(poll, POLL_MS);
+  if (state.enabled && isLeaderTab) timer = setTimeout(poll, POLL_MS);
 }
 
 function stopPolling() {
@@ -196,6 +244,10 @@ function stopPolling() {
  * already on, starts polling immediately -- a page reload while the monitor
  * is on must not require re-toggling it. */
 export async function init() {
+  tabSync.init();
+  tabSync.onLeaderChange(handleLeaderChange);
+  tabSync.onMessage("board", handleBoardBroadcast);
+  tabSync.onMessage("enabled", handleEnabledBroadcast);
   try {
     const res = await api.settings();
     const s = (res && res.settings) || {};
@@ -205,19 +257,20 @@ export async function init() {
   } catch { /* defaults stand */ }
   state.loading = false;
   emit();
-  if (state.enabled) poll();
+  if (state.enabled && isLeaderTab) poll();
 }
 
 export async function setEnabled(next) {
   state.enabled = next;
   emit();
+  tabSync.broadcast("enabled", { enabled: next });
   await api.saveSettings({ phoneMonitorEnabled: String(next) }).catch(() => {});
   if (next) {
     // The toggle click is the user gesture autoplay needs -- prime it here
     // rather than waiting for the first alert to try and fail silently.
     state.audioBlocked = !notify.primeAudio();
     if (notify.permission() === "default") await notify.requestPermission();
-    poll();
+    if (isLeaderTab) poll();
   } else {
     stopPolling();
   }
