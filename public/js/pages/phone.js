@@ -101,82 +101,27 @@ function statusCard(state) {
           h("div", { class: "mono", text: board.queuedAgents + " AMER · " + board.queuedFederal + " Federal" })))));
 }
 
-/**
- * The same same-line/same-region pool `positionOf()` builds server-side,
- * sliced to whoever sits before me in the board's own order -- not a second
- * implementation of the filter that could disagree with the position count
- * itself, just reading the same decorated `board.agents` the board route
- * already sends (each non-federal agent carries its own `region`).
- */
-function agentsAheadOf(state) {
-  const board = state.board;
-  const r = state.position;
-  if (!board || !board.ok || !r || r.position == null) return [];
-  const mine = board.agents.find((a) => a.name === state.myName);
-  if (!mine) return [];
-  const pool = board.agents.filter((a) => !a.federal && a.region === mine.region);
-  return pool.slice(0, r.ahead);
-}
-
-/**
- * v5 phase 4d: the pop-out's content -- a glance surface, not a page.
- * Reuses `STATUS_TONE`/`.phn-*` CSS verbatim (via the cloned stylesheet in
- * phonePip.js) rather than a second colour vocabulary, so the board, the
- * page and the pop-out never disagree about what amber means.
- */
-function pipContent(host, state) {
-  const board = state.board;
-  const mine = board && board.ok ? board.agents.find((a) => a.name === state.myName) : null;
-  const ringing = mine && (mine.statusClass === "ringing" || mine.statusClass === "accepting_call");
-  host.classList.toggle("phn-ringing", !!ringing);
-
-  if (!state.enabled) {
-    mount(host, h("div", { class: "phn-pip" }, h("p", { class: "dim", text: "Phone monitor is off." }), connectButton(state)));
-    return;
-  }
-  if (!board || !board.ok) {
-    mount(host, h("div", { class: "phn-pip" }, h("p", { class: "dim", text: (board && board.reason) || "Cannot read the board." }), connectButton(state)));
-    return;
-  }
-  if (!mine) {
-    mount(host, h("div", { class: "phn-pip" }, h("p", { class: "dim", text: "\"" + state.myName + "\" is not on the board right now." }), connectButton(state)));
-    return;
-  }
-
-  const r = state.position;
-  const pos = r ? r.position : null;
-  const ahead = agentsAheadOf(state);
-
-  mount(host, h("div", { class: "phn-pip" },
-    h("div", { class: `phn-pip-pos ${pos != null && pos <= state.threshold ? "is-urgent" : ""}`, text: pos != null ? "#" + pos : "—" }),
-    r ? h("div", { class: "dim", text: "of " + r.poolSize + " in " + r.poolLabel }) : null,
-    h("div", { class: "phn-pip-status" },
-      h("span", { class: `chip ${statusTone(mine.statusClass)}`, text: mine.statusText }),
-      h("span", { class: "dim", text: "  " + mine.duration })),
-    h("div", { class: "dim mono", text: board.queuedAgents + " AMER · " + board.queuedFederal + " Federal" }),
-    ahead.length
-      ? h("div", { class: "phn-pip-ahead" },
-          h("p", { class: "eyebrow", text: "Ahead of me" }),
-          ahead.map((a) => h("div", { class: "phn-pip-ahead-row" },
-            h("span", { text: a.name }),
-            h("span", { class: "dim mono", text: a.duration }))))
-      : null,
-    board.stale ? h("p", { class: "dim", text: "Stale — the board did not respond just now." }) : null,
-    connectButton(state)));
-}
-
 /** Pop-out control: shows the best available tier and never renders a
  * button that does nothing. Tier 3 (the dock) is always available
- * regardless of what this shows, so this only ever offers tiers 1 and 2. */
+ * regardless of what this shows, so this only ever offers tiers 1 and 2.
+ * v6 phase 3: pipContent/agentsAheadOf moved to phonePip.js so the dock's
+ * restore button can call the same renderer without lib/ importing from
+ * pages/. When another tab already owns the pop-out, this offers "Focus
+ * pop-out" instead of trying (and failing) to open a second one. */
 function popoutRow(state) {
   if (!state.enabled) return null;
   const t = phonePip.tier();
 
   if (t === "pip") {
+    if (phonePip.isPipOpen() && !phonePip.isPipOwnerLocal()) {
+      return h("div", { class: "phn-toggle-row" },
+        button("Focus pop-out", { small: true, onclick: () => phonePip.requestPipFocus() }),
+        h("span", { class: "dim", text: "Open in another tab." }));
+    }
     return h("div", { class: "phn-toggle-row" },
       button("Pop out", {
         small: true,
-        onclick: () => phonePip.openPip(pipContent),
+        onclick: () => phonePip.openPip(phonePip.pipContent),
       }),
       h("span", { class: "dim", text: "Opens an always-on-top window." }));
   }
@@ -235,6 +180,10 @@ export function render(ctx, host, shell) {
 
   mount(host, page(pageHead("Phone Queue"), bodyHost));
 
-  const unsubscribe = phoneMonitor.subscribe(paint);
-  return () => unsubscribe();
+  const unsubscribeMonitor = phoneMonitor.subscribe(paint);
+  // Ownership changes (another tab opening/closing the pop-out) don't flow
+  // through phoneMonitor -- this re-renders popoutRow for those without
+  // phone.js ever importing tabSync.js directly.
+  const unsubscribePip = phonePip.onOwnershipChange(() => paint(phoneMonitor.getState()));
+  return () => { unsubscribeMonitor(); unsubscribePip(); };
 }

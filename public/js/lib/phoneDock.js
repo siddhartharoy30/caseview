@@ -19,6 +19,8 @@ import * as store from "./store.js";
 import * as phoneMonitor from "./phoneMonitor.js";
 import { statusTone } from "./phoneMonitor.js";
 import { connectButton } from "./connectLauncher.js";
+import * as phonePip from "./phonePip.js";
+import { button } from "./ui.js";
 
 const KEY_COLLAPSED = "phoneDock.collapsed";
 
@@ -27,11 +29,26 @@ export function initPhoneDock() {
   if (!container) return;
 
   let collapsed = store.get(KEY_COLLAPSED, false);
+  // v6 phase 3: forces the body open regardless of the collapsed preference
+  // right after the pop-out owner disappears, or on first boot if a pop-out
+  // was left open before a browser restart -- an explicit user action
+  // (collapsing/expanding, or the pop-out reopening) always overrides it.
+  let forceExpanded = phonePip.pipWasOpen() && !phonePip.isPipOpen();
 
   function setCollapsed(next) {
     collapsed = next;
+    forceExpanded = false;
     store.set(KEY_COLLAPSED, next);
     paint(phoneMonitor.getState());
+  }
+
+  function restoreBanner(state) {
+    if (!state.enabled) return null; // a restore offer for a deliberately-off monitor is noise
+    if (phonePip.isPipOpen()) return null; // nothing to restore
+    if (!phonePip.pipWasOpen()) return null;
+    return h("div", { class: "phn-dock-restore" },
+      h("p", { class: "dim", text: "Pop-out isn't open right now." }),
+      button("Restore pop-out", { small: true, onclick: () => phonePip.openPip(phonePip.pipContent) }));
   }
 
   function body(state) {
@@ -67,6 +84,7 @@ export function initPhoneDock() {
     // init(), so this still hides the dock on the login screen without
     // depending on the toggle.
     container.hidden = state.loading;
+    const showBody = !collapsed || forceExpanded;
     mount(container,
       h("div", { class: "phn-dock-head" },
         h("span", { class: "eyebrow", text: "Phone queue" }),
@@ -76,8 +94,15 @@ export function initPhoneDock() {
           onclick: () => setCollapsed(!collapsed),
         }, collapsed ? "+" : "–")),
       connectButton(state, { compact: true }),
-      collapsed || !state.enabled ? null : body(state));
+      showBody && state.enabled ? body(state) : null,
+      showBody ? restoreBanner(state) : null);
   }
+
+  phonePip.onOwnershipChange((ownerId, { lostUngracefully } = {}) => {
+    if (lostUngracefully) forceExpanded = true; // no blind window between the owner dying and the restore offer appearing
+    if (ownerId != null) forceExpanded = false; // a pop-out exists again -- nothing left to restore
+    paint(phoneMonitor.getState());
+  });
 
   phoneMonitor.subscribe(paint);
 }
