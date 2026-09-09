@@ -57,13 +57,16 @@ export function initPhoneDock() {
         h("span", { class: `chip ${statusTone(mine.statusClass)}`, text: mine.statusText }),
         h("span", { class: "dim", text: "  " + mine.duration })),
       h("div", { class: "dim mono", text: board.queuedAgents + " AMER · " + board.queuedFederal + " Federal" }),
-      board.stale ? h("div", { class: "dim", text: "Stale — last good read" }) : null,
-      connectButton(state));
+      board.stale ? h("div", { class: "dim", text: "Stale — last good read" }) : null);
   }
 
   function paint(state) {
-    container.hidden = !state.enabled;
-    if (!state.enabled) return;
+    // Unconditional on state.enabled (v6 phase 1) -- the dock's Connect
+    // launcher is reachable whether or not the monitor is on. state.loading
+    // starts true and flips false exactly once, in phoneMonitor's post-auth
+    // init(), so this still hides the dock on the login screen without
+    // depending on the toggle.
+    container.hidden = state.loading;
     mount(container,
       h("div", { class: "phn-dock-head" },
         h("span", { class: "eyebrow", text: "Phone queue" }),
@@ -72,7 +75,8 @@ export function initPhoneDock() {
           class: "icon-btn sm", type: "button", title: collapsed ? "Expand" : "Collapse",
           onclick: () => setCollapsed(!collapsed),
         }, collapsed ? "+" : "–")),
-      collapsed ? null : body(state));
+      connectButton(state, { compact: true }),
+      collapsed || !state.enabled ? null : body(state));
   }
 
   phoneMonitor.subscribe(paint);

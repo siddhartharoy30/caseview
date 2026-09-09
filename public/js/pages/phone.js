@@ -98,8 +98,7 @@ function statusCard(state) {
           mine.federal ? h("div", { class: "chip neutral", text: "Federal line" }) : null),
         h("div", { class: "phn-fact" },
           eyebrow("Queued callers"),
-          h("div", { class: "mono", text: board.queuedAgents + " AMER · " + board.queuedFederal + " Federal" }))),
-      connectButton(state)));
+          h("div", { class: "mono", text: board.queuedAgents + " AMER · " + board.queuedFederal + " Federal" })))));
 }
 
 /**
@@ -132,15 +131,15 @@ function pipContent(host, state) {
   host.classList.toggle("phn-ringing", !!ringing);
 
   if (!state.enabled) {
-    mount(host, h("div", { class: "phn-pip" }, h("p", { class: "dim", text: "Phone monitor is off." })));
+    mount(host, h("div", { class: "phn-pip" }, h("p", { class: "dim", text: "Phone monitor is off." }), connectButton(state)));
     return;
   }
   if (!board || !board.ok) {
-    mount(host, h("div", { class: "phn-pip" }, h("p", { class: "dim", text: (board && board.reason) || "Cannot read the board." })));
+    mount(host, h("div", { class: "phn-pip" }, h("p", { class: "dim", text: (board && board.reason) || "Cannot read the board." }), connectButton(state)));
     return;
   }
   if (!mine) {
-    mount(host, h("div", { class: "phn-pip" }, h("p", { class: "dim", text: "\"" + state.myName + "\" is not on the board right now." })));
+    mount(host, h("div", { class: "phn-pip" }, h("p", { class: "dim", text: "\"" + state.myName + "\" is not on the board right now." }), connectButton(state)));
     return;
   }
 
@@ -223,6 +222,7 @@ export function render(ctx, host, shell) {
 
   function paint(state) {
     mount(bodyHost,
+      connectButton(state),
       h("div", { class: "phn-toggle-row" },
         h("label", { class: "checkline" },
           h("input", { type: "checkbox", checked: state.enabled, onchange: (e) => phoneMonitor.setEnabled(e.target.checked) }),

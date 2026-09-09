@@ -5282,3 +5282,16 @@ body.phn-ringing { background: color-mix(in srgb, var(--red) 18%, var(--bg)); }
 .phn-connect-fallback { font-size: var(--fs-meta); }
 .phn-connect-fallback a { color: var(--text-3); }
 .phn-connect-fallback a:hover { color: var(--blue-2); }
+
+/* v6 phase 1: compact form for the dock -- Okta fallbacks tucked behind a
+   disclosure instead of shown inline, everything else identical. */
+.phn-connect-compact { margin-top: var(--space-2); }
+.phn-connect-disclosure summary {
+  cursor: pointer;
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+  list-style: none;
+}
+.phn-connect-disclosure summary::-webkit-details-marker { display: none; }
+.phn-connect-disclosure summary:hover { color: var(--blue-2); }
+.phn-connect-disclosure[open] summary { margin-bottom: var(--space-1); }

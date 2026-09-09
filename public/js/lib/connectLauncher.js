@@ -45,18 +45,26 @@ export async function openOktaDashboard() {
 }
 
 /** One implementation, shared verbatim by the phone page, the docked panel
- * and the Document PiP pop-out. `state` is a phoneMonitor state object. */
-export function connectButton(state) {
+ * and the Document PiP pop-out. `state` is a phoneMonitor state object.
+ * `opts.compact` (v6 phase 1) tucks the Okta fallbacks behind a disclosure
+ * for the dock's tighter space -- the button itself is never conditional on
+ * anything but `compact`, board data included. */
+export function connectButton(state, opts = {}) {
+  const { compact = false } = opts;
   const board = state.board;
   const mine = board && board.ok ? board.agents.find((a) => a.name === state.myName) : null;
 
-  return h("div", { class: "phn-connect" },
+  const fallback = h("div", { class: "phn-connect-fallback" },
+    h("a", { href: "#", onclick: (e) => { e.preventDefault(); openOktaApp(); }, text: "Sign in through Okta" }),
+    h("span", { class: "dim", text: "  ·  " }),
+    h("a", { href: "#", onclick: (e) => { e.preventDefault(); openOktaDashboard(); }, text: "Okta dashboard" }));
+
+  return h("div", { class: compact ? "phn-connect phn-connect-compact" : "phn-connect" },
     h("button", { class: "btn primary sm", type: "button", onclick: () => openConnect() }, "Open Amazon Connect"),
     mine && mine.statusClass === "offline"
       ? h("span", { class: "dim", text: "  Board shows you offline" })
       : null,
-    h("div", { class: "phn-connect-fallback" },
-      h("a", { href: "#", onclick: (e) => { e.preventDefault(); openOktaApp(); }, text: "Sign in through Okta" }),
-      h("span", { class: "dim", text: "  ·  " }),
-      h("a", { href: "#", onclick: (e) => { e.preventDefault(); openOktaDashboard(); }, text: "Okta dashboard" })));
+    compact
+      ? h("details", { class: "phn-connect-disclosure" }, h("summary", { text: "More sign-in options" }), fallback)
+      : fallback);
 }
