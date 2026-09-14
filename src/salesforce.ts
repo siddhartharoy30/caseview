@@ -167,8 +167,27 @@ export function ownerId(): string {
  * that looks identical to the transfer bug this whole project exists to
  * fix. ownerName in .env is unchanged; this only changes what gets queried
  * with it.
+ *
+ * SALESFORCE_OWNER_ID is the escape hatch for a name that genuinely
+ * resolves to more than one active user -- confirmed to happen in this org
+ * (a second real account, not a data-entry error). When set, it is used
+ * directly, still verified against Salesforce so a typo fails loudly rather
+ * than silently scoping to nothing or the wrong person.
  */
 export async function resolveOwnerId(): Promise<string> {
+  if (config.salesforce.ownerId) {
+    const id = config.salesforce.ownerId;
+    const soql = `SELECT Id FROM User WHERE Id = '${escapeSoqlString(id)}' AND IsActive = true`;
+    const data = await soqlQuery(soql);
+    const records = (data.records || []) as Array<{ Id: string }>;
+    if (records.length !== 1) {
+      throw new Error(`SALESFORCE_OWNER_ID "${id}" does not match exactly one active Salesforce user`);
+    }
+    resolvedOwnerId = records[0].Id;
+    log.info("salesforce.owner_resolved", { ownerId: resolvedOwnerId, source: "SALESFORCE_OWNER_ID" });
+    return resolvedOwnerId;
+  }
+
   const name = config.salesforce.ownerName;
   if (!name) {
     throw new Error("SALESFORCE_OWNER_NAME must be set -- QView cannot safely scope any query without it");
@@ -182,7 +201,7 @@ export async function resolveOwnerId(): Promise<string> {
   if (records.length > 1) {
     throw new Error(
       `${records.length} active Salesforce users are named "${name}" (${records.map((r) => r.Id).join(", ")}) -- ` +
-        "ownerName must resolve to exactly one user.",
+        "ownerName must resolve to exactly one user, or set SALESFORCE_OWNER_ID to disambiguate.",
     );
   }
   resolvedOwnerId = records[0].Id;

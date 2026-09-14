@@ -37,6 +37,12 @@ export const config = {
     refreshToken: required("SALESFORCE_REFRESH_TOKEN"),
     apiVersion: process.env.SALESFORCE_API_VERSION || "v61.0",
     ownerName: process.env.SALESFORCE_OWNER_NAME || "",
+    // v7 phase 4: escape hatch for a display name that genuinely resolves to
+    // more than one active user (confirmed to happen in this org -- a real
+    // second account, not a data-entry error). When set, resolveOwnerId()
+    // uses this Id directly instead of the name lookup, still verifying it
+    // names exactly one active user so a typo here still fails loudly.
+    ownerId: process.env.SALESFORCE_OWNER_ID || "",
   },
   iqs: {
     coverageHours: process.env.IQS_COVERAGE_HOURS || "9:00 AM - 6:00 PM",
