@@ -388,6 +388,18 @@ ensureColumn("comments", "parser_version", "INTEGER");
 // would re-show every event as unread on every fresh page load.
 ensureColumn("events", "read_at", "INTEGER");
 
+// v7 phase 1: a case can leave the queue without the delta pull ever seeing
+// it, because the delta filters on Owner.Name -- the very field that
+// changed. These columns let a case stay in the local cache (never deleted)
+// while being excluded from every current-state view once it's gone.
+// DEFAULT 1 backfills every existing row as owned, which is correct: every
+// row already in the cache was pulled while it matched the owner filter at
+// some point.
+ensureColumn("cases", "owned", "INTEGER NOT NULL DEFAULT 1");
+ensureColumn("cases", "left_queue_at", "TEXT");
+ensureColumn("cases", "left_reason", "TEXT");
+ensureColumn("cases", "current_owner", "TEXT");
+
 /**
  * One-time (per parser-version bump) backfill of the columns above.
  *
@@ -493,6 +505,12 @@ export const SETTING_DEFAULTS: Record<string, string> = {
 
   escalationUpdateHours: "24",  // how often an escalation owes the customer an update
   closedCaseWindowDays: "120",  // how far back to keep closed cases for metrics
+
+  // v7 phase 1: the reconciliation pass that catches a case transferred away
+  // -- the one thing the owner-scoped delta query can never see on its own.
+  // Default on: a window where the queue is knowingly wrong is worse than
+  // the extra query. Off is the escape hatch if it ever misbehaves.
+  reconcileOwnership: "true",
 
   // Phase 7 coverage automation. Starts inert on both axes: no channel is
   // active until one is added, and dry run starts true regardless -- the

@@ -9,7 +9,7 @@
  */
 
 import { config } from "./config";
-import { runEvents, SyncDelta, DeltaCase } from "./notify";
+import { runEvents, SyncDelta, DeltaCase, recordLeftQueueEvent } from "./notify";
 import {
   db,
   newId,
@@ -25,6 +25,8 @@ import {
   SalesforceCaseComment,
   SalesforceEmail,
   listCasesModifiedSince,
+  listOpenCases,
+  getOwnershipStatus,
   getCommentsForCases,
   getEmailsForCases,
   isEmailAccessDenied,
@@ -75,12 +77,14 @@ INSERT INTO cases (
   id, case_number, subject, description, status, priority, type, origin,
   component, sub_component, account, contact_name, owner, owner_title, labels,
   is_escalated, is_closed, created_date, last_modified_date, closed_date,
-  ncc_date, last_customer_update, active_ttr_days, product_area, synced_at
+  ncc_date, last_customer_update, active_ttr_days, product_area, synced_at,
+  owned, current_owner, left_queue_at, left_reason
 ) VALUES (
   @id, @case_number, @subject, @description, @status, @priority, @type, @origin,
   @component, @sub_component, @account, @contact_name, @owner, @owner_title, @labels,
   @is_escalated, @is_closed, @created_date, @last_modified_date, @closed_date,
-  @ncc_date, @last_customer_update, @active_ttr_days, @product_area, @synced_at
+  @ncc_date, @last_customer_update, @active_ttr_days, @product_area, @synced_at,
+  1, @owner, NULL, NULL
 )
 ON CONFLICT(id) DO UPDATE SET
   case_number = excluded.case_number,
@@ -106,7 +110,11 @@ ON CONFLICT(id) DO UPDATE SET
   last_customer_update = excluded.last_customer_update,
   active_ttr_days = excluded.active_ttr_days,
   product_area = excluded.product_area,
-  synced_at = excluded.synced_at
+  synced_at = excluded.synced_at,
+  owned = 1,
+  current_owner = excluded.owner,
+  left_queue_at = NULL,
+  left_reason = NULL
 `);
 
 const upsertComment = db.prepare(`
@@ -435,6 +443,94 @@ export function reconcileCommitments(): void {
   }
 }
 
+/* ------------------------------------------------------- ownership reconcile */
+
+const selectLocalOpenOwned = db.prepare(
+  "SELECT id, case_number FROM cases WHERE owned = 1 AND is_closed = 0",
+);
+
+const markLeftQueue = db.prepare(`
+  UPDATE cases SET owned = 0, left_queue_at = @left_queue_at,
+    left_reason = @left_reason, current_owner = @current_owner
+  WHERE id = @id
+`);
+
+/**
+ * A case transferred away from me drops out of listCasesModifiedSince()'s
+ * owner-scoped delta forever, with no tombstone -- the local row just
+ * freezes in whatever state it held at transfer time. listOpenCases() is the
+ * authoritative remote open+owned set; anything locally marked owned+open
+ * but absent from it has left the queue. Runs every sync regardless of the
+ * delta batch's size -- a transfer is exactly the kind of change
+ * listCasesModifiedSince() cannot see, so this cannot depend on the delta
+ * having found anything. Never throws: a failure here must not fail an
+ * otherwise-successful sync -- the delta side already landed and the
+ * watermark still needs to advance.
+ */
+export async function reconcileOwnership(): Promise<{ left: number; skipped: boolean }> {
+  if (!getSettingBool("reconcileOwnership")) return { left: 0, skipped: true };
+
+  try {
+    const remote = await listOpenCases();
+
+    // soqlQueryAll's own hard cap (20,000) is the real ceiling now that
+    // listOpenCases() carries no SOQL-level LIMIT. Hitting it means the page
+    // may be truncated -- treating everything past it as "transferred" would
+    // be exactly the false positive this guard exists to prevent.
+    if (remote.length >= 20000) {
+      log.warn("sync.reconcile_ownership_skipped", { reason: "hit the 20000-row cap", count: remote.length });
+      return { left: 0, skipped: true };
+    }
+
+    const remoteIds = new Set(remote.map((c) => c.Id));
+    const local = selectLocalOpenOwned.all() as Array<{ id: string; case_number: string }>;
+    const missing = local.filter((r) => !remoteIds.has(r.id));
+    if (!missing.length) return { left: 0, skipped: false };
+
+    const requeried = await getOwnershipStatus(missing.map((r) => r.id));
+    const byId = new Map(requeried.map((r) => [r.Id, r]));
+
+    const ts = now();
+    const nowIso = new Date(ts).toISOString();
+    const left: string[] = [];
+
+    db.transaction(() => {
+      for (const row of missing) {
+        const r = byId.get(row.id);
+        if (!r) {
+          // Deleted or merged in Salesforce -- mark it and leave it alone.
+          markLeftQueue.run({ id: row.id, left_queue_at: nowIso, left_reason: "not_found", current_owner: null });
+          left.push(row.case_number);
+          continue;
+        }
+        const stillMine = normalise(r.Owner?.Name) === ME;
+        if (!stillMine) {
+          markLeftQueue.run({ id: row.id, left_queue_at: nowIso, left_reason: "transferred", current_owner: r.Owner?.Name ?? null });
+          left.push(row.case_number);
+        } else if (r.IsClosed) {
+          // The delta pull should have caught this closure already -- it
+          // didn't, which means something else is wrong. Worth a log line.
+          log.warn("sync.reconcile_missed_closure", { caseNumber: row.case_number });
+          markLeftQueue.run({ id: row.id, left_queue_at: nowIso, left_reason: "closed_elsewhere", current_owner: null });
+          left.push(row.case_number);
+        }
+        // else: still open, still mine -- a transient race between the two
+        // reads (e.g. reopened between listOpenCases() and this requery).
+        // Leave owned=1; the next cycle settles it either way.
+      }
+    })();
+
+    if (left.length) {
+      recordLeftQueueEvent(left, ts);
+      log.info("sync.reconcile_ownership", { left: left.length, cases: left });
+    }
+    return { left: left.length, skipped: false };
+  } catch (e) {
+    log.warn("sync.reconcile_ownership_failed", { error: errText(e) });
+    return { left: 0, skipped: true };
+  }
+}
+
 /* ------------------------------------------------------------- the sync run */
 
 export async function syncOnce(full = false): Promise<SyncResult> {
@@ -457,8 +553,11 @@ async function runSync(full: boolean): Promise<SyncResult> {
     const cases = await listCasesModifiedSince(since);
 
     if (!cases.length) {
-      // Nothing moved in Salesforce, but a deadline can arrive on its own.
+      // Nothing moved in Salesforce, but a deadline can arrive on its own --
+      // and so can a transfer, which this delta query can never see (that's
+      // exactly why reconciliation exists), so it must run on this path too.
       await runEvents(null, false);
+      await reconcileOwnership();
       const durationMs = Date.now() - started;
       patchSyncState({
         running: 0,
@@ -528,6 +627,7 @@ async function runSync(full: boolean): Promise<SyncResult> {
 
     write();
     reconcileCommitments();
+    await reconcileOwnership();
 
     // Quality scoring runs here and not inside recomputeCase(): the Reliability
     // dimension reads commitment states, and those states are only correct

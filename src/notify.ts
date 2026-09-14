@@ -27,6 +27,7 @@ export type EventKind =
   | "case.replied"
   | "case.escalated"
   | "case.waiting_on_support"
+  | "case.left_queue"
   | "commitment.due"
   | "commitment.breached";
 
@@ -240,6 +241,33 @@ function commitmentEvents(): number {
   }
 
   return fired;
+}
+
+/**
+ * Reconciliation's backfill/ongoing notice: one event per reconciliation
+ * pass that finds newly-unowned cases, not one per case -- so a first pass
+ * that finds several at once reads as "3 cases left your queue" rather than
+ * a burst of separate toasts, and a normal single future transfer still
+ * reads cleanly. caseNumber is set only for a single-case event, so a click
+ * can jump straight to it; a multi-case event lists the numbers in detail
+ * instead. Exported and called directly from sync.ts's reconcileOwnership()
+ * rather than through runEvents(), since it fires on its own schedule
+ * independent of the delta-suppression logic.
+ */
+export function recordLeftQueueEvent(caseNumbers: string[], at: number = now()): boolean {
+  if (!caseNumbers.length) return false;
+  const sorted = [...caseNumbers].sort();
+  const title =
+    sorted.length === 1
+      ? "1 case left your queue"
+      : `${sorted.length} cases left your queue while QView was not watching`;
+  return record(
+    "case.left_queue:" + at + ":" + sorted.join(","),
+    "case.left_queue",
+    sorted.length === 1 ? sorted[0] : null,
+    title,
+    sorted.join(", "),
+  );
 }
 
 /* ----------------------------------------------------------------- webhook */

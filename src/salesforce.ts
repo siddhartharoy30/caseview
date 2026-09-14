@@ -169,8 +169,36 @@ function chunk<T>(items: T[], size: number): T[][] {
 }
 
 export async function listOpenCases(): Promise<SalesforceCase[]> {
-  const soql = `SELECT ${CASE_FIELDS} FROM Case WHERE ${ownerClause()}IsClosed = false ORDER BY CreatedDate ASC LIMIT 500`;
+  // No LIMIT: a SOQL-level LIMIT makes Salesforce return done:true on page
+  // one, which makes soqlQueryAll's own pagination unreachable -- silently
+  // truncating the authoritative "what's open and mine" set is exactly the
+  // failure mode reconciliation exists to avoid. soqlQueryAll's own 20,000
+  // cap is the real ceiling now.
+  const soql = `SELECT ${CASE_FIELDS} FROM Case WHERE ${ownerClause()}IsClosed = false ORDER BY CreatedDate ASC`;
   return soqlQueryAll<SalesforceCase>(soql);
+}
+
+export interface CaseOwnershipRow {
+  Id: string;
+  CaseNumber: string;
+  Owner: { Name: string } | null;
+  Status: string;
+  IsClosed: boolean;
+}
+
+/**
+ * Reconciliation's "find out where it went": a targeted, unfiltered re-query
+ * for exactly the Ids found locally-open-but-not-remotely-open. No owner
+ * clause -- that's the point, since the case may no longer be mine.
+ */
+export async function getOwnershipStatus(ids: string[]): Promise<CaseOwnershipRow[]> {
+  if (!ids.length) return [];
+  const out: CaseOwnershipRow[] = [];
+  for (const group of chunk(ids, 150)) {
+    const soql = `SELECT Id, CaseNumber, Owner.Name, Status, IsClosed FROM Case WHERE Id IN (${idList(group)})`;
+    out.push(...(await soqlQueryAll<CaseOwnershipRow>(soql)));
+  }
+  return out;
 }
 
 /**
