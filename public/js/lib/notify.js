@@ -35,6 +35,7 @@ export const KINDS = [
   { id: "case.replied", label: "Customer replied" },
   { id: "case.escalated", label: "Case escalated" },
   { id: "case.waiting_on_support", label: "Case moved to waiting-on-support" },
+  { id: "case.left_queue", label: "A case left my queue" },
   { id: "commitment.due", label: "Commitment due within the hour" },
   { id: "commitment.breached", label: "Commitment breached" },
 ];
@@ -44,14 +45,20 @@ const DEFAULT_KINDS = {
   "case.replied": true,
   "case.escalated": true,
   "case.waiting_on_support": true,
+  "case.left_queue": true,
   "commitment.due": true,
   "commitment.breached": true,
 };
 
 /** Sticky in the in-app toast stack (never auto-dismiss) and eligible for a
- * sound, per phase 5 -- the three kinds where missing it costs the most. */
-const PRIORITY_KINDS = new Set(["case.escalated", "case.waiting_on_support", "commitment.breached"]);
-const TONE_BY_KIND = { "case.escalated": "err", "commitment.breached": "err", "case.waiting_on_support": "warn" };
+ * sound, per phase 5 -- the kinds where missing it costs the most. */
+const PRIORITY_KINDS = new Set(["case.escalated", "case.waiting_on_support", "commitment.breached", "case.left_queue"]);
+const TONE_BY_KIND = {
+  "case.escalated": "err",
+  "commitment.breached": "err",
+  "case.waiting_on_support": "warn",
+  "case.left_queue": "warn",
+};
 
 export function prefs() {
   const p = store.get(KEY_PREFS, {});

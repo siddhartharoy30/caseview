@@ -148,6 +148,20 @@ const COLUMNS = [
     csv: (c) => c.productArea || "",
     cell: (c) => h("span", { class: "nowrap", text: c.productArea || "—" }),
   },
+  {
+    id: "currentOwner", label: "Now owned by", defaultOn: false,
+    sortVal: (c) => (c.currentOwner || "").toLowerCase(),
+    csv: (c) => c.currentOwner || "",
+    cell: (c) => h("span", { class: "nowrap", text: c.currentOwner || "—" }),
+  },
+  {
+    id: "leftQueueAt", label: "Left queue", defaultOn: false,
+    sortVal: (c) => (c.leftQueueAt ? -Date.parse(c.leftQueueAt) : null),
+    csv: (c) => (c.leftQueueAt ? fmt.dateTime(c.leftQueueAt) : ""),
+    cell: (c) => c.leftQueueAt
+      ? h("span", { class: "nowrap", title: fmt.dateTime(c.leftQueueAt), text: fmt.relative(c.leftQueueAt) })
+      : h("span", { class: "dim", text: "—" }),
+  },
   /*
    * Quality sits last on purpose.
    *
@@ -202,6 +216,7 @@ const BUILTIN_VIEWS = [
   { id: "waiting", label: "Waiting on Customer", params: { status: "open", flag: "waiting" },   hint: "Ball is in their court" },
   { id: "open",    label: "All Open",            params: { status: "open" },                    hint: "Every case I own that is not closed" },
   { id: "closed",  label: "Recently Closed",     params: { status: "closed", sort: "age:asc" }, hint: "Closed cases, newest first" },
+  { id: "left",    label: "Left My Queue",       params: { status: "left" },                    hint: "Transferred, closed elsewhere, or gone from Salesforce — still searchable, no longer worked" },
 ];
 
 const GROUPS = [
@@ -495,7 +510,7 @@ export async function render(ctx, host, shell) {
 
   const q = ctx.query || {};
   const state = {
-    scope:    q.status === "closed" || q.status === "all" ? q.status : "open",
+    scope:    ["closed", "all", "left"].includes(q.status) ? q.status : "open",
     priority: q.priority || "",
     account:  q.account || "",
     area:     q.area || "",
@@ -694,6 +709,14 @@ export async function render(ctx, host, shell) {
   function paint(opts = {}) {
     paintViews();
     const cols = visibleColumns(layout);
+    if (state.scope === "left") {
+      // These two columns only matter on the Left My Queue view -- force
+      // them into this one render without touching the user's saved layout.
+      for (const id of ["currentOwner", "leftQueueAt"]) {
+        const col = COL_BY_ID.get(id);
+        if (col && !cols.includes(col)) cols.push(col);
+      }
+    }
     const rows = filterRows(state.all, state).sort(comparator(state.sort));
     state.rows = rows;
     if (state.cursor >= rows.length) state.cursor = rows.length - 1;
@@ -902,6 +925,13 @@ export async function render(ctx, host, shell) {
       return {
         title: "Queue is clear",
         message: "No open cases are assigned to you right now. That is a good place to be.",
+        iconName: "check", kind: "ok",
+      };
+    }
+    if (state.scope === "left") {
+      return {
+        title: "Nothing has left your queue",
+        message: "Every case reconciliation catches will show up here.",
         iconName: "check", kind: "ok",
       };
     }
@@ -1263,7 +1293,7 @@ export async function render(ctx, host, shell) {
     refreshFromQuery(ctx) {
       const nq = ctx.query || {};
       const prevScope = state.scope;
-      state.scope    = nq.status === "closed" || nq.status === "all" ? nq.status : "open";
+      state.scope    = ["closed", "all", "left"].includes(nq.status) ? nq.status : "open";
       state.priority = nq.priority || "";
       state.account  = nq.account || "";
       state.area     = nq.area || "";

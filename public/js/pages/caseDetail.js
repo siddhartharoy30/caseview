@@ -200,6 +200,13 @@ export function render(ctx, host, shell) {
     const quality = c.iqs;
 
     mount(headHost,
+      c.owned === false
+        ? banner("warn", c.leftReason === "transferred" && c.currentOwner
+            ? `Transferred to ${c.currentOwner}${c.leftQueueAt ? " on " + fmt.dateShort(c.leftQueueAt) : ""}. No longer in your queue.`
+            : c.leftReason === "closed_elsewhere"
+              ? `Closed without going through the usual sync${c.leftQueueAt ? " — noticed " + fmt.dateShort(c.leftQueueAt) : ""}. No longer in your queue.`
+              : `No longer found in Salesforce${c.leftQueueAt ? " — noticed " + fmt.dateShort(c.leftQueueAt) : ""}. No longer in your queue.`)
+        : null,
       /* Primary: case number, subject, priority, status -- the four facts
          that identify the case, all at title weight (v4 phase 3.3). */
       h("div", { class: "cd-title-row" },
@@ -1554,9 +1561,13 @@ export function render(ctx, host, shell) {
       if (state.tab !== "iqs") return;   // the tab changed while fetching
     }
 
+    const c = state.detail.case;
     const score = state.iqs.score;
     const rubric = state.iqs.rubric || {};
     const scoped = score.overall !== null && score.overall !== undefined;
+    const ownershipNote = c.owned === false
+      ? banner("info", `This case left your queue${c.leftQueueAt ? " on " + fmt.dateShort(c.leftQueueAt) : ""}. Scoring stopped here — this score is frozen.`)
+      : null;
 
     /*
      * A dimension that does not apply to this response type is absent from the
@@ -1624,6 +1635,7 @@ export function render(ctx, host, shell) {
     if (!scoped) {
       mount(bodyHost,
         header,
+        ownershipNote,
         (score.notes || []).map((n) => banner("info", n)),
         emptyState({
           title: "Nothing of mine to score yet",
@@ -1638,6 +1650,7 @@ export function render(ctx, host, shell) {
 
     mount(bodyHost,
       header,
+      ownershipNote,
 
       (score.notes || []).map((n) => banner("info", n)),
 

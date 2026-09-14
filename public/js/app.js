@@ -251,6 +251,7 @@ const EVENT_ICON_TONE = {
   "commitment.breached": "t-bad",
   "case.waiting_on_support": "t-warn",
   "commitment.due": "t-warn",
+  "case.left_queue": "t-warn",
 };
 
 function setNotifBadge(unread) {
