@@ -44,6 +44,10 @@ export interface CaseRow {
   needs_my_reply: number;
   comment_count: number;
   synced_at: number;
+  owned: number;
+  current_owner: string | null;
+  left_queue_at: string | null;
+  left_reason: string | null;
 }
 
 const CASE_COLUMNS = `
@@ -52,7 +56,8 @@ const CASE_COLUMNS = `
   is_escalated, is_closed, created_date, last_modified_date, closed_date,
   ncc_date, last_customer_update, active_ttr_days, product_area,
   error_signature, first_response_at, last_my_touch, last_customer_touch,
-  needs_my_reply, comment_count, synced_at
+  needs_my_reply, comment_count, synced_at,
+  owned, current_owner, left_queue_at, left_reason
 `;
 
 /** Shape a cache row for the client. Field names match the old API. */
@@ -90,6 +95,10 @@ export function toApiCase(r: CaseRow) {
     needsMyReply: !!r.needs_my_reply,
     commentCount: r.comment_count || 0,
     syncedAt: r.synced_at,
+    owned: !!r.owned,
+    currentOwner: r.current_owner,
+    leftQueueAt: r.left_queue_at,
+    leftReason: r.left_reason,
     nextCommitment: next,
     // Three numbers, not the whole breakdown. The queue sorts and colours on
     // these; the dimension tree stays behind /api/cases/:n/iqs so a 200-row
@@ -151,7 +160,7 @@ function nextCommitmentFor(caseId: string) {
 }
 
 export interface CaseFilters {
-  status?: string;   // "open" | "closed" | "all" | a literal Salesforce status
+  status?: string;   // "open" | "closed" | "all" | "left" | a literal Salesforce status
   priority?: string; // comma separated
   account?: string;
   productArea?: string;
@@ -165,10 +174,20 @@ export function listCases(f: CaseFilters = {}) {
   const params: any[] = [];
 
   const status = f.status || "open";
-  if (status === "open") where.push("is_closed = 0");
-  else if (status === "closed") where.push("is_closed = 1");
-  else if (status !== "all") {
-    where.push("status = ?");
+  if (status === "left") {
+    // "Left my queue": both open and closed rows that are no longer mine, no
+    // is_closed predicate -- in practice nearly all are still open, but a
+    // transferred case that later closes elsewhere shouldn't silently drop
+    // off this view.
+    where.push("owned = 0");
+  } else if (status === "open") {
+    where.push("is_closed = 0 AND owned = 1");
+  } else if (status === "closed") {
+    where.push("is_closed = 1 AND owned = 1");
+  } else if (status === "all") {
+    where.push("owned = 1");
+  } else {
+    where.push("status = ? AND owned = 1");
     params.push(status);
   }
 
@@ -529,7 +548,7 @@ export function commitmentCoverage(): CommitmentCoverageRow[] {
             WHERE cm.case_id = c.id ORDER BY cm.created_at DESC LIMIT 1) AS latest_at,
          (SELECT COUNT(*) FROM commitments cm WHERE cm.case_id = c.id) AS total_count
        FROM cases c
-       WHERE c.is_closed = 0
+       WHERE c.is_closed = 0 AND c.owned = 1
        ORDER BY c.last_modified_date DESC`,
     )
     .all() as Array<{
@@ -571,9 +590,10 @@ export function duplicateCommitmentCases(): string[] {
   return (
     db
       .prepare(
-        `SELECT case_number FROM commitments
-         WHERE state IN ('active', 'unparsed')
-         GROUP BY case_number HAVING COUNT(*) > 1`,
+        `SELECT cm.case_number AS case_number FROM commitments cm
+         JOIN cases c ON c.id = cm.case_id
+         WHERE cm.state IN ('active', 'unparsed') AND c.owned = 1
+         GROUP BY cm.case_number HAVING COUNT(*) > 1`,
       )
       .all() as Array<{ case_number: string }>
   ).map((r) => r.case_number);
@@ -761,7 +781,7 @@ export function patterns() {
   const bySignature = db
     .prepare(
       `SELECT error_signature AS key, COUNT(*) AS count,
-              SUM(CASE WHEN is_closed = 0 THEN 1 ELSE 0 END) AS open_count
+              SUM(CASE WHEN is_closed = 0 AND owned = 1 THEN 1 ELSE 0 END) AS open_count
        FROM cases WHERE error_signature IS NOT NULL
        GROUP BY error_signature HAVING COUNT(*) > 1
        ORDER BY count DESC, key LIMIT 50`,
@@ -771,7 +791,7 @@ export function patterns() {
   const byArea = db
     .prepare(
       `SELECT COALESCE(product_area, 'Unclassified') AS key, COUNT(*) AS count,
-              SUM(CASE WHEN is_closed = 0 THEN 1 ELSE 0 END) AS open_count
+              SUM(CASE WHEN is_closed = 0 AND owned = 1 THEN 1 ELSE 0 END) AS open_count
        FROM cases GROUP BY key ORDER BY count DESC`,
     )
     .all() as Array<{ key: string; count: number; open_count: number }>;
@@ -779,7 +799,7 @@ export function patterns() {
   const byAccount = db
     .prepare(
       `SELECT account AS key, COUNT(*) AS count,
-              SUM(CASE WHEN is_closed = 0 THEN 1 ELSE 0 END) AS open_count
+              SUM(CASE WHEN is_closed = 0 AND owned = 1 THEN 1 ELSE 0 END) AS open_count
        FROM cases WHERE account IS NOT NULL
        GROUP BY account HAVING COUNT(*) > 1
        ORDER BY count DESC, key LIMIT 50`,
@@ -829,15 +849,15 @@ export function badgeCounts(atRiskHours: number) {
     one(
       `SELECT COUNT(*) AS n FROM commitments cm
          JOIN cases c ON c.case_number = cm.case_number
-        WHERE c.is_closed = 0 AND ${extra}`,
+        WHERE c.is_closed = 0 AND c.owned = 1 AND ${extra}`,
       ...p,
     );
 
   return {
-    queue: one("SELECT COUNT(*) AS n FROM cases WHERE is_closed = 0"),
-    needsReply: one("SELECT COUNT(*) AS n FROM cases WHERE is_closed = 0 AND needs_my_reply = 1"),
+    queue: one("SELECT COUNT(*) AS n FROM cases WHERE is_closed = 0 AND owned = 1"),
+    needsReply: one("SELECT COUNT(*) AS n FROM cases WHERE is_closed = 0 AND owned = 1 AND needs_my_reply = 1"),
     triage: one(
-      "SELECT COUNT(*) AS n FROM cases WHERE is_closed = 0 AND first_response_at IS NULL",
+      "SELECT COUNT(*) AS n FROM cases WHERE is_closed = 0 AND owned = 1 AND first_response_at IS NULL",
     ),
     // At risk means "still time to act": due inside the horizon but not yet past.
     commitmentsAtRisk: openCommitments(
@@ -848,7 +868,7 @@ export function badgeCounts(atRiskHours: number) {
     commitmentsBreached: openCommitments("cm.state = 'breached'"),
     commitmentsUnparsed: openCommitments("cm.state = 'unparsed'"),
     escalations: one(
-      "SELECT COUNT(*) AS n FROM cases WHERE is_closed = 0 AND (is_escalated = 1 OR priority IN ('P1','P0'))",
+      "SELECT COUNT(*) AS n FROM cases WHERE is_closed = 0 AND owned = 1 AND (is_escalated = 1 OR priority IN ('P1','P0'))",
     ),
     // Past due but not yet reconciled into 'breached' — still my problem today.
     overdue: openCommitments(
@@ -867,7 +887,7 @@ export function badgeCounts(atRiskHours: number) {
  * applies is worse than no count at all.
  */
 export function facets(openOnly = true) {
-  const scope = openOnly ? "is_closed = 0 AND" : "";
+  const scope = openOnly ? "is_closed = 0 AND owned = 1 AND" : "";
   const col = (name: string) =>
     (
       db

@@ -658,7 +658,7 @@ export function cacheCounts(): Record<string, number> {
   const one = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
   return {
     cases: one("SELECT COUNT(*) AS n FROM cases"),
-    openCases: one("SELECT COUNT(*) AS n FROM cases WHERE is_closed = 0"),
+    openCases: one("SELECT COUNT(*) AS n FROM cases WHERE is_closed = 0 AND owned = 1"),
     comments: one("SELECT COUNT(*) AS n FROM comments"),
     commitments: one("SELECT COUNT(*) AS n FROM commitments"),
     artifacts: one("SELECT COUNT(*) AS n FROM artifacts"),

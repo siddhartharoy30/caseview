@@ -190,6 +190,7 @@ function commitmentEvents(): number {
         "  FROM commitments cm" +
         "  JOIN cases c ON c.id = cm.case_id" +
         " WHERE c.is_closed = 0" +
+        "   AND c.owned = 1" +
         "   AND cm.due_at IS NOT NULL" +
         "   AND cm.state IN ('active', 'breached')",
     )

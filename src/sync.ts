@@ -402,7 +402,10 @@ export function reconcileCommitments(): void {
 
   const active = db
     .prepare(
-      "SELECT id, case_id, due_at, created_at, source_comment_id FROM commitments WHERE state = 'active' AND due_at IS NOT NULL",
+      `SELECT cm.id, cm.case_id, cm.due_at, cm.created_at, cm.source_comment_id
+         FROM commitments cm
+         JOIN cases c ON c.id = cm.case_id
+        WHERE cm.state = 'active' AND cm.due_at IS NOT NULL AND c.owned = 1`,
     )
     .all() as Array<{
     id: string;

@@ -293,6 +293,8 @@ export async function sweepTransitions(
     if (!t.newStatus || !triggers.has(t.newStatus)) continue;
     const c = getCaseRow(t.caseNumber);
     if (!c) continue;
+    // Never ask the team to cover a case that isn't mine anymore.
+    if (c.owned !== 1) continue;
     // The case's own last-modified stamp, not wall-clock-at-detection-time.
     // Caught by testing: using new Date() here meant re-running the sweep on
     // an unchanged case (an overlapping or retried sync) minted a different

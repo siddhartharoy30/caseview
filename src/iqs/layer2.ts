@@ -114,6 +114,7 @@ export type Layer2Unavailable =
   | { ok: false; reason: "no-token"; detail: string }
   | { ok: false; reason: "budget"; detail: string }
   | { ok: false; reason: "no-content"; detail: string }
+  | { ok: false; reason: "not-owned"; detail: string }
   | { ok: false; reason: "error"; detail: string };
 
 export type Layer2Result = { ok: true; score: Layer2Score } | Layer2Unavailable;

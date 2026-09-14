@@ -412,9 +412,12 @@ export async function scoreLayer2ByNumber(
   opts: Layer2Options = {},
 ): Promise<Layer2StoreResult> {
   const r = db
-    .prepare("SELECT id FROM cases WHERE case_number = ?")
-    .get(caseNumber) as { id: string } | undefined;
+    .prepare("SELECT id, owned FROM cases WHERE case_number = ?")
+    .get(caseNumber) as { id: string; owned: number } | undefined;
   if (!r) return { ok: false, reason: "error", detail: "That case is not in the cache." };
+  if (r.owned !== 1) {
+    return { ok: false, reason: "not-owned", detail: "This case left your queue; Layer 2 scoring is frozen." };
+  }
   return scoreLayer2(r.id, opts);
 }
 
@@ -452,7 +455,7 @@ const selectCandidates = db.prepare(`
            s.scored_at AS scored_at
     FROM cases c
     LEFT JOIN iqs_scores s ON s.case_id = c.id AND s.layer = '${LAYER2}'
-    WHERE c.is_closed = 0
+    WHERE c.is_closed = 0 AND c.owned = 1
   )
   WHERE last_mine IS NOT NULL
     AND (

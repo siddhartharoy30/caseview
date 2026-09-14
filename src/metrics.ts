@@ -109,7 +109,7 @@ export function scorecard(range: Range) {
     .prepare(
       `SELECT case_number, priority, status, account, product_area, is_closed, is_escalated,
               created_date, closed_date, first_response_at
-       FROM cases WHERE is_closed = 0`,
+       FROM cases WHERE is_closed = 0 AND owned = 1`,
     )
     .all() as MetricCaseRow[];
 
