@@ -27,6 +27,7 @@ import {
   listCasesModifiedSince,
   listOpenCases,
   getOwnershipStatus,
+  ownerId,
   getCommentsForCases,
   getEmailsForCases,
   isEmailAccessDenied,
@@ -506,7 +507,7 @@ export async function reconcileOwnership(): Promise<{ left: number; skipped: boo
           left.push(row.case_number);
           continue;
         }
-        const stillMine = normalise(r.Owner?.Name) === ME;
+        const stillMine = r.OwnerId === ownerId();
         if (!stillMine) {
           markLeftQueue.run({ id: row.id, left_queue_at: nowIso, left_reason: "transferred", current_owner: r.Owner?.Name ?? null });
           left.push(row.case_number);

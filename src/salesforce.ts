@@ -150,10 +150,48 @@ export function escapeSoqlString(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
+let resolvedOwnerId: string | null = null;
+
+/** Set once at boot by resolveOwnerId(); every owner-scoped query reads
+ * this, never config.salesforce.ownerName directly. */
+export function ownerId(): string {
+  if (!resolvedOwnerId) throw new Error("ownerId() called before resolveOwnerId() completed at boot");
+  return resolvedOwnerId;
+}
+
+/**
+ * Resolve the configured display name to exactly one active User.Id, once,
+ * before the server accepts a request or the sync loop starts. Owner.Name is
+ * not guaranteed unique in Salesforce -- two people sharing this name would
+ * otherwise silently pull a colleague's cases into this queue, a failure
+ * that looks identical to the transfer bug this whole project exists to
+ * fix. ownerName in .env is unchanged; this only changes what gets queried
+ * with it.
+ */
+export async function resolveOwnerId(): Promise<string> {
+  const name = config.salesforce.ownerName;
+  if (!name) {
+    throw new Error("SALESFORCE_OWNER_NAME must be set -- QView cannot safely scope any query without it");
+  }
+  const soql = `SELECT Id, Name FROM User WHERE Name = '${escapeSoqlString(name)}' AND IsActive = true`;
+  const data = await soqlQuery(soql);
+  const records = (data.records || []) as Array<{ Id: string; Name: string }>;
+  if (records.length === 0) {
+    throw new Error(`No active Salesforce user is named "${name}" -- check SALESFORCE_OWNER_NAME`);
+  }
+  if (records.length > 1) {
+    throw new Error(
+      `${records.length} active Salesforce users are named "${name}" (${records.map((r) => r.Id).join(", ")}) -- ` +
+        "ownerName must resolve to exactly one user.",
+    );
+  }
+  resolvedOwnerId = records[0].Id;
+  log.info("salesforce.owner_resolved", { ownerId: resolvedOwnerId, ownerName: name });
+  return resolvedOwnerId;
+}
+
 function ownerClause(joiner = " AND "): string {
-  return config.salesforce.ownerName
-    ? `Owner.Name = '${escapeSoqlString(config.salesforce.ownerName)}'${joiner}`
-    : "";
+  return resolvedOwnerId ? `OwnerId = '${escapeSoqlString(resolvedOwnerId)}'${joiner}` : "";
 }
 
 /** Quote a list of Ids for an IN clause. */
@@ -181,6 +219,7 @@ export async function listOpenCases(): Promise<SalesforceCase[]> {
 export interface CaseOwnershipRow {
   Id: string;
   CaseNumber: string;
+  OwnerId: string;
   Owner: { Name: string } | null;
   Status: string;
   IsClosed: boolean;
@@ -189,13 +228,15 @@ export interface CaseOwnershipRow {
 /**
  * Reconciliation's "find out where it went": a targeted, unfiltered re-query
  * for exactly the Ids found locally-open-but-not-remotely-open. No owner
- * clause -- that's the point, since the case may no longer be mine.
+ * clause -- that's the point, since the case may no longer be mine. OwnerId
+ * is the identity used to decide "is this still mine"; Owner.Name is kept
+ * only for the human-readable current_owner display.
  */
 export async function getOwnershipStatus(ids: string[]): Promise<CaseOwnershipRow[]> {
   if (!ids.length) return [];
   const out: CaseOwnershipRow[] = [];
   for (const group of chunk(ids, 150)) {
-    const soql = `SELECT Id, CaseNumber, Owner.Name, Status, IsClosed FROM Case WHERE Id IN (${idList(group)})`;
+    const soql = `SELECT Id, CaseNumber, OwnerId, Owner.Name, Status, IsClosed FROM Case WHERE Id IN (${idList(group)})`;
     out.push(...(await soqlQueryAll<CaseOwnershipRow>(soql)));
   }
   return out;
@@ -207,8 +248,8 @@ export async function getOwnershipStatus(ids: string[]): Promise<CaseOwnershipRo
  */
 export async function listCasesModifiedSince(since: string | null): Promise<SalesforceCase[]> {
   const filters: string[] = [];
-  if (config.salesforce.ownerName) {
-    filters.push(`Owner.Name = '${escapeSoqlString(config.salesforce.ownerName)}'`);
+  if (resolvedOwnerId) {
+    filters.push(`OwnerId = '${escapeSoqlString(resolvedOwnerId)}'`);
   }
   if (since) {
     filters.push(`LastModifiedDate > ${since}`);
@@ -246,8 +287,8 @@ export interface StatusTransition {
  */
 export async function getRecentStatusHistory(days: number): Promise<StatusTransition[]> {
   const cutoff = new Date(Date.now() - days * 24 * 3600_000).toISOString();
-  const owner = config.salesforce.ownerName
-    ? `Case.Owner.Name = '${escapeSoqlString(config.salesforce.ownerName)}' AND `
+  const owner = resolvedOwnerId
+    ? `Case.OwnerId = '${escapeSoqlString(resolvedOwnerId)}' AND `
     : "";
   const soql =
     `SELECT Case.CaseNumber, OldValue, NewValue, CreatedDate FROM CaseHistory ` +

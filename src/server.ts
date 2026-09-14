@@ -5,7 +5,7 @@ import https from "https";
 import fs from "fs";
 import { config } from "./config";
 import { COOKIE_NAME, makeSessionToken, requireAuth, sessionEmail, sessionDiagnostic } from "./auth";
-import { getCaseByNumber, isEmailAccessDenied } from "./salesforce";
+import { getCaseByNumber, isEmailAccessDenied, resolveOwnerId } from "./salesforce";
 import { computeSla, deriveQueue, deriveNextAction } from "./sla";
 import {
   getLatestSuggestedReply,
@@ -963,36 +963,53 @@ function safeHost(url: string): string {
   }
 }
 
-app.listen(config.port, () => {
-  log.info("server.listening", { port: config.port, protocol: "http" });
-  // Cases cached before quality scoring existed, and every case if the rubric
-  // version moved, are graded here. Local regex over the cache: no Salesforce
-  // call, no API key, so it is safe to do before the first sync lands.
-  rescoreStale();
-  // Layer 2 is the only thing here that can spend money, so it starts last
-  // and starts itself only if a token exists.
-  startLayer2Sweep();
-  startSync();
-});
-
 /**
- * v5 phase 4c: optional, and additive -- the HTTP listener above always
- * starts regardless of these vars (constraint: "HTTPS stays optional, plain
- * HTTP remains the default"). Replacing it outright would break the
- * container healthcheck, which calls http://127.0.0.1:PORT/healthz in plain
- * HTTP, and every existing bookmark on that port. Document Picture-in-Picture
- * (phase 4d) needs a secure context, which plain http:// on a bare IP is
- * not -- this is how that gets satisfied without disturbing anything that
- * already works. A bad cert/key must not take the whole process down, since
- * the HTTP listener is already serving traffic by the time this runs.
+ * v7 phase 4: Owner.Name is a display name, not guaranteed unique in
+ * Salesforce -- two people sharing it would silently pull a colleague's
+ * cases into this queue, a failure that looks identical to the transfer bug
+ * this whole project exists to fix. Resolving it to exactly one active
+ * User.Id, once, before the HTTP port ever opens, turns that into a boot
+ * failure instead of a quiet data leak.
  */
-if (config.tls.certPath && config.tls.keyPath) {
-  try {
-    const options = { cert: fs.readFileSync(config.tls.certPath), key: fs.readFileSync(config.tls.keyPath) };
-    https.createServer(options, app).listen(config.tls.port, () => {
-      log.info("server.listening", { port: config.tls.port, protocol: "https" });
-    });
-  } catch (err) {
-    log.error("server.tls_failed", { error: errText(err) });
+async function boot(): Promise<void> {
+  await resolveOwnerId();
+
+  app.listen(config.port, () => {
+    log.info("server.listening", { port: config.port, protocol: "http" });
+    // Cases cached before quality scoring existed, and every case if the rubric
+    // version moved, are graded here. Local regex over the cache: no Salesforce
+    // call, no API key, so it is safe to do before the first sync lands.
+    rescoreStale();
+    // Layer 2 is the only thing here that can spend money, so it starts last
+    // and starts itself only if a token exists.
+    startLayer2Sweep();
+    startSync();
+  });
+
+  /**
+   * v5 phase 4c: optional, and additive -- the HTTP listener above always
+   * starts regardless of these vars (constraint: "HTTPS stays optional, plain
+   * HTTP remains the default"). Replacing it outright would break the
+   * container healthcheck, which calls http://127.0.0.1:PORT/healthz in plain
+   * HTTP, and every existing bookmark on that port. Document Picture-in-Picture
+   * (phase 4d) needs a secure context, which plain http:// on a bare IP is
+   * not -- this is how that gets satisfied without disturbing anything that
+   * already works. A bad cert/key must not take the whole process down, since
+   * the HTTP listener is already serving traffic by the time this runs.
+   */
+  if (config.tls.certPath && config.tls.keyPath) {
+    try {
+      const options = { cert: fs.readFileSync(config.tls.certPath), key: fs.readFileSync(config.tls.keyPath) };
+      https.createServer(options, app).listen(config.tls.port, () => {
+        log.info("server.listening", { port: config.tls.port, protocol: "https" });
+      });
+    } catch (err) {
+      log.error("server.tls_failed", { error: errText(err) });
+    }
   }
 }
+
+boot().catch((err) => {
+  log.error("server.boot_failed", { error: errText(err) });
+  process.exit(1);
+});
