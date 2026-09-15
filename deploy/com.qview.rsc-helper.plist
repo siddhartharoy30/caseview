@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.qview.rsc-helper</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>/Users/siddhartharoy/qview-work/dist/rscHelperServer.js</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/siddhartharoy/qview-work</string>
+
+  <!--
+    LaunchAgents do not source .zshrc/.zprofile, so PATH here is minimal.
+    GCLOUD_BIN_PATH is set explicitly rather than relying on the bare
+    "gcloud" default (which only works from an interactive shell) --
+    see docs/PLAN_V8.md.
+  -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>GCLOUD_BIN_PATH</key>
+    <string>/Users/siddhartharoy/Downloads/google-cloud-sdk/bin/gcloud</string>
+    <key>PACMAN_BASE_URL</key>
+    <string>https://pacman.prod.my.rubrik.com</string>
+    <key>RSC_HELPER_PORT</key>
+    <string>8756</string>
+    <key>RSC_ALLOWED_ORIGINS</key>
+    <string>http://10.26.118.153:3001,http://localhost:3001</string>
+    <key>QVIEW_LOG_FILE</key>
+    <string>/Users/siddhartharoy/Library/Logs/qview-rsc-helper.log</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/siddhartharoy/Library/Logs/qview-rsc-helper.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/siddhartharoy/Library/Logs/qview-rsc-helper.stderr.log</string>
+</dict>
+</plist>
