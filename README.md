@@ -16,11 +16,18 @@ those questions on one screen.
 
 **Queue** — every case you own, filterable and sorted by how urgent it
 actually is rather than by last-modified. Facets for status, priority, product
-area and whether the ball is in your court.
+area and whether the ball is in your court. A case that leaves your queue —
+transferred to someone else, closed without QView's own sync catching it, or
+gone from Salesforce entirely — drops out of the queue and every count, but is
+never deleted: it stays in a dedicated **Left My Queue** view showing who has
+it now and when it left, still fully searchable and still carrying its
+comment history and last quality score.
 
 **Case detail** — the case, its full comment timeline, extracted artifacts
 (log bundles, cluster IDs, versions, support bundles referenced anywhere in the
-thread), related cases, and an optional AI-drafted reply.
+thread), related cases, and an optional AI-drafted reply. A transferred case
+still opens normally, with a quiet banner above the header saying where it
+went and a note on the Quality tab that its score is frozen from before that.
 
 **Triage** — the open queue banded by urgency, each case showing the SLA clock
 that matters for it right now and how much of it is left.
@@ -46,7 +53,7 @@ cache rebuild.
 
 Desktop notifications are opt-in and per-kind: new case assigned, customer
 reply, case gone stale, SLA at risk, commitment due, commitment breached,
-escalation aging.
+escalation aging, case left your queue.
 
 ---
 
@@ -67,6 +74,16 @@ Everything derived — SLA state, commitment extraction, artifact extraction,
 product-area classification, staleness, IQS — is computed from the cache. That
 means it recomputes on threshold changes without a resync, and it means the
 whole thing works offline once the cache is warm.
+
+The delta sync is scoped to cases you own, which means it cannot see a case
+the moment it stops being yours — the case simply stops matching the query and
+would otherwise sit in the cache forever, frozen as "open and mine." A
+separate reconciliation pass runs at the end of every sync (`reconcileOwnership`,
+on by default, toggleable in Settings) to close that gap: it fetches your
+authoritative current open-case list from Salesforce and diffs it against the
+cache, marking anything missing as no longer owned — never deleting it — and
+recording who has it now where knowable. A case reassigned back to you clears
+automatically on its next appearance in the normal sync.
 
 The front end is vanilla ES modules with no bundler and no dependencies. Pages
 are lazy-loaded with dynamic `import()`; charts are hand-rolled SVG.
@@ -115,6 +132,11 @@ Only `manual_metrics`, `commitments` you created or edited by hand, and
 `settings` are yours. Everything else is a cache and can be rebuilt from
 Salesforce at any time from Settings.
 
+`cases` also carries ownership state (`owned`, `left_queue_at`, `left_reason`,
+`current_owner`), maintained by reconciliation rather than the normal sync —
+see *How it works* above. A rebuild resets it correctly: the next
+reconciliation pass finds the truth again from scratch.
+
 ---
 
 ## Running it
@@ -153,10 +175,20 @@ Every variable is documented in `.env.example`. Five are required:
 `SALESFORCE_REFRESH_TOKEN`, `QVIEW_ALLOWED_EMAIL`, and `SESSION_SECRET` must be
 non-empty. The process exits at startup rather than running half-configured.
 
+`SALESFORCE_OWNER_NAME` (your display name in Salesforce) is resolved to a
+Salesforce User Id once at boot, since a display name is not guaranteed unique
+— every owner-scoped query filters on that resolved Id, not the name itself.
+Boot fails loudly, before the HTTP port opens, if the name matches zero or
+more than one active user. If it genuinely matches more than one (two people
+sharing a name, or a secondary login of your own), set `SALESFORCE_OWNER_ID`
+to the correct Id directly — still verified against Salesforce at boot, so a
+typo still fails loudly — and it takes priority over the name lookup.
+
 Sync schedule, active window and all the thresholds (`staleDays`,
 `atRiskHours`, `escalationUpdateHours`, `closedCaseWindowDays`) are runtime
 settings, not env vars — change them in the Settings page and they take effect
-on the next read.
+on the next read. `reconcileOwnership` (default on) is one of these settings
+too — see *How it works* above.
 
 ### First run
 
