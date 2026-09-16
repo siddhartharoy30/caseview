@@ -166,7 +166,13 @@ the numbered-plan convention at v8 rather than backfilling the gap.
    before this was written. The `url`/`user_email`/`domain`/`token` fields
    were already confirmed against a real response in Phase 1 and are used
    as-is; only the two date fields' exact string format was unconfirmed, so
-   they get the defensive treatment. **This also live-validates the
-   `gcloud_unauth` error path itself was hit for real, not simulated** — the
-   helper correctly distinguished it from `gcloud_missing` and returned the
+   they get the defensive treatment. **Resolved after re-authentication**:
+   pacman actually returns `enable_at`/`expired_at` as `"YYYY-MM-DD HH:MM:SS"`
+   (e.g. `"2026-09-18 19:06:59"`, no timezone, no `T` separator, not strict
+   ISO-8601) — confirmed `new Date(...)` still parses it in V8 (Node/Chrome),
+   so the defensive formatting works correctly rather than showing "—", but
+   the choice not to assume the shape up front was the right one. **This also
+   live-validates the `gcloud_unauth` error path itself was hit for real, not
+   simulated** — the helper correctly distinguished it from `gcloud_missing`
+   and returned the
    exact spec-required message.
