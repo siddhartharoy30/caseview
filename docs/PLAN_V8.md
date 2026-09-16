@@ -144,3 +144,18 @@ the numbered-plan convention at v8 rather than backfilling the gap.
    no access to Salesforce case data to verify such a flag against, and this is a
    single-operator personal tool, not a multi-tenant security boundary — pacman
    itself remains the real authorization check regardless.
+6. **The RSC panel formats `enable_at`/`expired_at` defensively**
+   (`fmt.dateOnly`/`fmt.dateShort`, which already fall back to "—" on anything
+   that doesn't parse as a date) rather than assuming a specific string shape.
+   Live testing hit a real `gcloud` reauthentication requirement mid-build
+   (Google's reauth policy expired the session between the Phase 1 gate test
+   and a later Phase 2 check — confirmed via `gcloud auth print-identity-token`
+   directly, which is exactly the `gcloud_unauth` path's own error text: "Run
+   `gcloud auth login`"), which blocked inspecting a second live response
+   before this was written. The `url`/`user_email`/`domain`/`token` fields
+   were already confirmed against a real response in Phase 1 and are used
+   as-is; only the two date fields' exact string format was unconfirmed, so
+   they get the defensive treatment. **This also live-validates the
+   `gcloud_unauth` error path itself was hit for real, not simulated** — the
+   helper correctly distinguished it from `gcloud_missing` and returned the
+   exact spec-required message.

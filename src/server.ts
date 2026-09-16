@@ -19,6 +19,7 @@ import {
   getSyncState,
   cacheCounts,
   rebuildCache,
+  logSupportAccess,
 } from "./db";
 import { draftSuggestedReply, repairDraft } from "./claude";
 import {
@@ -255,6 +256,21 @@ app.get("/api/cases/:caseNumber", requireAuth, noStore, (req, res) => {
   const c = getCase(req.params.caseNumber);
   if (!c) return res.status(404).json({ error: "Case not in cache" });
   res.json({ case: c, commitments: listCommitmentsForCase(req.params.caseNumber) });
+});
+
+/**
+ * Audit trail for a successful RSC support-access generation -- never the
+ * token itself. The generation happens against the RSC helper running on the
+ * Mac (docs/PLAN_V8.md, docs/RSC_HELPER.md); the browser calls this
+ * separately, right after, to persist the durable record.
+ */
+app.post("/api/rsc/audit", requireAuth, noStore, (req, res) => {
+  const account = typeof req.body?.account === "string" ? req.body.account.trim() : "";
+  if (!account) return res.status(400).json({ error: "account is required" });
+  const caseNumber = typeof req.body?.caseNumber === "string" ? req.body.caseNumber : null;
+  const userEmail = typeof req.body?.userEmail === "string" ? req.body.userEmail : null;
+  logSupportAccess(caseNumber, account, userEmail);
+  res.json({ ok: true });
 });
 
 app.get("/api/cases/:caseNumber/timeline", requireAuth, noStore, (req, res) => {

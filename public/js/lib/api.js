@@ -170,4 +170,9 @@ export const api = {
      edited version of the composed text, sent instead of the original. */
   sendCoveragePost:    (id, body) => request("POST", `/api/coverage/posts/${encodeURIComponent(id)}/send`, body ? { body } : {}),
   discardCoveragePost: (id)       => request("POST", `/api/coverage/posts/${encodeURIComponent(id)}/discard`),
+
+  /* v8 — RSC support access. The generation itself goes straight to the
+     local helper (see lib/rscHelper.js), never through here; this is only
+     the token-free audit row recorded afterward. */
+  rscAudit: (payload) => request("POST", "/api/rsc/audit", payload),
 };

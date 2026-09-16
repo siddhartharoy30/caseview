@@ -79,13 +79,15 @@ INSERT INTO cases (
   component, sub_component, account, contact_name, owner, owner_title, labels,
   is_escalated, is_closed, created_date, last_modified_date, closed_date,
   ncc_date, last_customer_update, active_ttr_days, product_area, synced_at,
-  owned, current_owner, left_queue_at, left_reason
+  owned, current_owner, left_queue_at, left_reason,
+  rsc_url, rsc_instance_status, us_federal, is_fedramp, federal_support_access
 ) VALUES (
   @id, @case_number, @subject, @description, @status, @priority, @type, @origin,
   @component, @sub_component, @account, @contact_name, @owner, @owner_title, @labels,
   @is_escalated, @is_closed, @created_date, @last_modified_date, @closed_date,
   @ncc_date, @last_customer_update, @active_ttr_days, @product_area, @synced_at,
-  1, @owner, NULL, NULL
+  1, @owner, NULL, NULL,
+  @rsc_url, @rsc_instance_status, @us_federal, @is_fedramp, @federal_support_access
 )
 ON CONFLICT(id) DO UPDATE SET
   case_number = excluded.case_number,
@@ -115,7 +117,12 @@ ON CONFLICT(id) DO UPDATE SET
   owned = 1,
   current_owner = excluded.owner,
   left_queue_at = NULL,
-  left_reason = NULL
+  left_reason = NULL,
+  rsc_url = excluded.rsc_url,
+  rsc_instance_status = excluded.rsc_instance_status,
+  us_federal = excluded.us_federal,
+  is_fedramp = excluded.is_fedramp,
+  federal_support_access = excluded.federal_support_access
 `);
 
 const upsertComment = db.prepare(`
@@ -213,6 +220,13 @@ function caseRow(c: SalesforceCase, syncedAt: number) {
       description: c.Description,
     }),
     synced_at: syncedAt,
+    // v8: resolved once here, not on every read -- Account_Polaris_URL__c is
+    // primary, RSCInstance__r.RSCUrl__c is a fallback (docs/PLAN_V8.md).
+    rsc_url: c.Account_Polaris_URL__c || (c.RSCInstance__r ? c.RSCInstance__r.RSCUrl__c : null) || null,
+    rsc_instance_status: c.RSCInstance__r ? c.RSCInstance__r.Status__c : null,
+    us_federal: c.US_Federal_Account__c ? 1 : 0,
+    is_fedramp: c.isFedRAMP__c ? 1 : 0,
+    federal_support_access: c.Federal_Account_Support_Access__c,
   };
 }
 

@@ -304,6 +304,35 @@ CREATE INDEX IF NOT EXISTS idx_l2_usage_created ON iqs_layer2_usage(created_at);
 CREATE INDEX IF NOT EXISTS idx_l2_usage_case ON iqs_layer2_usage(case_number, created_at);
 `);
 
+/* ------------------------------------------------ RSC support access log */
+
+/**
+ * One row per generated support-access token -- never the token itself. The
+ * RSC helper process (src/rscAccess.ts) that actually talks to pacman runs on
+ * the Mac and keeps its own in-memory cooldown; this table is the durable
+ * side, written by the main app after a successful generation, and answers
+ * "when did I last go into this tenant" (docs/PLAN_V8.md). Append-only, same
+ * shape as iqs_layer2_usage above.
+ */
+db.exec(`
+CREATE TABLE IF NOT EXISTS support_access_log (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_number  TEXT,
+  account      TEXT NOT NULL,
+  user_email   TEXT,
+  generated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rsc_log_account ON support_access_log(account, generated_at);
+CREATE INDEX IF NOT EXISTS idx_rsc_log_case ON support_access_log(case_number, generated_at);
+`);
+
+export function logSupportAccess(caseNumber: string | null, account: string, userEmail: string | null): void {
+  db.prepare(
+    `INSERT INTO support_access_log (case_number, account, user_email, generated_at)
+     VALUES (@case_number, @account, @user_email, @generated_at)`,
+  ).run({ case_number: caseNumber, account, user_email: userEmail, generated_at: now() });
+}
+
 /* --------------------------------------------------------------- full text */
 
 /**
@@ -399,6 +428,15 @@ ensureColumn("cases", "owned", "INTEGER NOT NULL DEFAULT 1");
 ensureColumn("cases", "left_queue_at", "TEXT");
 ensureColumn("cases", "left_reason", "TEXT");
 ensureColumn("cases", "current_owner", "TEXT");
+
+// v8: RSC support access (docs/PLAN_V8.md). rsc_url is already the resolved
+// primary/fallback value (see sync.ts's caseRow()), not the raw Salesforce
+// fields -- there's nothing to re-derive on read.
+ensureColumn("cases", "rsc_url", "TEXT");
+ensureColumn("cases", "rsc_instance_status", "TEXT");
+ensureColumn("cases", "us_federal", "INTEGER NOT NULL DEFAULT 0");
+ensureColumn("cases", "is_fedramp", "INTEGER NOT NULL DEFAULT 0");
+ensureColumn("cases", "federal_support_access", "TEXT");
 
 /**
  * One-time (per parser-version bump) backfill of the columns above.

@@ -48,6 +48,11 @@ export interface CaseRow {
   current_owner: string | null;
   left_queue_at: string | null;
   left_reason: string | null;
+  rsc_url: string | null;
+  rsc_instance_status: string | null;
+  us_federal: number;
+  is_fedramp: number;
+  federal_support_access: string | null;
 }
 
 const CASE_COLUMNS = `
@@ -57,7 +62,8 @@ const CASE_COLUMNS = `
   ncc_date, last_customer_update, active_ttr_days, product_area,
   error_signature, first_response_at, last_my_touch, last_customer_touch,
   needs_my_reply, comment_count, synced_at,
-  owned, current_owner, left_queue_at, left_reason
+  owned, current_owner, left_queue_at, left_reason,
+  rsc_url, rsc_instance_status, us_federal, is_fedramp, federal_support_access
 `;
 
 /** Shape a cache row for the client. Field names match the old API. */
@@ -99,6 +105,11 @@ export function toApiCase(r: CaseRow) {
     currentOwner: r.current_owner,
     leftQueueAt: r.left_queue_at,
     leftReason: r.left_reason,
+    rscUrl: r.rsc_url,
+    rscInstanceStatus: r.rsc_instance_status,
+    usFederal: !!r.us_federal,
+    isFedramp: !!r.is_fedramp,
+    federalSupportAccess: r.federal_support_access,
     nextCommitment: next,
     // Three numbers, not the whole breakdown. The queue sorts and colours on
     // these; the dimension tree stays behind /api/cases/:n/iqs so a 200-row

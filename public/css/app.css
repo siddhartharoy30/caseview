@@ -691,6 +691,13 @@ body.sidebar-collapsed .nav-item { position: relative; }
 .btn:disabled { opacity: .5; pointer-events: none; }
 .btn.sm { height: 26px; padding: 0 10px; font-size: 11px; }
 
+/* A disabled .btn whose title tooltip still has to work (v8's RSC/CDM header
+   buttons) -- plain .btn:disabled above sets pointer-events:none, which
+   silently kills hover in most browsers. Declared after that rule so equal
+   specificity resolves in this rule's favour. */
+.btn.tip-disabled:disabled { opacity: .5; pointer-events: auto; cursor: default; }
+.btn.tip-disabled:disabled:hover { background: var(--surface); color: var(--text-2); border-color: var(--border); }
+
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -964,6 +971,44 @@ body.sidebar-collapsed .nav-item { position: relative; }
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* --- RSC support access (v8) ---------------------------------------------- */
+
+.rsc-panel-body { display: flex; flex-direction: column; gap: 12px; }
+.rsc-loading, .rsc-error, .rsc-expired { color: var(--text-2); font-size: 13px; }
+.rsc-error { color: var(--red); }
+.rsc-hint { color: var(--text-3); font-size: 11.5px; margin: 0; }
+
+.rsc-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; }
+.rsc-label { color: var(--text-3); }
+.rsc-value { color: var(--text); font-weight: 500; }
+
+.rsc-countdown-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.rsc-copy-status { font-size: 12px; color: var(--text-3); }
+.rsc-copy-status.ok { color: var(--green); }
+.rsc-copy-status.warn { color: var(--amber); font-weight: 500; }
+.rsc-countdown { font-size: 20px; font-weight: 600; }
+
+.rsc-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.rsc-picker { display: flex; flex-direction: column; gap: 6px; }
+.rsc-picker-row {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); cursor: pointer; text-align: left;
+}
+.rsc-picker-row:hover { background: var(--surface-2); border-color: var(--border-2); }
+.rsc-picker-email { font-weight: 500; font-size: 13px; }
+.rsc-picker-meta { font-size: 11.5px; color: var(--text-3); }
+
+.rsc-token-text {
+  width: 100%; resize: none; margin-top: 6px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px; font-size: 11.5px; color: var(--text);
 }
 
 /* ------------------------------------------------------------------ inputs */

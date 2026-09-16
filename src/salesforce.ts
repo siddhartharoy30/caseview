@@ -118,6 +118,14 @@ export interface SalesforceCase {
   NCC_date__c: string | null;
   Last_Customer_Update__c: string | null;
   Active_TTR__c: number | null;
+  // v8: RSC support access (docs/PLAN_V8.md). Account_Polaris_URL__c is
+  // primary -- populated on 15/15 of a real sample of open cases, vs. 2/15
+  // for RSCInstance__r.RSCUrl__c, the opposite of what was guessed up front.
+  Account_Polaris_URL__c: string | null;
+  RSCInstance__r: { RSCUrl__c: string | null; Status__c: string | null } | null;
+  US_Federal_Account__c: boolean;
+  isFedRAMP__c: boolean;
+  Federal_Account_Support_Access__c: string | null;
 }
 
 const CASE_FIELDS = [
@@ -144,6 +152,12 @@ const CASE_FIELDS = [
   "NCC_date__c",
   "Last_Customer_Update__c",
   "Active_TTR__c",
+  "Account_Polaris_URL__c",
+  "RSCInstance__r.RSCUrl__c",
+  "RSCInstance__r.Status__c",
+  "US_Federal_Account__c",
+  "isFedRAMP__c",
+  "Federal_Account_Support_Access__c",
 ].join(", ");
 
 export function escapeSoqlString(s: string): string {
