@@ -14,6 +14,17 @@ const HEALTH_CACHE_MS = 30000;
 
 let healthCache = null; // { ok, checkedAt }
 
+/**
+ * Synchronous peek at the last checkHealth() result, for callers that need a
+ * value immediately during render (e.g. computeRscState in lib/rsc.js) rather
+ * than awaiting a fresh check. Optimistic default when never checked yet --
+ * the helper auto-starts via launchd, so assuming it's up avoids flashing a
+ * disabled state on first paint in the common case.
+ */
+export function lastKnownHealthy() {
+  return healthCache ? healthCache.ok : true;
+}
+
 export async function checkHealth(force = false) {
   if (!force && healthCache && Date.now() - healthCache.checkedAt < HEALTH_CACHE_MS) {
     return healthCache.ok;

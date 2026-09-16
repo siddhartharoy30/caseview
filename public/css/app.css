@@ -1419,6 +1419,31 @@ tr.row .copybtn:hover { color: var(--blue); }
   vertical-align: 1px;
 }
 
+/* Same pill shape as .reply-flag, but a real button (RSC support access,
+   docs/PLAN_V8.md's queue follow-on) -- hover-revealed like .copybtn above
+   (app.css:1401-1406) so a dense table isn't speckled with badges, dimmed
+   rather than hidden when disabled so the tooltip explaining why stays
+   reachable on hover. */
+.rsc-flag-btn {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .03em;
+  background: var(--surface-3);
+  color: var(--text-2);
+  vertical-align: 1px;
+  cursor: pointer;
+}
+tr.row .rsc-flag-btn { opacity: 0; transition: opacity var(--speed) ease; }
+tr.row:hover .rsc-flag-btn { opacity: 1; }
+tr.row:hover .rsc-flag-btn:disabled { opacity: .35; }
+.rsc-flag-btn:hover:not(:disabled) { background: var(--blue-2); color: #fff; }
+.rsc-flag-btn:disabled { cursor: default; }
+
 .age-red   { color: var(--red); font-weight: 500; }
 .age-amber { color: var(--amber); }
 

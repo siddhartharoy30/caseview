@@ -20,6 +20,7 @@ import {
   skeletonRows, emptyState, banner, button, copyToast,
 } from "../lib/ui.js";
 import { scoreMeter, bandExplain, bandLabel, KEYWORD_LABEL } from "../lib/iqs.js";
+import { computeRscState, openRscPanel } from "../lib/rsc.js";
 import * as bh from "../lib/bizhours.js";
 import { pageHead, page } from "./_shared.js";
 import { navigate, setQuery } from "../router.js";
@@ -91,6 +92,20 @@ const COLUMNS = [
       const wrap = h("span", { class: "cell-subject", title: c.subject || "" });
       if (c.needsMyReply) wrap.append(h("span", { class: "reply-flag", text: "REPLY" }));
       wrap.append(h("span", { text: c.subject || "(no subject)" }));
+      // v8 follow-on: the same RSC support-access action as case detail,
+      // right here, so a token doesn't require opening the case first.
+      // Hover-revealed like the copybtn above, not always visible, so a
+      // dense table isn't speckled with badges (docs/PLAN_V8.md). COLUMNS is
+      // module-level (defined before any render() call exists), so this
+      // can't close over paint() directly -- dataset + delegation, same as
+      // the copybtn above, resolved against the live `render()` scope.
+      const rsc = computeRscState(c);
+      wrap.append(h("button", {
+        class: "rsc-flag-btn", type: "button",
+        disabled: rsc.kind !== "ready",
+        title: rsc.title,
+        dataset: { rscCase: c.caseNumber },
+      }, "RSC"));
       return wrap;
     },
   },
@@ -1253,6 +1268,19 @@ export async function render(ctx, host, shell) {
     e.preventDefault();
     e.stopPropagation();
     copyToast(el.dataset.copy, "Case number copied");
+  });
+
+  /**
+   * v8 follow-on: same action as case detail's RSC button, from the queue
+   * row. A disabled button never fires a click at all, so nothing here needs
+   * to re-check computeRscState() -- reaching this handler already means the
+   * badge was enabled at render time.
+   */
+  on(tableWrap, "click", ".rsc-flag-btn", (e, el) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const c = state.rows.find((r) => r.caseNumber === el.dataset.rscCase);
+    if (c) openRscPanel(c, { onClose: () => paint() });
   });
 
   /**
