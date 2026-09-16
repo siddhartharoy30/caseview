@@ -1405,9 +1405,28 @@ tr.row .copybtn {
 tr.row:hover .copybtn { opacity: 1; }
 tr.row .copybtn:hover { color: var(--blue); }
 
-.cell-subject { color: var(--text); max-width: 420px; }
+/*
+ * A flex row, not plain inline content: the table cell itself clips at
+ * max-width:340px with overflow:hidden (table.tbl tbody td, above), and with
+ * a long subject that clipping used to cut off whatever came after the
+ * subject text -- the REPLY flag was fine (it comes first), but the trailing
+ * RSC badge could fall entirely outside the visible area, invisible even on
+ * hover, with no way to widen the column to compensate (queue columns
+ * reorder/show-hide, they don't resize). Fixed by making only .subject-text
+ * the shrinking, ellipsizing element; .reply-flag/.rsc-flag-btn are
+ * flex-shrink:0 so they always render at full size regardless of subject
+ * length.
+ */
+.cell-subject { display: flex; align-items: center; color: var(--text); max-width: 420px; }
+.cell-subject .subject-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0; /* required for a flex child to actually shrink below its content width */
+}
 .reply-flag {
   display: inline-block;
+  flex-shrink: 0;
   margin-right: 6px;
   padding: 1px 6px;
   border-radius: 9px;
@@ -1426,6 +1445,7 @@ tr.row .copybtn:hover { color: var(--blue); }
    reachable on hover. */
 .rsc-flag-btn {
   display: inline-block;
+  flex-shrink: 0;
   margin-left: 6px;
   padding: 1px 6px;
   border: 0;

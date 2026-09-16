@@ -91,7 +91,7 @@ const COLUMNS = [
     cell: (c) => {
       const wrap = h("span", { class: "cell-subject", title: c.subject || "" });
       if (c.needsMyReply) wrap.append(h("span", { class: "reply-flag", text: "REPLY" }));
-      wrap.append(h("span", { text: c.subject || "(no subject)" }));
+      wrap.append(h("span", { class: "subject-text", text: c.subject || "(no subject)" }));
       // v8 follow-on: the same RSC support-access action as case detail,
       // right here, so a token doesn't require opening the case first.
       // Hover-revealed like the copybtn above, not always visible, so a
