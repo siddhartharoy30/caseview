@@ -144,7 +144,18 @@ the numbered-plan convention at v8 rather than backfilling the gap.
    no access to Salesforce case data to verify such a flag against, and this is a
    single-operator personal tool, not a multi-tenant security boundary — pacman
    itself remains the real authorization check regardless.
-6. **The RSC panel formats `enable_at`/`expired_at` defensively**
+6. **Phases 2, 3, and 4 shipped as one commit, not three.** The plan's own
+   phase split (field sync + button/panel UI, then clipboard tiers, then
+   errors/federal-gating/audit-log) assumed more separability than the actual
+   code has: the button's five states need the error-message contract to
+   exist, the panel needs the clipboard tiers to be a complete, testable unit,
+   and the audit call is one line inside the same `pick()` function the panel
+   already needed. Splitting these into three commits would have meant two of
+   them left the app in a state that doesn't build toward anything usable on
+   its own. All of it is still gated on the same acceptance criteria the
+   original three-phase table implied; only the git history is flatter than
+   planned.
+7. **The RSC panel formats `enable_at`/`expired_at` defensively**
    (`fmt.dateOnly`/`fmt.dateShort`, which already fall back to "—" on anything
    that doesn't parse as a date) rather than assuming a specific string shape.
    Live testing hit a real `gcloud` reauthentication requirement mid-build
