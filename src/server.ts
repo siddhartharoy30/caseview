@@ -20,6 +20,8 @@ import {
   cacheCounts,
   rebuildCache,
   logSupportAccess,
+  logCdmAccess,
+  closeCdmAccess,
 } from "./db";
 import { draftSuggestedReply, repairDraft } from "./claude";
 import {
@@ -270,6 +272,35 @@ app.post("/api/rsc/audit", requireAuth, noStore, (req, res) => {
   const caseNumber = typeof req.body?.caseNumber === "string" ? req.body.caseNumber : null;
   const userEmail = typeof req.body?.userEmail === "string" ? req.body.userEmail : null;
   logSupportAccess(caseNumber, account, userEmail);
+  res.json({ ok: true });
+});
+
+/**
+ * Audit trail for an opened/closed CDM tunnel session -- never the spray
+ * token, never the command transcript (docs/PLAN_V8_CDM.md security
+ * requirement 1). The tunnel itself is driven by the CDM helper on the Mac
+ * (src/cdmHelperServer.ts); the browser calls these separately to persist
+ * the durable record. If the browser dies before the close call,
+ * stopped_at stays null -- the helper's own pidfile registry is the
+ * authoritative live-session record, this is just the durable log.
+ */
+app.post("/api/cdm/audit", requireAuth, noStore, (req, res) => {
+  const id = typeof req.body?.id === "string" ? req.body.id : "";
+  const caseNumber = typeof req.body?.caseNumber === "string" ? req.body.caseNumber : "";
+  const clusterUuid = typeof req.body?.clusterUuid === "string" ? req.body.clusterUuid : "";
+  const clusterTag = typeof req.body?.clusterTag === "string" ? req.body.clusterTag : null;
+  const localPort = typeof req.body?.localPort === "number" ? req.body.localPort : null;
+  if (!id || !caseNumber || !clusterUuid) {
+    return res.status(400).json({ error: "id, caseNumber, and clusterUuid are required" });
+  }
+  logCdmAccess(id, caseNumber, clusterUuid, clusterTag, localPort);
+  res.json({ ok: true });
+});
+
+app.post("/api/cdm/audit/close", requireAuth, noStore, (req, res) => {
+  const id = typeof req.body?.id === "string" ? req.body.id : "";
+  if (!id) return res.status(400).json({ error: "id is required" });
+  closeCdmAccess(id);
   res.json({ ok: true });
 });
 

@@ -80,14 +80,18 @@ INSERT INTO cases (
   is_escalated, is_closed, created_date, last_modified_date, closed_date,
   ncc_date, last_customer_update, active_ttr_days, product_area, synced_at,
   owned, current_owner, left_queue_at, left_reason,
-  rsc_url, rsc_instance_status, us_federal, is_fedramp, federal_support_access
+  rsc_url, rsc_instance_status, us_federal, is_fedramp, federal_support_access,
+  cluster_uuid, cluster_tag, cluster_version,
+  cluster2_uuid, cluster2_tag, cluster2_version, platform, case_version_raw
 ) VALUES (
   @id, @case_number, @subject, @description, @status, @priority, @type, @origin,
   @component, @sub_component, @account, @contact_name, @owner, @owner_title, @labels,
   @is_escalated, @is_closed, @created_date, @last_modified_date, @closed_date,
   @ncc_date, @last_customer_update, @active_ttr_days, @product_area, @synced_at,
   1, @owner, NULL, NULL,
-  @rsc_url, @rsc_instance_status, @us_federal, @is_fedramp, @federal_support_access
+  @rsc_url, @rsc_instance_status, @us_federal, @is_fedramp, @federal_support_access,
+  @cluster_uuid, @cluster_tag, @cluster_version,
+  @cluster2_uuid, @cluster2_tag, @cluster2_version, @platform, @case_version_raw
 )
 ON CONFLICT(id) DO UPDATE SET
   case_number = excluded.case_number,
@@ -122,7 +126,15 @@ ON CONFLICT(id) DO UPDATE SET
   rsc_instance_status = excluded.rsc_instance_status,
   us_federal = excluded.us_federal,
   is_fedramp = excluded.is_fedramp,
-  federal_support_access = excluded.federal_support_access
+  federal_support_access = excluded.federal_support_access,
+  cluster_uuid = excluded.cluster_uuid,
+  cluster_tag = excluded.cluster_tag,
+  cluster_version = excluded.cluster_version,
+  cluster2_uuid = excluded.cluster2_uuid,
+  cluster2_tag = excluded.cluster2_tag,
+  cluster2_version = excluded.cluster2_version,
+  platform = excluded.platform,
+  case_version_raw = excluded.case_version_raw
 `);
 
 const upsertComment = db.prepare(`
@@ -227,6 +239,17 @@ function caseRow(c: SalesforceCase, syncedAt: number) {
     us_federal: c.US_Federal_Account__c ? 1 : 0,
     is_fedramp: c.isFedRAMP__c ? 1 : 0,
     federal_support_access: c.Federal_Account_Support_Access__c,
+    // v8 part 2: CDM UI access (docs/PLAN_V8_CDM.md). tag__c, not Name -- see
+    // salesforce.ts. case_version_raw keeps Software_Version__c unfiltered;
+    // the ^\d+\.\d+ guard is applied at read time in cdmVersion.ts.
+    cluster_uuid: c.Cluster__r ? c.Cluster__r.uuid__c : null,
+    cluster_tag: c.Cluster__r ? c.Cluster__r.tag__c : null,
+    cluster_version: c.Cluster__r ? c.Cluster__r.software_version__c : null,
+    cluster2_uuid: c.Additional_Cluster__r ? c.Additional_Cluster__r.uuid__c : null,
+    cluster2_tag: c.Additional_Cluster__r ? c.Additional_Cluster__r.tag__c : null,
+    cluster2_version: c.Additional_Cluster__r ? c.Additional_Cluster__r.software_version__c : null,
+    platform: c.Platform__c,
+    case_version_raw: c.Software_Version__c,
   };
 }
 

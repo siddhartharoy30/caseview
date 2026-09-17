@@ -126,6 +126,20 @@ export interface SalesforceCase {
   US_Federal_Account__c: boolean;
   isFedRAMP__c: boolean;
   Federal_Account_Support_Access__c: string | null;
+  // v8 part 2: CDM UI access (docs/PLAN_V8_CDM.md). tag__c, not Name -- Name's
+  // field label is literally "Cluster UUID" and duplicates uuid__c.
+  Cluster__r: {
+    uuid__c: string | null;
+    tag__c: string | null;
+    software_version__c: string | null;
+  } | null;
+  Additional_Cluster__r: {
+    uuid__c: string | null;
+    tag__c: string | null;
+    software_version__c: string | null;
+  } | null;
+  Platform__c: string | null;
+  Software_Version__c: string | null;
 }
 
 const CASE_FIELDS = [
@@ -158,6 +172,17 @@ const CASE_FIELDS = [
   "US_Federal_Account__c",
   "isFedRAMP__c",
   "Federal_Account_Support_Access__c",
+  // v8 part 2: CDM UI access (docs/PLAN_V8_CDM.md). Support_Tunnel__c and
+  // Cluster_ID_Read_Only__c are deliberately not synced -- both were checked
+  // live and found dead/redundant (see the doc, section 6).
+  "Cluster__r.uuid__c",
+  "Cluster__r.tag__c",
+  "Cluster__r.software_version__c",
+  "Additional_Cluster__r.uuid__c",
+  "Additional_Cluster__r.tag__c",
+  "Additional_Cluster__r.software_version__c",
+  "Platform__c",
+  "Software_Version__c",
 ].join(", ");
 
 export function escapeSoqlString(s: string): string {

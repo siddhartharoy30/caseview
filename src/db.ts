@@ -333,6 +333,43 @@ export function logSupportAccess(caseNumber: string | null, account: string, use
   ).run({ case_number: caseNumber, account, user_email: userEmail, generated_at: now() });
 }
 
+/* ------------------------------------------------ CDM tunnel access log */
+
+/**
+ * One row per opened CDM tunnel session -- never the spray token, never the
+ * command transcript (docs/PLAN_V8_CDM.md security requirement 1). The CDM
+ * helper process (src/cdmHelperServer.ts) that actually drives portal_client
+ * runs on the Mac and keeps its own JSONL session log; this table is the
+ * durable, queryable side on the VM, written by the browser via
+ * /api/cdm/audit at start and /api/cdm/audit/close at stop -- if the browser
+ * dies before the stop call, stopped_at stays null, which is acceptable: the
+ * helper's own pidfile registry is the authoritative live-session record.
+ */
+db.exec(`
+CREATE TABLE IF NOT EXISTS cdm_access_log (
+  id           TEXT PRIMARY KEY,
+  case_number  TEXT NOT NULL,
+  cluster_uuid TEXT NOT NULL,
+  cluster_tag  TEXT,
+  local_port   INTEGER,
+  started_at   INTEGER NOT NULL,
+  stopped_at   INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_cdm_log_case ON cdm_access_log(case_number, started_at);
+CREATE INDEX IF NOT EXISTS idx_cdm_log_cluster ON cdm_access_log(cluster_uuid, started_at);
+`);
+
+export function logCdmAccess(id: string, caseNumber: string, clusterUuid: string, clusterTag: string | null, localPort: number | null): void {
+  db.prepare(
+    `INSERT INTO cdm_access_log (id, case_number, cluster_uuid, cluster_tag, local_port, started_at)
+     VALUES (@id, @case_number, @cluster_uuid, @cluster_tag, @local_port, @started_at)`,
+  ).run({ id, case_number: caseNumber, cluster_uuid: clusterUuid, cluster_tag: clusterTag, local_port: localPort, started_at: now() });
+}
+
+export function closeCdmAccess(id: string): void {
+  db.prepare(`UPDATE cdm_access_log SET stopped_at = @stopped_at WHERE id = @id`).run({ id, stopped_at: now() });
+}
+
 /* --------------------------------------------------------------- full text */
 
 /**
@@ -437,6 +474,19 @@ ensureColumn("cases", "rsc_instance_status", "TEXT");
 ensureColumn("cases", "us_federal", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("cases", "is_fedramp", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("cases", "federal_support_access", "TEXT");
+
+// v8 part 2: CDM UI access (docs/PLAN_V8_CDM.md). case_version_raw stores the
+// unfiltered Software_Version__c (including "Other") -- the ^\d+\.\d+ guard is
+// applied at read time in cdmVersion.ts, not here, so the raw value stays
+// inspectable if the guard's rule ever needs revisiting.
+ensureColumn("cases", "cluster_uuid", "TEXT");
+ensureColumn("cases", "cluster_tag", "TEXT");
+ensureColumn("cases", "cluster_version", "TEXT");
+ensureColumn("cases", "cluster2_uuid", "TEXT");
+ensureColumn("cases", "cluster2_tag", "TEXT");
+ensureColumn("cases", "cluster2_version", "TEXT");
+ensureColumn("cases", "platform", "TEXT");
+ensureColumn("cases", "case_version_raw", "TEXT");
 
 /**
  * One-time (per parser-version bump) backfill of the columns above.

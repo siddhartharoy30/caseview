@@ -53,6 +53,14 @@ export interface CaseRow {
   us_federal: number;
   is_fedramp: number;
   federal_support_access: string | null;
+  cluster_uuid: string | null;
+  cluster_tag: string | null;
+  cluster_version: string | null;
+  cluster2_uuid: string | null;
+  cluster2_tag: string | null;
+  cluster2_version: string | null;
+  platform: string | null;
+  case_version_raw: string | null;
 }
 
 const CASE_COLUMNS = `
@@ -63,7 +71,9 @@ const CASE_COLUMNS = `
   error_signature, first_response_at, last_my_touch, last_customer_touch,
   needs_my_reply, comment_count, synced_at,
   owned, current_owner, left_queue_at, left_reason,
-  rsc_url, rsc_instance_status, us_federal, is_fedramp, federal_support_access
+  rsc_url, rsc_instance_status, us_federal, is_fedramp, federal_support_access,
+  cluster_uuid, cluster_tag, cluster_version,
+  cluster2_uuid, cluster2_tag, cluster2_version, platform, case_version_raw
 `;
 
 /** Shape a cache row for the client. Field names match the old API. */
@@ -110,6 +120,14 @@ export function toApiCase(r: CaseRow) {
     usFederal: !!r.us_federal,
     isFedramp: !!r.is_fedramp,
     federalSupportAccess: r.federal_support_access,
+    clusterUuid: r.cluster_uuid,
+    clusterTag: r.cluster_tag,
+    clusterVersion: r.cluster_version,
+    cluster2Uuid: r.cluster2_uuid,
+    cluster2Tag: r.cluster2_tag,
+    cluster2Version: r.cluster2_version,
+    platform: r.platform,
+    caseVersionRaw: r.case_version_raw,
     nextCommitment: next,
     // Three numbers, not the whole breakdown. The queue sorts and colours on
     // these; the dimension tree stays behind /api/cases/:n/iqs so a 200-row
