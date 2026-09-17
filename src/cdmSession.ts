@@ -39,10 +39,20 @@ export interface CdmSession {
   // token-generation attempt) -- polled by the panel so the operator sees
   // what's happening as it happens, not just a result after the fact.
   currentStep: string | null;
+  // The same steps, accumulated -- a scrolling boot-log-style feed rather
+  // than a single line that gets overwritten. Capped, see setStep().
+  activityLog: string[];
   // Set only by a token-generation attempt; cleared at the start of the
   // next one. Separate from `error` (the tunnel's own failure state) since
   // a denied token generation must not disturb an otherwise-open session.
   tokenGenError: string | null;
+  // The most recently generated/pasted token, held only so the panel's
+  // explicit "Show token" action can display it -- a deliberate choice
+  // (docs/PLAN_V8_CDM.md), matching how the sibling RSC flow already shows
+  // its own token. Excluded from toWire(): never part of routine polling,
+  // only ever served by the dedicated reveal endpoint an explicit click
+  // hits. Cleared on stop.
+  lastToken: string | null;
   // Never serialised -- see toWire() below, an explicit allowlist rather than
   // a subtraction, so a future field can't leak by accident as this grows.
   child?: ChildProcess;
@@ -66,6 +76,7 @@ export interface CdmSessionWire {
   tokenStatus: "none" | "auto" | "manual";
   hasChromeWindow: boolean;
   currentStep: string | null;
+  activityLog: string[];
   tokenGenError: string | null;
 }
 
@@ -86,15 +97,24 @@ export function toWire(s: CdmSession): CdmSessionWire {
     tokenStatus: s.tokenStatus,
     hasChromeWindow: s.chromePid != null,
     currentStep: s.currentStep,
+    activityLog: s.activityLog,
     tokenGenError: s.tokenGenError,
   };
 }
 
-/** Sets the live-progress text the panel polls for. Never call this with
- * anything derived from child-process output -- see cdmAccess.ts/cdmToken.ts
- * headers. Step descriptions are always fixed, hand-written strings. */
+const MAX_LOG_LINES = 60;
+
+/** Sets the live-progress text the panel polls for, and appends it to the
+ * scrolling activity log. Never call this with anything derived from
+ * child-process output -- see cdmAccess.ts/cdmToken.ts headers. Step
+ * descriptions are always fixed, hand-written strings. Pass `null` to clear
+ * the *current* step (an attempt finishing) without adding a log line. */
 export function setStep(s: CdmSession, step: string | null): void {
   s.currentStep = step;
+  if (step === null) return;
+  const ts = new Date().toLocaleTimeString([], { hour12: false });
+  s.activityLog.push(`[${ts}] ${step}`);
+  if (s.activityLog.length > MAX_LOG_LINES) s.activityLog.splice(0, s.activityLog.length - MAX_LOG_LINES);
 }
 
 export function createSession(caseNumber: string, clusterUuid: string, clusterTag: string | null, clusterVersion: string | null): CdmSession {
@@ -115,7 +135,9 @@ export function createSession(caseNumber: string, clusterUuid: string, clusterTa
     chromeProfileDir: null,
     chromePid: null,
     currentStep: null,
+    activityLog: [],
     tokenGenError: null,
+    lastToken: null,
   };
   sessions.set(s.id, s);
   return s;

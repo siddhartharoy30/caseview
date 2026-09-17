@@ -5,12 +5,14 @@
  * the never-log-the-token rule is localised to one small module.
  *
  * The token is generated, validated, and handed to copyToMacClipboard() in
- * one place (generateToken() below) and NEVER crosses into an HTTP response
- * -- callers get back only {ok, via, username} or an error, never the token
- * itself. This is stricter than the RSC flow (which does send its token to
- * the browser as JSON): there is no ambiguity to resolve here, since the
- * token never needs to leave this process at all.
+ * one place (generateToken() below), which ALSO returns it to the caller
+ * (src/cdmHelperServer.ts only) so the panel can offer a "Show token" box
+ * with its own copy button -- matching the sibling RSC flow, which already
+ * sends its token to the browser as JSON (an explicit decision, not a
+ * default: see cdmSession.ts's `lastToken` field). Never logged anywhere in
+ * this file regardless -- see the log-call audit in every function below.
  *
+
  * Live-tested against a real cluster (docs/PLAN_V8_CDM.md): `portal connect
  * --cluster-uuid <uuid> --ticket <case>` (run inside the same one-shot,
  * expect-driven bastion session as claimAccess) drops into a real shell on
@@ -51,7 +53,9 @@ import { log, errText } from "./log";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CASE_RE = /^[A-Za-z0-9_-]{1,40}$/;
 
-export type TokenResult = { ok: true; via: string; username: string } | { ok: false; code: "no_permission" | "unknown"; message: string };
+export type TokenResult =
+  | { ok: true; via: string; username: string; token: string }
+  | { ok: false; code: "no_permission" | "unknown"; message: string };
 
 function tclQuote(s: string): string {
   return s.replace(/([\\"$\[\]])/g, "\\$1");
@@ -288,14 +292,15 @@ async function tryGenerateAndPbcopy(clusterUuid: string, caseNumber: string, onP
       .find((line) => /^[A-Za-z0-9._-]{15,}$/.test(line));
     if (token) {
       const copied = await copyToMacClipboard(token);
-      // `token` goes out of scope here; nothing else in this function holds
-      // a reference to it.
       if (!copied.ok) {
         log.warn("cdm.token_pbcopy_failed", { username: targetUsed });
         return { ok: false, code: "unknown", message: "Token generated and validated, but could not be copied to the clipboard." };
       }
       log.info("cdm.token_ok", { via: "exec", osuser, username: targetUsed, validateStatus: status });
-      return { ok: true, via: "exec", username: targetUsed };
+      // Returned to src/cdmHelperServer.ts only, which stores it on
+      // CdmSession.lastToken -- a field toWire() never serialises, served
+      // only by the dedicated reveal-token route an explicit click hits.
+      return { ok: true, via: "exec", username: targetUsed, token };
     }
     // Exit 0 but no token-shaped line found -- the script's output format
     // may have changed, or the extraction missed it. Say so plainly rather

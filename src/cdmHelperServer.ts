@@ -170,6 +170,7 @@ app.post("/sessions/:id/stop", async (req, res) => {
   s.state = "stopped";
   s.stoppedAt = Date.now();
   s.chromePid = null;
+  s.lastToken = null;
   appendSessionLog("stop", s);
   pruneOldSessions();
   res.json({ session: toWire(s) });
@@ -233,6 +234,10 @@ app.post("/sessions/:id/generate-token", (req, res) => {
     .then((result) => {
       if (result.ok) {
         s.tokenStatus = "auto";
+        // Held only for the panel's explicit "Show token" action (the
+        // dedicated reveal route below) -- toWire() never serialises this,
+        // so it never appears in the routine GET /sessions polling.
+        s.lastToken = result.token;
       } else {
         s.tokenGenError = result.message;
       }
@@ -247,9 +252,24 @@ app.post("/sessions/:id/generate-token", (req, res) => {
     });
 });
 
+/**
+ * Explicit reveal, for the panel's "Show token" box -- deliberately not
+ * part of the routine GET /sessions/:id polling response, so the token
+ * only ever reaches the browser when the operator asks for it directly.
+ * Manually-pasted tokens (tier 3) aren't stored here at all: the browser
+ * already has whatever the operator typed in, so there's nothing to reveal.
+ */
+app.get("/sessions/:id/reveal-token", (req, res) => {
+  const s = getSession(req.params.id);
+  if (!s) {
+    res.status(404).json({ error: "unknown", message: "No such session." });
+    return;
+  }
+  res.json({ token: s.lastToken || null });
+});
+
 /** Tier 3: manual-token paste, always available regardless of Phase 5's
- * automation. pbcopy's it and marks the session so the panel reflects it --
- * the token itself is never stored on the session or returned by any GET. */
+ * automation. pbcopy's it and marks the session so the panel reflects it. */
 app.post("/sessions/:id/manual-token", async (req, res) => {
   const s = getSession(req.params.id);
   if (!s) {
@@ -291,6 +311,7 @@ async function stopAllSessions(reason: string): Promise<void> {
       }
       s.state = "stopped";
       s.stoppedAt = Date.now();
+      s.lastToken = null;
       appendSessionLog("stop", s);
     }),
   );

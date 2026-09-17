@@ -111,6 +111,13 @@ export async function generateToken(id) {
   return body.session;
 }
 
+/** Explicit reveal for the panel's "Show token" box -- only ever called on
+ * a direct click, never as part of routine polling. */
+export async function revealToken(id) {
+  const body = await call(`/sessions/${encodeURIComponent(id)}/reveal-token`);
+  return body.token;
+}
+
 /** Tier 3: paste a manually-generated token; the helper pbcopy's it. */
 export async function manualToken(id, token) {
   const body = await call(`/sessions/${encodeURIComponent(id)}/manual-token`, {

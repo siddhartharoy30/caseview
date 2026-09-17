@@ -111,8 +111,23 @@ export function openCdmPanel(c, opts = {}) {
         clusters.length > 1 ? button("Back", { small: true, onclick: renderPicker }) : null));
   }
 
+  /** A scrolling, boot-log-style feed of session.activityLog -- shown
+   * live while connecting and again once open (token-generation steps
+   * keep appending to the same log), always pinned to the newest line. */
+  function activityLogBox() {
+    const lines = (session && session.activityLog) || [];
+    const pre = h("pre", { class: "cdm-log-box mono", text: lines.join("\n") });
+    // Runs after this element is actually in the DOM (mount() below happens
+    // synchronously before this executes in the same tick, so scrollHeight
+    // is already correct).
+    queueMicrotask(() => { pre.scrollTop = pre.scrollHeight; });
+    return pre;
+  }
+
   function renderConnecting(stateLabel) {
-    mount(panelBody, h("div", { class: "rsc-loading" }, stateLabel));
+    mount(panelBody,
+      h("div", { class: "rsc-loading" }, stateLabel),
+      activityLogBox());
   }
 
   function renderError(err) {
@@ -148,6 +163,40 @@ export function openCdmPanel(c, opts = {}) {
         })));
   }
 
+  /** "Show token" box for an auto-generated token -- fetches it only on
+   * first open (an explicit action), never as part of routine polling.
+   * Manually-pasted tokens have nothing to reveal (the browser already has
+   * whatever the operator typed in), so this only appears for tokenStatus
+   * === "auto". */
+  function tokenRevealBlock() {
+    if (session.tokenStatus !== "auto") return null;
+    const textEl = h("textarea", {
+      class: "cdm-token-text mono", readonly: true, rows: 3, placeholder: "Click to load…",
+    });
+    const statusEl = h("span", { class: "rsc-copy-status" }, "");
+    const details = h("details", { class: "cdm-manual" },
+      h("summary", {}, "Show token"),
+      textEl,
+      h("div", { class: "rsc-actions" },
+        button("Copy token", {
+          small: true,
+          onclick: () => copyTiered(textEl.value, { statusEl, detailsEl: details, inputEl: textEl, pbcopy: cdmHelper.pbcopy }),
+        })),
+      statusEl);
+    details.addEventListener("toggle", async () => {
+      if (!details.open || textEl.dataset.loaded) return;
+      textEl.value = "Loading…";
+      try {
+        const token = await cdmHelper.revealToken(session.id);
+        textEl.value = token || "(no token available -- it may have been generated in an earlier session)";
+        textEl.dataset.loaded = "1";
+      } catch {
+        textEl.value = "(could not load the token)";
+      }
+    });
+    return details;
+  }
+
   function renderOpen() {
     const flavorKnown = !!session.uiFlavor;
     mount(panelBody,
@@ -179,6 +228,8 @@ export function openCdmPanel(c, opts = {}) {
       // stderr, the validation HTTP status) is long, plain text, and needs
       // room to wrap, not a spot meant for a one-line "Copied!" message.
       h("p", { class: "rsc-hint", "data-cdm-token-detail": "" }, ""),
+      tokenRevealBlock(),
+      activityLogBox(),
       manualCommandBlock());
 
     const el = panelBody.querySelector(".cdm-elapsed");
@@ -214,10 +265,21 @@ export function openCdmPanel(c, opts = {}) {
   const TOKEN_POLL_MS = 1200;
   let tokenGenPollHandle = null;
 
+  /** Refreshes just the live log box in place (no full remount, so it
+   * doesn't disturb whatever else is on screen -- e.g. an open "Show
+   * token" details element) by swapping its text and re-pinning scroll. */
+  function refreshLogBox() {
+    const pre = panelBody.querySelector(".cdm-log-box");
+    if (!pre) return;
+    pre.textContent = ((session && session.activityLog) || []).join("\n");
+    pre.scrollTop = pre.scrollHeight;
+  }
+
   /** Kicks off generation, then polls the session every 1.2s to show live
-   * progress (session.currentStep) rather than a single "please wait" that
-   * only resolves after the fact -- a real attempt round-trips through a
-   * bastion session and can take 20-40s. */
+   * progress (session.currentStep, and the same scrolling log the tunnel
+   * setup uses) rather than a single "please wait" that only resolves
+   * after the fact -- a real attempt round-trips through a bastion session
+   * and can take 20-40s. */
   async function generateToken() {
     const statusEl = panelBody.querySelector("[data-cdm-copy-status]");
     const detailEl = panelBody.querySelector("[data-cdm-token-detail]");
@@ -235,6 +297,7 @@ export function openCdmPanel(c, opts = {}) {
       setStatus(err.message || "Could not start generation.", "warn");
       return;
     }
+    refreshLogBox();
 
     if (tokenGenPollHandle) clearTimeout(tokenGenPollHandle);
     const pollTokenGen = async () => {
@@ -246,8 +309,16 @@ export function openCdmPanel(c, opts = {}) {
         return;
       }
       session = s;
+      refreshLogBox();
       if (s.tokenStatus === "auto") {
-        setStatus("Token copied to clipboard (exec)", "ok");
+        // Full re-render so the newly-available "Show token" box appears,
+        // then set the transient status on the freshly-mounted element.
+        renderOpen();
+        const freshStatus = panelBody.querySelector("[data-cdm-copy-status]");
+        if (freshStatus) {
+          freshStatus.textContent = "Token copied to clipboard (exec)";
+          freshStatus.className = "rsc-copy-status ok";
+        }
         return;
       }
       if (s.tokenGenError) {
@@ -257,7 +328,8 @@ export function openCdmPanel(c, opts = {}) {
         // status -- never the token) goes in the detail paragraph, which has
         // room for it; the compact status stays a one-line summary.
         setStatus("Automatic generation denied — see detail below", "warn");
-        if (detailEl) detailEl.textContent = s.tokenGenError;
+        const freshDetail = panelBody.querySelector("[data-cdm-token-detail]");
+        if (freshDetail) freshDetail.textContent = s.tokenGenError;
         return;
       }
       // Still running -- show whatever step the helper is on right now.
