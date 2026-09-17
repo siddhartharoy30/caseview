@@ -147,6 +147,9 @@ export function openCdmPanel(c, opts = {}) {
       h("div", { class: "rsc-row" },
         h("span", { class: "rsc-label" }, "Local port"),
         h("span", { class: "rsc-value mono" }, String(session.localPort))),
+      h("div", { class: "rsc-row" },
+        h("span", { class: "rsc-label" }, "Token"),
+        h("span", { class: "rsc-value", text: session.tokenStatus === "auto" ? "Generated automatically" : session.tokenStatus === "manual" ? "Pasted manually" : "Not generated yet" })),
       h("div", { class: "rsc-countdown-row" },
         h("span", { class: "rsc-copy-status", "data-cdm-copy-status": "" }, ""),
         h("span", { class: "cd cdm-elapsed mono" }, fmtElapsed(session.startedAt))),
@@ -159,6 +162,7 @@ export function openCdmPanel(c, opts = {}) {
         : null,
       h("div", { class: "rsc-actions" },
         flavorKnown ? button("Open UI", { small: true, onclick: () => openUi() }) : null,
+        button("Generate token", { small: true, onclick: generateToken }),
         button("Stop session", { small: true, kind: "danger", onclick: stop })),
       manualCommandBlock());
 
@@ -185,6 +189,29 @@ export function openCdmPanel(c, opts = {}) {
       window.open(session.uiUrl, "_blank", "noopener");
     } catch (err) {
       renderError(err);
+    }
+  }
+
+  async function generateToken() {
+    const statusEl = panelBody.querySelector("[data-cdm-copy-status]");
+    if (statusEl) {
+      statusEl.textContent = "Trying automatic generation…";
+      statusEl.className = "rsc-copy-status";
+    }
+    try {
+      const body = await cdmHelper.generateToken(session.id);
+      session = body.session;
+      if (statusEl) {
+        statusEl.textContent = `Token copied to clipboard (${body.via})`;
+        statusEl.className = "rsc-copy-status ok";
+      }
+    } catch (err) {
+      // A denial here is expected on many clusters (docs/PLAN_V8_CDM.md) --
+      // the manual box below always works regardless.
+      if (statusEl) {
+        statusEl.textContent = err.message || "Automatic generation was denied — use the manual box below.";
+        statusEl.className = "rsc-copy-status warn";
+      }
     }
   }
 

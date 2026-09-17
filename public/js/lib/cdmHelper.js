@@ -99,6 +99,16 @@ export async function openUi(id, flavor) {
   return body.session;
 }
 
+/** Tier 1: try automatic generation. Never returns the token itself --
+ * see cdmHelperServer.ts's header comment. */
+export async function generateToken(id) {
+  const body = await call(`/sessions/${encodeURIComponent(id)}/generate-token`, {
+    method: "POST",
+    timeoutMs: 90000, // tries several usernames, each over its own bastion round trip
+  });
+  return body;
+}
+
 /** Tier 3: paste a manually-generated token; the helper pbcopy's it. */
 export async function manualToken(id, token) {
   const body = await call(`/sessions/${encodeURIComponent(id)}/manual-token`, {

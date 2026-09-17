@@ -329,3 +329,96 @@ cases.
    throughout (security requirement 3). This was a legitimate use of the tool
    against an open, real support case ("Waiting for Rubrik Support") — not a
    synthetic test against unrelated customer infrastructure.
+
+---
+
+## 8. Phase 5 — spray token generation, live-tested against the actual node
+
+This section was written after Phases 1-4 shipped (five commits) and the whole
+tunnel was validated end-to-end through the real helper implementation, not just
+an ad-hoc probe script: `POST /sessions` on the actual `cdmHelperServer.ts`
+completed the full readiness-check → claim → forward sequence unattended and
+reached `state: "open"` with a real listener on `127.0.0.1`, confirming Phase 3's
+design needs no manually-held companion session of any kind — local
+`portal_client forward` alone, after `claim`, is sufficient.
+
+### 8.1 `portal connect` (remote) reaches the actual cluster node
+
+With a tunnel genuinely open (via the real helper, this time — not a hand-held
+`expect` session), remote `portal connect --cluster-uuid <uuid> --ticket <case>`
+(inside the same one-shot bastion shell as `claim`) succeeded and dropped into a
+**real shell on the CDM node itself**:
+
+```
+rksupport_basic@VRAZ238702681:~$
+```
+
+`VRAZ238702681` matches the node ID `portal list` reported for this cluster. The
+earlier failed attempt at this same command (Phase 0, section 3) was against a
+cluster with no live tunnel at all — the command itself works fine once a tunnel
+exists; nothing else needed to change.
+
+### 8.2 The spray-token script, confirmed present and inspected
+
+```
+$ ls -la /opt/rubrik/src/scripts/dev/get_local_spray_token.*
+-rwxrwxr-x 1 ubuntu ubuntu 4731 Aug 24 23:33  get_local_spray_token.py
+-rwxrwxr-x 1 ubuntu ubuntu  144 Aug 24 23:33  get_local_spray_token.sh
+```
+
+`/usr/local/rubrik/...` does not exist on this node — only `/opt/rubrik/...` is
+real. `.sh` is a thin wrapper (`source scl_source enable python27` on RedHat,
+then just execs the `.py` with the same args) — calling the `.py` directly, as
+`cdmToken.ts` does, skips an irrelevant RedHat-only branch on this Ubuntu node.
+
+`--help` confirms the real signature:
+```
+usage: get_local_spray_token.py [-h] --username USERNAME
+                                [--organization-id ORGANIZATION_ID]
+                                [--caller CALLER]
+```
+`--username` is required, no default. `--organization-id` and `--caller` are
+optional.
+
+### 8.3 Every username tried was denied — a real permission gate, not a guess
+
+Four candidates tried against this cluster, all failing identically:
+
+| `--username` | Result |
+|---|---|
+| `support` | `Unable to get local spray token. Please check the target --username, and confirm you have the permission to request a token for that user.` (exit 1, empty output) |
+| `support_basic` | same |
+| `rksupport` | same |
+| `rksupport_basic` (the OS login itself) | same |
+
+The identical message across four different targets, including the exact OS
+username we're logged in as, points to a genuine authorization gate on this
+account/cluster combination rather than a wrong-username guess. Phase 0's own
+recon already surfaced the documented escalation path: `portal token --escalate`
+("Generate an escalation token for rksupport user. Use this only if you are
+currently able to log in as rksupport_basic and need to escalate to rksupport")
+— which opens a real JIRA ticket or posts to `#low-privileged-support-user`.
+**Deliberately not triggered here** — escalating access is a judgement call for
+the operator with a real justification, not something `cdmToken.ts` should ever
+do on its own.
+
+### 8.4 What shipped despite the permission wall
+
+The full mechanism is implemented and live-tested up to (but not across) that
+wall: locate the script, drive `portal connect` non-interactively via the same
+one-shot `expect` pattern as `claimAccess`, run the script with each candidate
+username redirected to a node-local temp file, **validate on the node itself**
+(`curl -sk -H "Authorization: Bearer $(cat <tmpfile>)" https://localhost/api/v1/cluster/me`
+— `$(...)` expands server-side, so the raw token is never present in a command
+line this process sends, and therefore never echoed into shell history), extract
+the token from between a pair of per-candidate markers only on a `200`, hand it
+straight to `copyToMacClipboard()`, and delete the remote temp file regardless of
+outcome. `generateToken()` never returns the token value itself — the HTTP
+response from `/sessions/:id/generate-token` carries only `{ok, via}`.
+
+**What is not live-validated**: the actual success path (a `200` from the
+validation curl). Every candidate tried failed at generation, so the
+extract-and-pbcopy branch has not fired against real data. The manual-token tier
+(shipped in Phase 4, unaffected by any of this) is not a stopgap for that reason
+— it is, empirically, the path that works today on the one cluster this was
+tested against.

@@ -27,6 +27,7 @@ import {
   appendSessionLog,
 } from "./cdmSession";
 import { checkTunnelOpen, claimAccess, startForward, stopForward, MSG } from "./cdmAccess";
+import { generateToken } from "./cdmToken";
 import { allocatePort } from "./cdmPorts";
 import { resolveUiFlavor, uiPathFor, UiFlavor } from "./cdmVersion";
 import { launchIsolatedChrome, closeChromeAndCleanup, ChromeLaunch } from "./cdmChrome";
@@ -191,6 +192,29 @@ app.post("/sessions/:id/open-ui", async (req, res) => {
   s.chromePid = launched.child.pid ?? null;
   s.uiUrl = url;
   res.json({ session: toWire(s) });
+});
+
+/**
+ * Tier 1: automatic generation (src/cdmToken.ts). Tries a short list of
+ * usernames against the cluster node and pbcopy's the first one that
+ * validates -- never returns the token itself, only whether it worked and
+ * which username succeeded. Empirically this is denied on at least one real
+ * cluster/account combination (docs/PLAN_V8_CDM.md) -- that's a real
+ * permission gate, not a bug, and the manual tier below covers it either way.
+ */
+app.post("/sessions/:id/generate-token", async (req, res) => {
+  const s = getSession(req.params.id);
+  if (!s || s.state !== "open") {
+    res.status(409).json({ error: "unknown", message: "Session is not open." });
+    return;
+  }
+  const result = await generateToken(s.clusterUuid, s.caseNumber);
+  if (!result.ok) {
+    res.status(result.code === "no_permission" ? 403 : 502).json({ error: result.code, message: result.message });
+    return;
+  }
+  s.tokenStatus = "auto";
+  res.json({ ok: true, via: result.via, session: toWire(s) });
 });
 
 /** Tier 3: manual-token paste, always available regardless of Phase 5's
