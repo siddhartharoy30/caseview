@@ -29,6 +29,13 @@ helper (see `src/cdmHelperServer.ts`'s header comment).
 4. **Chrome** — a disposable `--user-data-dir` profile per session, spawned
    directly (not `open -na`), so `__Secur-rubrik-token` never leaks between
    concurrent sessions to different clusters.
+5. **Token generation (optional, on request)** — `portal connect` again, this
+   time straight through to the cluster node itself, running
+   `/opt/rubrik/src/scripts/dev/get_local_spray_token.py` for a short list of
+   usernames and validating each on the node before handing a match to
+   `pbcopy`. Empirically denied on at least one real cluster/account (see
+   `docs/PLAN_V8_CDM.md` §8) — the manual-token box in the panel always works
+   as a fallback regardless of what this finds.
 
 ## One-time setup
 
