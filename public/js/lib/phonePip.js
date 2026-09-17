@@ -33,6 +33,7 @@ import { statusTone } from "./phoneMonitor.js";
 import * as store from "./store.js";
 import * as tabSync from "./tabSync.js";
 import { h, mount } from "./dom.js";
+import { button } from "./ui.js";
 import { connectButton } from "./connectLauncher.js";
 
 const KEY_SIZE = "phonePip.size";
@@ -180,6 +181,40 @@ export async function openPip(buildContent) {
 export function openPopupFallback() {
   if (isPopupOpen()) { popupRef.focus(); return; }
   popupRef = window.open("/phone", "qview-phone-popup", "width=380,height=520");
+}
+
+/**
+ * Pop-out control: shows the best available tier and never renders a
+ * button that does nothing. Moved here from phone.js (v8 follow-on) so the
+ * dock can offer the exact same trigger the /phone page does -- previously
+ * the dock only ever showed a *conditional* "Restore pop-out" banner (only
+ * after a pop-out had been opened once and then lost), with no way to
+ * start one for the first time without visiting /phone. When another tab
+ * already owns the pop-out, this offers "Focus pop-out" instead of trying
+ * (and failing) to open a second one -- Chrome allows only one PiP window
+ * at a time regardless of tab.
+ */
+export function popoutRow(state) {
+  if (!state.enabled) return null;
+  const t = tier();
+
+  if (t === "pip") {
+    if (isPipOpen() && !isPipOwnerLocal()) {
+      return h("div", { class: "phn-toggle-row" },
+        button("Focus pop-out", { small: true, onclick: () => requestPipFocus() }),
+        h("span", { class: "dim", text: "Open in another tab." }));
+    }
+    return h("div", { class: "phn-toggle-row" },
+      button("Pop out", { small: true, onclick: () => openPip(pipContent) }),
+      h("span", { class: "dim", text: "Opens an always-on-top window." }));
+  }
+
+  const why = t === "insecure-context"
+    ? "Always-on-top needs QView on https or localhost."
+    : "Always-on-top needs a newer Chrome.";
+  return h("div", { class: "phn-toggle-row" },
+    button("Pop out (window)", { small: true, onclick: () => openPopupFallback() }),
+    h("span", { class: "dim", text: why }));
 }
 
 /**

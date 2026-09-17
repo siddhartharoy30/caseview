@@ -101,39 +101,6 @@ function statusCard(state) {
           h("div", { class: "mono", text: board.queuedAgents + " AMER · " + board.queuedFederal + " Federal" })))));
 }
 
-/** Pop-out control: shows the best available tier and never renders a
- * button that does nothing. Tier 3 (the dock) is always available
- * regardless of what this shows, so this only ever offers tiers 1 and 2.
- * v6 phase 3: pipContent/agentsAheadOf moved to phonePip.js so the dock's
- * restore button can call the same renderer without lib/ importing from
- * pages/. When another tab already owns the pop-out, this offers "Focus
- * pop-out" instead of trying (and failing) to open a second one. */
-function popoutRow(state) {
-  if (!state.enabled) return null;
-  const t = phonePip.tier();
-
-  if (t === "pip") {
-    if (phonePip.isPipOpen() && !phonePip.isPipOwnerLocal()) {
-      return h("div", { class: "phn-toggle-row" },
-        button("Focus pop-out", { small: true, onclick: () => phonePip.requestPipFocus() }),
-        h("span", { class: "dim", text: "Open in another tab." }));
-    }
-    return h("div", { class: "phn-toggle-row" },
-      button("Pop out", {
-        small: true,
-        onclick: () => phonePip.openPip(phonePip.pipContent),
-      }),
-      h("span", { class: "dim", text: "Opens an always-on-top window." }));
-  }
-
-  const why = t === "insecure-context"
-    ? "Always-on-top needs QView on https or localhost."
-    : "Always-on-top needs a newer Chrome.";
-  return h("div", { class: "phn-toggle-row" },
-    button("Pop out (window)", { small: true, onclick: () => phonePip.openPopupFallback() }),
-    h("span", { class: "dim", text: why }));
-}
-
 function boardTable(state) {
   const board = state.board;
   if (!board || !board.ok || !board.agents.length) return null;
@@ -173,7 +140,7 @@ export function render(ctx, host, shell) {
           h("input", { type: "checkbox", checked: state.enabled, onchange: (e) => phoneMonitor.setEnabled(e.target.checked) }),
           h("span", { text: "I'm on the phone queue" })),
         h("span", { class: "dim", text: "Polls the board every 10s while this is on, from anywhere in QView. Off means zero requests." })),
-      popoutRow(state),
+      phonePip.popoutRow(state),
       statusCard(state),
       boardTable(state));
   }

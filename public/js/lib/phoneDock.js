@@ -95,7 +95,14 @@ export function initPhoneDock() {
         }, collapsed ? "+" : "–")),
       connectButton(state, { compact: true }),
       showBody && state.enabled ? body(state) : null,
-      showBody ? restoreBanner(state) : null);
+      // The dock used to offer only the *conditional* restore banner (a
+      // pop-out that existed once and was lost) -- with no way to start one
+      // for the first time without leaving the page you're on to visit
+      // /phone. restoreBanner's specific "it disappeared" framing wins when
+      // it applies; phonePip.popoutRow (the exact same control /phone
+      // shows) is the fallback the rest of the time, so there's always a
+      // one-click way to open the always-on-top window right from here.
+      showBody ? (restoreBanner(state) || phonePip.popoutRow(state)) : null);
   }
 
   phonePip.onOwnershipChange((ownerId, { lostUngracefully } = {}) => {
