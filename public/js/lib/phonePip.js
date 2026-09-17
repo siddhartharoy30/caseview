@@ -33,7 +33,7 @@ import { statusTone } from "./phoneMonitor.js";
 import * as store from "./store.js";
 import * as tabSync from "./tabSync.js";
 import { h, mount } from "./dom.js";
-import { button } from "./ui.js";
+import { button, toast } from "./ui.js";
 import { connectButton } from "./connectLauncher.js";
 
 const KEY_SIZE = "phonePip.size";
@@ -45,10 +45,19 @@ let pipOwnerTabId = null;
 const ownershipListeners = new Set();
 
 /** "pip" | "insecure-context" | "unsupported-browser". Feature-detected
- * directly -- never navigator.userAgent. */
+ * directly -- never navigator.userAgent.
+ *
+ * Checks isSecureContext FIRST, not just whether `documentPictureInPicture`
+ * is defined -- this module's own original assumption ("the property is
+ * simply undefined otherwise") turned out not to hold on every Chrome
+ * build: the property can exist on `window` in an insecure context (plain
+ * http:// on a bare private IP, e.g. QView's own default deployment --
+ * see server.ts's TLS listener comment) while `requestWindow()` still
+ * rejects when actually called. Checking the real precondition directly
+ * avoids depending on that assumption at all. */
 export function tier() {
-  if (typeof window.documentPictureInPicture !== "undefined") return "pip";
-  return window.isSecureContext ? "unsupported-browser" : "insecure-context";
+  if (!window.isSecureContext) return "insecure-context";
+  return typeof window.documentPictureInPicture !== "undefined" ? "pip" : "unsupported-browser";
 }
 
 /** Whether *this* document owns a live PiP window -- the original,
@@ -153,7 +162,18 @@ export async function openPip(buildContent) {
   if (pipOwnerTabId != null) { requestPipFocus(); return; } // defensive -- the UI shouldn't offer "Pop out" when another tab owns one
 
   const size = store.get(KEY_SIZE, DEFAULT_SIZE);
-  const pipWindow = await documentPictureInPicture.requestWindow(size);
+  let pipWindow;
+  try {
+    pipWindow = await documentPictureInPicture.requestWindow(size);
+  } catch (err) {
+    // Without this, a rejected requestWindow() (stale user-gesture, the
+    // site permission toggled off, a stored size the browser won't accept,
+    // etc.) is an unhandled promise rejection -- invisible to the operator,
+    // who just sees the click do nothing. Surfacing it is the whole fix;
+    // what it actually says decides what (if anything) needs fixing next.
+    toast(`Could not open the pop-out: ${err && err.message ? err.message : err}`, "err");
+    return;
+  }
   await cloneStylesheets(pipWindow.document);
   pipWindow.document.body.className = document.body.className; // theme (light/dark) travels with it
 
