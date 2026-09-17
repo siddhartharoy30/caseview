@@ -7,10 +7,11 @@
  */
 
 import { h, mount } from "./dom.js";
-import { toast, dialog, button } from "./ui.js";
+import { dialog, button } from "./ui.js";
 import * as fmt from "./fmt.js";
 import * as rscHelper from "./rscHelper.js";
 import { api } from "./api.js";
+import { copyTiered } from "./copyTiered.js";
 
 /*
  * Keyed by account (the resolved rsc_url), not by case number: the 2-minute
@@ -62,36 +63,6 @@ export function computeRscState(c) {
     return { kind: "helper-offline", title: "RSC helper not running on your Mac — see docs/RSC_HELPER.md" };
   }
   return { kind: "ready", title: "Generate a support access token" };
-}
-
-/**
- * Three tiers, never a silent failure (docs/PLAN_V8.md's Phase 3). Does NOT
- * reuse lib/dom.js's copy()/ui.js's copyToast() -- that helper's
- * clipboard-API-then-execCommand fallback would mask exactly the tier
- * boundary this needs to report distinctly (a real Clipboard API rejection
- * has to visibly fall through to the Mac-side pbcopy tier, not be silently
- * absorbed by a same-tab execCommand fallback that usually still "succeeds").
- */
-async function copyTiered(token, statusEl, detailsEl, tokenInputEl) {
-  try {
-    await navigator.clipboard.writeText(token);
-    statusEl.textContent = "Token copied to clipboard";
-    statusEl.className = "rsc-copy-status ok";
-    return;
-  } catch { /* fall through */ }
-
-  if (await rscHelper.pbcopy(token)) {
-    statusEl.textContent = "Token copied to clipboard (via helper)";
-    statusEl.className = "rsc-copy-status ok";
-    return;
-  }
-
-  statusEl.textContent = "Automatic copy failed — token is shown below, selected for you.";
-  statusEl.className = "rsc-copy-status warn";
-  detailsEl.open = true;
-  tokenInputEl.focus();
-  tokenInputEl.select();
-  toast("Automatic copy did not work — paste from the field below.", "warn", { sticky: true });
 }
 
 /**
@@ -147,12 +118,12 @@ export function openRscPanel(c, opts = {}) {
     // Never hold more than the chosen grant's token in memory.
     for (const g of grants) if (g !== grant) g.token = "";
     renderGrant(grant);
-    copyTiered(
-      grant.token,
-      panelBody.querySelector("[data-rsc-copy-status]"),
-      panelBody.querySelector("[data-rsc-details]"),
-      panelBody.querySelector("[data-rsc-token-input]"),
-    );
+    copyTiered(grant.token, {
+      statusEl: panelBody.querySelector("[data-rsc-copy-status]"),
+      detailsEl: panelBody.querySelector("[data-rsc-details]"),
+      inputEl: panelBody.querySelector("[data-rsc-token-input]"),
+      pbcopy: rscHelper.pbcopy,
+    });
     if (loginTab && !loginTab.closed) loginTab.location = grant.url;
     api.rscAudit({ account, caseNumber, userEmail: grant.userEmail }).catch(() => {});
   }
@@ -172,12 +143,12 @@ export function openRscPanel(c, opts = {}) {
         button("Open login page", { small: true, onclick: () => window.open(grant.url, "_blank", "noopener") }),
         button("Copy token again", {
           small: true,
-          onclick: () => copyTiered(
-            grant.token,
-            panelBody.querySelector("[data-rsc-copy-status]"),
-            panelBody.querySelector("[data-rsc-details]"),
-            panelBody.querySelector("[data-rsc-token-input]"),
-          ),
+          onclick: () => copyTiered(grant.token, {
+            statusEl: panelBody.querySelector("[data-rsc-copy-status]"),
+            detailsEl: panelBody.querySelector("[data-rsc-details]"),
+            inputEl: panelBody.querySelector("[data-rsc-token-input]"),
+            pbcopy: rscHelper.pbcopy,
+          }),
         })),
       h("details", { "data-rsc-details": "" },
         h("summary", {}, "Show token"),

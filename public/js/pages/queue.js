@@ -21,6 +21,7 @@ import {
 } from "../lib/ui.js";
 import { scoreMeter, bandExplain, bandLabel, KEYWORD_LABEL } from "../lib/iqs.js";
 import { computeRscState, openRscPanel } from "../lib/rsc.js";
+import { computeCdmState, openCdmPanel } from "../lib/cdm.js";
 import * as bh from "../lib/bizhours.js";
 import { pageHead, page } from "./_shared.js";
 import { navigate, setQuery } from "../router.js";
@@ -106,6 +107,16 @@ const COLUMNS = [
         title: rsc.title,
         dataset: { rscCase: c.caseNumber },
       }, "RSC"));
+      // v8 part 2: same shape as the RSC badge above -- opens the panel, never
+      // starts a tunnel itself. A one-click tunnel on a dense table would be
+      // an accidental production connection with an audit record attached.
+      const cdm = computeCdmState(c);
+      wrap.append(h("button", {
+        class: "cdm-flag-btn", type: "button",
+        disabled: cdm.kind !== "ready",
+        title: cdm.title,
+        dataset: { cdmCase: c.caseNumber },
+      }, "CDM"));
       return wrap;
     },
   },
@@ -1281,6 +1292,13 @@ export async function render(ctx, host, shell) {
     e.stopPropagation();
     const c = state.rows.find((r) => r.caseNumber === el.dataset.rscCase);
     if (c) openRscPanel(c, { onClose: () => paint() });
+  });
+
+  on(tableWrap, "click", ".cdm-flag-btn", (e, el) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const c = state.rows.find((r) => r.caseNumber === el.dataset.cdmCase);
+    if (c) openCdmPanel(c, { onClose: () => paint() });
   });
 
   /**

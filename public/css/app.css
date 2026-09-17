@@ -1011,6 +1011,49 @@ body.sidebar-collapsed .nav-item { position: relative; }
   padding: 8px; font-size: 11.5px; color: var(--text);
 }
 
+/* --- CDM UI access (v8 part 2) -------------------------------------------- */
+/* Reuses the .rsc-* panel vocabulary above (row/label/value/actions/hint/
+   picker/countdown-row/copy-status) -- only what's genuinely CDM-specific
+   gets its own class. */
+
+.cdm-manual { margin-top: 4px; }
+.cdm-manual summary { cursor: pointer; font-size: 12px; color: var(--text-3); }
+.cdm-mono-line {
+  display: block; font-family: var(--mono); font-size: 11.5px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 8px; margin: 8px 0 6px; word-break: break-all;
+}
+.cdm-cmd-row { display: flex; align-items: center; gap: 8px; }
+.cdm-cmd-row .cdm-mono-line { flex: 1; margin: 0; }
+.cdm-token-paste-row { display: flex; gap: 8px; margin-top: 10px; }
+.cdm-token-paste-row .cdm-token-input { flex: 1; }
+.cdm-flavor-chooser { padding: 10px 0; border-top: 1px solid var(--border); }
+
+/* Same pill shape as .rsc-flag-btn -- see app.css's queue subject-cell note
+   (the fix for a badge disappearing behind clipped long subjects, commit
+   26c1c45): only .subject-text may shrink, every sibling badge needs
+   flex-shrink:0. */
+.cdm-flag-btn {
+  display: inline-block;
+  flex-shrink: 0;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .03em;
+  background: var(--surface-3);
+  color: var(--text-2);
+  vertical-align: 1px;
+  cursor: pointer;
+}
+tr.row .cdm-flag-btn { opacity: 0; transition: opacity var(--speed) ease; }
+tr.row:hover .cdm-flag-btn { opacity: 1; }
+tr.row:hover .cdm-flag-btn:disabled { opacity: .35; }
+.cdm-flag-btn:hover:not(:disabled) { background: var(--blue-2); color: #fff; }
+.cdm-flag-btn:disabled { cursor: default; }
+
 /* ------------------------------------------------------------------ inputs */
 
 .field { margin-bottom: 14px; }

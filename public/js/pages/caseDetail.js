@@ -22,6 +22,8 @@ import {
 } from "../lib/ui.js";
 import * as rscHelper from "../lib/rscHelper.js";
 import { computeRscState, openRscPanel } from "../lib/rsc.js";
+import * as cdmHelper from "../lib/cdmHelper.js";
+import { computeCdmState, openCdmPanel } from "../lib/cdm.js";
 import { htmlToText, textNodes } from "../lib/text.js";
 import {
   scoreMeter, bandChip, bandExplain,
@@ -170,6 +172,7 @@ export function render(ctx, host, shell) {
       // navigating between several cases in a row doesn't re-probe on every
       // load().
       rscHelper.checkHealth().then(() => paintHead());
+      cdmHelper.checkHealth().then(() => paintHead());
     } catch (err) {
       const missing = err instanceof ApiError && err.status === 404;
       mount(headHost);
@@ -195,6 +198,7 @@ export function render(ctx, host, shell) {
     const nav = neighbours();
     const nc = c.nextCommitment;
     const rsc = computeRscState(c);
+    const cdm = computeCdmState(c);
 
     /**
      * There is no contact email field in the cache. Rather than leave the row
@@ -254,7 +258,13 @@ export function render(ctx, host, shell) {
             title: rsc.title,
             onclick: rsc.kind === "ready" ? () => openRscPanel(c) : undefined,
           }),
-          button("CDM", { small: true, kind: "tip-disabled", disabled: true, title: "Coming in part 2" }))),
+          button("CDM", {
+            small: true,
+            kind: cdm.kind === "ready" ? "" : "tip-disabled",
+            disabled: cdm.kind !== "ready",
+            title: cdm.title,
+            onclick: cdm.kind === "ready" ? () => openCdmPanel(c) : undefined,
+          }))),
 
       /* Secondary: what needs acting on and who it's for -- next commitment,
          quality score, account, contact. */

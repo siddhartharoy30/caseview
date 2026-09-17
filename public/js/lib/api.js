@@ -175,4 +175,6 @@ export const api = {
      local helper (see lib/rscHelper.js), never through here; this is only
      the token-free audit row recorded afterward. */
   rscAudit: (payload) => request("POST", "/api/rsc/audit", payload),
+  cdmAudit: (payload) => request("POST", "/api/cdm/audit", payload),
+  cdmAuditClose: (payload) => request("POST", "/api/cdm/audit/close", payload),
 };
