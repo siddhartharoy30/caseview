@@ -127,6 +127,19 @@ const DEFAULT_TARGET_USER = "admin";
  *
  * This function itself never returns the token text -- see generateToken().
  */
+function stripAnsi(s: string): string {
+  return s.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "");
+}
+
+/** Pulls the exact slice between one pair of echo markers out of a
+ * transcript. Used both for the (redacted) token slice and for the
+ * diagnostic slices below -- same extraction, same bounds-checking. */
+function between(output: string, startTag: string, endTag: string): string {
+  const startIdx = output.indexOf(startTag);
+  const endIdx = output.indexOf(endTag);
+  return startIdx !== -1 && endIdx !== -1 && endIdx > startIdx ? output.slice(startIdx + startTag.length, endIdx) : "";
+}
+
 async function tryGenerateAndPbcopy(clusterUuid: string, caseNumber: string): Promise<TokenResult> {
   const remoteTmp = "/tmp/.qview_spray_tok";
   const remoteTmpErr = "/tmp/.qview_spray_tok_err";
@@ -149,13 +162,25 @@ async function tryGenerateAndPbcopy(clusterUuid: string, caseNumber: string): Pr
     `  timeout {}`,
     `}`,
     `sleep 1`,
+    `send "echo QVIEW_OSUSER_START:$osuser:QVIEW_OSUSER_END\\r"`,
+    `expect "QVIEW_OSUSER_END"`,
     `if {[string match "*basic*" $osuser]} {`,
     `  set target_user {${BASIC_TARGET_USER}}`,
     `} else {`,
     `  set target_user {${DEFAULT_TARGET_USER}}`,
     `}`,
-    `send "python /opt/rubrik/src/scripts/dev/get_local_spray_token.py --username $target_user > ${remoteTmp} 2>${remoteTmpErr}; echo QVIEW_GEN_DONE:\\$?\\r"`,
-    `expect "QVIEW_GEN_DONE:"`,
+    `send "echo QVIEW_TARGET_START:$target_user:QVIEW_TARGET_END\\r"`,
+    `expect "QVIEW_TARGET_END"`,
+    `sleep 1`,
+    `send "python /opt/rubrik/src/scripts/dev/get_local_spray_token.py --username $target_user > ${remoteTmp} 2>${remoteTmpErr}; echo QVIEW_GEN_EXIT:\\$?\\r"`,
+    `expect -re {QVIEW_GEN_EXIT:\\d*}`,
+    `sleep 1`,
+    // The script's own stderr is not sensitive -- it's a fixed diagnostic
+    // string ("Unable to get local spray token...") -- so it's fine to
+    // surface in full, unlike the token itself just below.
+    `send {echo QVIEW_ERR_START; cat ${remoteTmpErr} 2>/dev/null; echo QVIEW_ERR_END}`,
+    `send "\\r"`,
+    `expect "QVIEW_ERR_END"`,
     `sleep 1`,
     // Validated on the node itself -- "localhost" here is the cluster's own
     // API, no need to route back through the Mac's tunnel.
@@ -185,24 +210,29 @@ async function tryGenerateAndPbcopy(clusterUuid: string, caseNumber: string): Pr
     return { ok: false, code: "unknown", message: "Token generation timed out." };
   }
 
-  // Which target actually got tried is read back from the transcript rather
-  // than tracked separately -- the Tcl `if` above is the single source of
-  // truth for the choice, so recovering it here can't drift from what ran.
-  const targetUsed = output.includes(`--username ${BASIC_TARGET_USER}`) ? BASIC_TARGET_USER : DEFAULT_TARGET_USER;
-
+  // Diagnostics only -- none of this is the token itself, so it's safe to
+  // both log (log.ts's own redactor would catch a field literally named
+  // "token"/"error" if it mattered, but none of these values are secrets
+  // to begin with) and return in the error message the panel shows.
+  const osuser = stripAnsi(between(output, "QVIEW_OSUSER_START:", ":QVIEW_OSUSER_END")).trim() || "(not detected)";
+  const targetUsed = stripAnsi(between(output, "QVIEW_TARGET_START:", ":QVIEW_TARGET_END")).trim() || "(not determined)";
+  const genExitMatch = /QVIEW_GEN_EXIT:(\d+)/.exec(output);
+  const genExit = genExitMatch ? genExitMatch[1] : "(no exit code seen)";
+  const scriptErr = stripAnsi(between(output, "QVIEW_ERR_START", "QVIEW_ERR_END"))
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .join(" ") || "(no stderr captured)";
   const validateMatch = /QVIEW_VALIDATE:(\d{3})/.exec(output);
-  const status = validateMatch ? validateMatch[1] : null;
+  const status = validateMatch ? validateMatch[1] : "(no response)";
+
   if (status === "200") {
-    const startTag = "QVIEW_TOKEN_START";
-    const endTag = "QVIEW_TOKEN_END";
-    const startIdx = output.indexOf(startTag);
-    const endIdx = output.indexOf(endTag);
-    const slice = startIdx !== -1 && endIdx !== -1 && endIdx > startIdx ? output.slice(startIdx + startTag.length, endIdx) : "";
+    const slice = between(output, "QVIEW_TOKEN_START", "QVIEW_TOKEN_END");
     // Strip the echoed command line itself and ANSI/terminal control
     // sequences, keep only what looks like a token line.
     const token = slice
       .split(/\r?\n/)
-      .map((line) => line.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "").trim())
+      .map((line) => stripAnsi(line).trim())
       .find((line) => /^[A-Za-z0-9._-]{15,}$/.test(line));
     if (token) {
       const copied = await copyToMacClipboard(token);
@@ -212,16 +242,18 @@ async function tryGenerateAndPbcopy(clusterUuid: string, caseNumber: string): Pr
         log.warn("cdm.token_pbcopy_failed", { username: targetUsed });
         return { ok: false, code: "unknown", message: "Token generated and validated, but could not be copied to the clipboard." };
       }
-      log.info("cdm.token_ok", { via: "exec", username: targetUsed });
+      log.info("cdm.token_ok", { via: "exec", osuser, username: targetUsed });
       return { ok: true, via: "exec", username: targetUsed };
     }
   }
-  log.warn("cdm.token_no_permission", { username: targetUsed });
+  log.warn("cdm.token_denied", { osuser, username: targetUsed, genExit, scriptErr, validateStatus: status });
   return {
     ok: false,
     code: "no_permission",
     message:
-      "Automatic token generation was denied. This account may not have permission to request a spray token on this cluster -- use the manual command below, or escalate via `portal token --escalate` if that's warranted.",
+      `Automatic token generation was denied. OS user: ${osuser} -> tried --username ${targetUsed} ` +
+      `(script exit ${genExit}: "${scriptErr}"; validation HTTP ${status}). ` +
+      "Use the manual command below, or escalate via `portal token --escalate` if that's warranted.",
   };
 }
 

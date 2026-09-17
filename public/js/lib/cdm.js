@@ -173,6 +173,11 @@ export function openCdmPanel(c, opts = {}) {
         flavorKnown ? button("Open UI", { small: true, onclick: () => openUi() }) : null,
         button("Generate token", { small: true, onclick: generateToken }),
         button("Stop session", { small: true, kind: "danger", onclick: stop })),
+      // Separate from the compact copy-status span above -- a denial's
+      // diagnostic detail (OS user, username tried, the script's own
+      // stderr, the validation HTTP status) is long, plain text, and needs
+      // room to wrap, not a spot meant for a one-line "Copied!" message.
+      h("p", { class: "rsc-hint", "data-cdm-token-detail": "" }, ""),
       manualCommandBlock());
 
     const el = panelBody.querySelector(".cdm-elapsed");
@@ -207,10 +212,12 @@ export function openCdmPanel(c, opts = {}) {
 
   async function generateToken() {
     const statusEl = panelBody.querySelector("[data-cdm-copy-status]");
+    const detailEl = panelBody.querySelector("[data-cdm-token-detail]");
     if (statusEl) {
       statusEl.textContent = "Trying automatic generation…";
       statusEl.className = "rsc-copy-status";
     }
+    if (detailEl) detailEl.textContent = "";
     try {
       const body = await cdmHelper.generateToken(session.id);
       session = body.session;
@@ -220,11 +227,15 @@ export function openCdmPanel(c, opts = {}) {
       }
     } catch (err) {
       // A denial here is expected on many clusters (docs/PLAN_V8_CDM.md) --
-      // the manual box below always works regardless.
+      // the manual box below always works regardless. The full diagnostic
+      // (OS user, username tried, the script's own stderr, validation HTTP
+      // status -- never the token) goes in the detail paragraph, which has
+      // room for it; the compact status stays a one-line summary.
       if (statusEl) {
-        statusEl.textContent = err.message || "Automatic generation was denied — use the manual box below.";
+        statusEl.textContent = "Automatic generation denied — see detail below";
         statusEl.className = "rsc-copy-status warn";
       }
+      if (detailEl) detailEl.textContent = err.message || "Automatic generation was denied — use the manual box below.";
     }
   }
 
