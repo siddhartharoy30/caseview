@@ -99,14 +99,16 @@ export async function openUi(id, flavor) {
   return body.session;
 }
 
-/** Tier 1: try automatic generation. Never returns the token itself --
- * see cdmHelperServer.ts's header comment. */
+/** Tier 1: kicks off automatic generation and returns immediately --
+ * never the token itself, see cdmHelperServer.ts's header comment. The
+ * actual outcome (tokenStatus/tokenGenError) and live progress
+ * (currentStep) show up on the session; the caller polls getSession(). */
 export async function generateToken(id) {
   const body = await call(`/sessions/${encodeURIComponent(id)}/generate-token`, {
     method: "POST",
-    timeoutMs: 90000, // tries several usernames, each over its own bastion round trip
+    timeoutMs: 10000,
   });
-  return body;
+  return body.session;
 }
 
 /** Tier 3: paste a manually-generated token; the helper pbcopy's it. */

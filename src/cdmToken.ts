@@ -61,8 +61,12 @@ function tclQuote(s: string): string {
  * Runs a one-shot `expect` script exactly like cdmAccess.ts's
  * runExpectScript, duplicated locally rather than shared so this file's
  * token-handling stays self-contained and easy to audit on its own.
+ *
+ * `onData`, if given, fires on every chunk with the *cumulative* buffer so
+ * far -- used only to detect known, fixed marker strings appearing (for
+ * live-progress reporting), never to display or log the buffer itself.
  */
-function runExpectScript(script: string, timeoutMs: number): Promise<{ output: string; timedOut: boolean }> {
+function runExpectScript(script: string, timeoutMs: number, onData?: (bufSoFar: string) => void): Promise<{ output: string; timedOut: boolean }> {
   return new Promise((resolve) => {
     const scriptPath = path.join(os.tmpdir(), `qview-cdm-tok-${Date.now()}-${Math.random().toString(36).slice(2)}.exp`);
     fs.writeFileSync(scriptPath, script, { mode: 0o600 });
@@ -80,6 +84,7 @@ function runExpectScript(script: string, timeoutMs: number): Promise<{ output: s
     const onChunk = (chunk: Buffer) => {
       buf += chunk.toString("utf8");
       if (buf.length > MAX_BUF) buf = buf.slice(-MAX_BUF);
+      onData?.(buf);
     };
     child.stdout?.on("data", onChunk);
     child.stderr?.on("data", onChunk);
@@ -131,16 +136,56 @@ function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "");
 }
 
-/** Pulls the exact slice between one pair of echo markers out of a
- * transcript. Used both for the (redacted) token slice and for the
- * diagnostic slices below -- same extraction, same bounds-checking. */
+/**
+ * Pulls the exact slice between one pair of echo markers out of a
+ * transcript. Uses the LAST occurrence of each tag, not the first --
+ * whatever this process `send`s gets echoed back by the pty before it even
+ * runs (that's just how terminals work), so a marker's first appearance in
+ * the buffer is always its own echoed command text, not the real output
+ * that follows once the command actually executes. The real thing is
+ * always the later occurrence.
+ */
 function between(output: string, startTag: string, endTag: string): string {
-  const startIdx = output.indexOf(startTag);
-  const endIdx = output.indexOf(endTag);
+  const startIdx = output.lastIndexOf(startTag);
+  const endIdx = output.lastIndexOf(endTag);
   return startIdx !== -1 && endIdx !== -1 && endIdx > startIdx ? output.slice(startIdx + startTag.length, endIdx) : "";
 }
 
-async function tryGenerateAndPbcopy(clusterUuid: string, caseNumber: string): Promise<TokenResult> {
+/** Same "last occurrence, not first" reasoning as between() -- for a marker
+ * immediately followed by a dynamic value with no closing tag (just the
+ * exit code's own digits terminating the match). */
+function afterLast(output: string, tag: string, valuePattern: RegExp): string | null {
+  const idx = output.lastIndexOf(tag);
+  if (idx === -1) return null;
+  const m = valuePattern.exec(output.slice(idx + tag.length));
+  return m ? m[0] : null;
+}
+
+type Progress = (step: string) => void;
+
+/** Announces each phase exactly once, the first time its marker appears in
+ * the cumulative buffer -- fixed, hand-written text only, never anything
+ * from the child's own output. */
+function makeProgressWatcher(onProgress: Progress | undefined) {
+  const announced = new Set<string>();
+  return (bufSoFar: string) => {
+    if (!onProgress) return;
+    const say = (marker: string, text: string) => {
+      if (announced.has(marker)) return;
+      if (!bufSoFar.includes(marker)) return;
+      announced.add(marker);
+      onProgress(text);
+    };
+    say("connect", "Connecting to the Teleport bastion…");
+    say("QVIEW_OSUSER_START", "Reached the cluster node, detecting the login account…");
+    say("QVIEW_TARGET_START", "Requesting a spray token…");
+    say("QVIEW_GEN_EXIT", "Validating the token against the cluster…");
+    say("QVIEW_VALIDATE_END", "Finishing up…");
+  };
+}
+
+async function tryGenerateAndPbcopy(clusterUuid: string, caseNumber: string, onProgress?: Progress): Promise<TokenResult> {
+  onProgress?.("Connecting to the Teleport bastion…");
   const remoteTmp = "/tmp/.qview_spray_tok";
   const remoteTmpErr = "/tmp/.qview_spray_tok_err";
   const script = [
@@ -172,8 +217,11 @@ async function tryGenerateAndPbcopy(clusterUuid: string, caseNumber: string): Pr
     `send "echo QVIEW_TARGET_START:$target_user:QVIEW_TARGET_END\\r"`,
     `expect "QVIEW_TARGET_END"`,
     `sleep 1`,
+    // Exit code is the real signal (0 = success) -- confirmed live: a run
+    // that generated and printed a real token exited 0, no curl needed to
+    // know that much. $? is bash's own, expanded remotely, never a Tcl var.
     `send "python /opt/rubrik/src/scripts/dev/get_local_spray_token.py --username $target_user > ${remoteTmp} 2>${remoteTmpErr}; echo QVIEW_GEN_EXIT:\\$?\\r"`,
-    `expect -re {QVIEW_GEN_EXIT:\\d*}`,
+    `expect -re {QVIEW_GEN_EXIT:\\d+}`,
     `sleep 1`,
     // The script's own stderr is not sensitive -- it's a fixed diagnostic
     // string ("Unable to get local spray token...") -- so it's fine to
@@ -183,14 +231,17 @@ async function tryGenerateAndPbcopy(clusterUuid: string, caseNumber: string): Pr
     `expect "QVIEW_ERR_END"`,
     `sleep 1`,
     // Validated on the node itself -- "localhost" here is the cluster's own
-    // API, no need to route back through the Mac's tunnel.
-    `send {curl -sk -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $(cat ${remoteTmp} 2>/dev/null)" https://localhost/api/v1/cluster/me}`,
-    `send "; echo QVIEW_VALIDATE:\\r"`,
-    `expect -re {QVIEW_VALIDATE:\\d*}`,
+    // API, no need to route back through the Mac's tunnel. A diagnostic
+    // signal only now (see the exit-code comment above) -- the marker comes
+    // BEFORE curl's own output so the http_code lands cleanly between two
+    // markers instead of needing to be parsed out of a mixed line.
+    `send {echo QVIEW_VALIDATE_START; curl -sk -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $(cat ${remoteTmp} 2>/dev/null)" https://localhost/api/v1/cluster/me; echo :QVIEW_VALIDATE_END}`,
+    `send "\\r"`,
+    `expect "QVIEW_VALIDATE_END"`,
     `sleep 1`,
     // Printed only inside these markers -- the caller extracts the exact
     // slice between them and nothing else ever gets treated as token text.
-    // An unvalidated attempt's file is empty, so this prints nothing.
+    // A failed attempt's file is empty, so this prints nothing.
     `send {echo QVIEW_TOKEN_START; cat ${remoteTmp} 2>/dev/null; echo QVIEW_TOKEN_END}`,
     `send "\\r"`,
     `expect "QVIEW_TOKEN_END"`,
@@ -204,7 +255,8 @@ async function tryGenerateAndPbcopy(clusterUuid: string, caseNumber: string): Pr
     `expect eof`,
   ].join("\n");
 
-  const { output, timedOut } = await runExpectScript(script, cdmConfig.claimTimeoutMs + 20000);
+  const watchProgress = makeProgressWatcher(onProgress);
+  const { output, timedOut } = await runExpectScript(script, cdmConfig.claimTimeoutMs + 20000, watchProgress);
   if (timedOut) {
     log.warn("cdm.token_timeout", {});
     return { ok: false, code: "unknown", message: "Token generation timed out." };
@@ -216,17 +268,17 @@ async function tryGenerateAndPbcopy(clusterUuid: string, caseNumber: string): Pr
   // to begin with) and return in the error message the panel shows.
   const osuser = stripAnsi(between(output, "QVIEW_OSUSER_START:", ":QVIEW_OSUSER_END")).trim() || "(not detected)";
   const targetUsed = stripAnsi(between(output, "QVIEW_TARGET_START:", ":QVIEW_TARGET_END")).trim() || "(not determined)";
-  const genExitMatch = /QVIEW_GEN_EXIT:(\d+)/.exec(output);
-  const genExit = genExitMatch ? genExitMatch[1] : "(no exit code seen)";
+  const genExit = afterLast(output, "QVIEW_GEN_EXIT:", /^\d+/) ?? "(no exit code seen)";
   const scriptErr = stripAnsi(between(output, "QVIEW_ERR_START", "QVIEW_ERR_END"))
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean)
     .join(" ") || "(no stderr captured)";
-  const validateMatch = /QVIEW_VALIDATE:(\d{3})/.exec(output);
-  const status = validateMatch ? validateMatch[1] : "(no response)";
+  const validateRaw = stripAnsi(between(output, "QVIEW_VALIDATE_START", ":QVIEW_VALIDATE_END")).replace(/[^\d]/g, "");
+  const status = validateRaw || "(no response)";
 
-  if (status === "200") {
+  if (genExit === "0") {
+    onProgress?.("Copying the token to your clipboard…");
     const slice = between(output, "QVIEW_TOKEN_START", "QVIEW_TOKEN_END");
     // Strip the echoed command line itself and ANSI/terminal control
     // sequences, keep only what looks like a token line.
@@ -242,9 +294,20 @@ async function tryGenerateAndPbcopy(clusterUuid: string, caseNumber: string): Pr
         log.warn("cdm.token_pbcopy_failed", { username: targetUsed });
         return { ok: false, code: "unknown", message: "Token generated and validated, but could not be copied to the clipboard." };
       }
-      log.info("cdm.token_ok", { via: "exec", osuser, username: targetUsed });
+      log.info("cdm.token_ok", { via: "exec", osuser, username: targetUsed, validateStatus: status });
       return { ok: true, via: "exec", username: targetUsed };
     }
+    // Exit 0 but no token-shaped line found -- the script's output format
+    // may have changed, or the extraction missed it. Say so plainly rather
+    // than silently reporting a permission denial that didn't happen.
+    log.warn("cdm.token_extract_failed", { osuser, username: targetUsed, validateStatus: status });
+    return {
+      ok: false,
+      code: "unknown",
+      message:
+        `The script succeeded (exit 0) as --username ${targetUsed}, but QView could not find a token in its output ` +
+        `(validation HTTP ${status}). Use the manual command below -- the generation itself is working.`,
+    };
   }
   log.warn("cdm.token_denied", { osuser, username: targetUsed, genExit, scriptErr, validateStatus: status });
   return {
@@ -252,14 +315,14 @@ async function tryGenerateAndPbcopy(clusterUuid: string, caseNumber: string): Pr
     code: "no_permission",
     message:
       `Automatic token generation was denied. OS user: ${osuser} -> tried --username ${targetUsed} ` +
-      `(script exit ${genExit}: "${scriptErr}"; validation HTTP ${status}). ` +
+      `(script exit ${genExit}: "${scriptErr}"). ` +
       "Use the manual command below, or escalate via `portal token --escalate` if that's warranted.",
   };
 }
 
-export async function generateToken(clusterUuid: string, caseNumber: string): Promise<TokenResult> {
+export async function generateToken(clusterUuid: string, caseNumber: string, onProgress?: Progress): Promise<TokenResult> {
   if (!UUID_RE.test(clusterUuid) || !CASE_RE.test(caseNumber)) {
     return { ok: false, code: "unknown", message: "Invalid cluster UUID or case number." };
   }
-  return tryGenerateAndPbcopy(clusterUuid, caseNumber);
+  return tryGenerateAndPbcopy(clusterUuid, caseNumber, onProgress);
 }

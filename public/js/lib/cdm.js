@@ -18,7 +18,7 @@ import * as cdmHelper from "./cdmHelper.js";
 import { api } from "./api.js";
 import { copyTiered } from "./copyTiered.js";
 
-const POLL_MS = 2000;
+const POLL_MS = 1200;
 
 // Mirrors src/cdmVersion.ts's uiPathFor() -- kept here too so "Open UI" can
 // open the URL directly in the operator's own browser tab (window.open)
@@ -76,6 +76,7 @@ export function openCdmPanel(c, opts = {}) {
   d.onClose(() => {
     if (pollHandle) clearTimeout(pollHandle);
     if (tickHandle) clearInterval(tickHandle);
+    if (tokenGenPollHandle) clearTimeout(tokenGenPollHandle);
     opts.onClose?.();
   });
 
@@ -210,33 +211,60 @@ export function openCdmPanel(c, opts = {}) {
     window.open(url, "_blank", "noopener");
   }
 
+  const TOKEN_POLL_MS = 1200;
+  let tokenGenPollHandle = null;
+
+  /** Kicks off generation, then polls the session every 1.2s to show live
+   * progress (session.currentStep) rather than a single "please wait" that
+   * only resolves after the fact -- a real attempt round-trips through a
+   * bastion session and can take 20-40s. */
   async function generateToken() {
     const statusEl = panelBody.querySelector("[data-cdm-copy-status]");
     const detailEl = panelBody.querySelector("[data-cdm-token-detail]");
-    if (statusEl) {
-      statusEl.textContent = "Trying automatic generation…";
-      statusEl.className = "rsc-copy-status";
-    }
     if (detailEl) detailEl.textContent = "";
+    const setStatus = (text, kind) => {
+      if (!statusEl) return;
+      statusEl.textContent = text;
+      statusEl.className = kind ? `rsc-copy-status ${kind}` : "rsc-copy-status";
+    };
+
+    setStatus("Starting…");
     try {
-      const body = await cdmHelper.generateToken(session.id);
-      session = body.session;
-      if (statusEl) {
-        statusEl.textContent = `Token copied to clipboard (${body.via})`;
-        statusEl.className = "rsc-copy-status ok";
-      }
+      session = await cdmHelper.generateToken(session.id);
     } catch (err) {
-      // A denial here is expected on many clusters (docs/PLAN_V8_CDM.md) --
-      // the manual box below always works regardless. The full diagnostic
-      // (OS user, username tried, the script's own stderr, validation HTTP
-      // status -- never the token) goes in the detail paragraph, which has
-      // room for it; the compact status stays a one-line summary.
-      if (statusEl) {
-        statusEl.textContent = "Automatic generation denied — see detail below";
-        statusEl.className = "rsc-copy-status warn";
-      }
-      if (detailEl) detailEl.textContent = err.message || "Automatic generation was denied — use the manual box below.";
+      setStatus(err.message || "Could not start generation.", "warn");
+      return;
     }
+
+    if (tokenGenPollHandle) clearTimeout(tokenGenPollHandle);
+    const pollTokenGen = async () => {
+      let s;
+      try {
+        s = await cdmHelper.getSession(session.id);
+      } catch (err) {
+        setStatus(err.message || "Lost contact with the CDM helper.", "warn");
+        return;
+      }
+      session = s;
+      if (s.tokenStatus === "auto") {
+        setStatus("Token copied to clipboard (exec)", "ok");
+        return;
+      }
+      if (s.tokenGenError) {
+        // A denial here is expected on many clusters (docs/PLAN_V8_CDM.md) --
+        // the manual box below always works regardless. The full diagnostic
+        // (OS user, username tried, the script's own stderr, validation HTTP
+        // status -- never the token) goes in the detail paragraph, which has
+        // room for it; the compact status stays a one-line summary.
+        setStatus("Automatic generation denied — see detail below", "warn");
+        if (detailEl) detailEl.textContent = s.tokenGenError;
+        return;
+      }
+      // Still running -- show whatever step the helper is on right now.
+      setStatus(s.currentStep || "Working…");
+      tokenGenPollHandle = setTimeout(pollTokenGen, TOKEN_POLL_MS);
+    };
+    pollTokenGen();
   }
 
   async function stop() {
@@ -279,7 +307,10 @@ export function openCdmPanel(c, opts = {}) {
       renderError(session.error || { message: "The tunnel failed to start." });
       return;
     }
-    renderConnecting(STATE_LABEL[session.state] || "Working…");
+    // The helper's own live-progress text, when it has one, beats the
+    // generic per-state label -- e.g. "Starting the tunnel on port 9772…"
+    // instead of just "Opening the tunnel…".
+    renderConnecting(session.currentStep || STATE_LABEL[session.state] || "Working…");
     pollHandle = setTimeout(poll, POLL_MS);
   }
 

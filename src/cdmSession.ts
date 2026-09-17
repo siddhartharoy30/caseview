@@ -35,6 +35,14 @@ export interface CdmSession {
   tokenStatus: "none" | "auto" | "manual";
   chromeProfileDir: string | null;
   chromePid: number | null;
+  // Live-progress text for whatever's currently running (tunnel setup or a
+  // token-generation attempt) -- polled by the panel so the operator sees
+  // what's happening as it happens, not just a result after the fact.
+  currentStep: string | null;
+  // Set only by a token-generation attempt; cleared at the start of the
+  // next one. Separate from `error` (the tunnel's own failure state) since
+  // a denied token generation must not disturb an otherwise-open session.
+  tokenGenError: string | null;
   // Never serialised -- see toWire() below, an explicit allowlist rather than
   // a subtraction, so a future field can't leak by accident as this grows.
   child?: ChildProcess;
@@ -57,6 +65,8 @@ export interface CdmSessionWire {
   uiUrl: string | null;
   tokenStatus: "none" | "auto" | "manual";
   hasChromeWindow: boolean;
+  currentStep: string | null;
+  tokenGenError: string | null;
 }
 
 export function toWire(s: CdmSession): CdmSessionWire {
@@ -75,7 +85,16 @@ export function toWire(s: CdmSession): CdmSessionWire {
     uiUrl: s.uiUrl,
     tokenStatus: s.tokenStatus,
     hasChromeWindow: s.chromePid != null,
+    currentStep: s.currentStep,
+    tokenGenError: s.tokenGenError,
   };
+}
+
+/** Sets the live-progress text the panel polls for. Never call this with
+ * anything derived from child-process output -- see cdmAccess.ts/cdmToken.ts
+ * headers. Step descriptions are always fixed, hand-written strings. */
+export function setStep(s: CdmSession, step: string | null): void {
+  s.currentStep = step;
 }
 
 export function createSession(caseNumber: string, clusterUuid: string, clusterTag: string | null, clusterVersion: string | null): CdmSession {
@@ -95,6 +114,8 @@ export function createSession(caseNumber: string, clusterUuid: string, clusterTa
     tokenStatus: "none",
     chromeProfileDir: null,
     chromePid: null,
+    currentStep: null,
+    tokenGenError: null,
   };
   sessions.set(s.id, s);
   return s;

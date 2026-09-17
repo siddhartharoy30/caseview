@@ -25,6 +25,7 @@ import {
   readAllMarkers,
   removeMarkerFile,
   appendSessionLog,
+  setStep,
 } from "./cdmSession";
 import { checkTunnelOpen, claimAccess, startForward, stopForward, MSG } from "./cdmAccess";
 import { generateToken } from "./cdmToken";
@@ -72,34 +73,42 @@ async function runSessionLifecycle(
   opts: { clusterVersion: string | null; caseVersionRaw: string | null },
 ): Promise<void> {
   s.state = "claiming";
+  setStep(s, "Checking whether the cluster has an active support tunnel…");
   const ready = await checkTunnelOpen(s.clusterUuid);
   if (!ready) {
     s.state = "error";
     s.error = { code: "no_tunnel", message: MSG.no_tunnel };
+    setStep(s, null);
     return;
   }
 
+  setStep(s, "Claiming access for this case…");
   const claimed = await claimAccess(s.clusterUuid, s.caseNumber);
   if (!claimed.ok) {
     s.state = "error";
     s.error = { code: claimed.code, message: claimed.message };
+    setStep(s, null);
     return;
   }
 
+  setStep(s, "Allocating a local port…");
   const port = await allocatePort(reservedPorts());
   if (port == null) {
     s.state = "error";
     s.error = { code: "no_free_port", message: MSG.no_free_port };
+    setStep(s, null);
     return;
   }
   s.localPort = port;
   s.state = "connecting";
+  setStep(s, `Starting the tunnel on port ${port}…`);
 
   const forwarded = await startForward(s);
   if (!forwarded.ok) {
     s.state = "error";
     s.error = { code: forwarded.code, message: forwarded.message };
     s.localPort = null;
+    setStep(s, null);
     return;
   }
 
@@ -111,6 +120,7 @@ async function runSessionLifecycle(
   s.uiFlavor = flavor;
   s.uiUrl = flavor ? `https://127.0.0.1:${s.localPort}${uiPathFor(flavor)}` : null;
   s.state = "open";
+  setStep(s, null);
   appendSessionLog("open", s);
   log.info("cdm.session_open", { hasCaseNumber: true, hasClusterUuid: true, flavorKnown: !!flavor });
 }
@@ -195,26 +205,46 @@ app.post("/sessions/:id/open-ui", async (req, res) => {
 });
 
 /**
- * Tier 1: automatic generation (src/cdmToken.ts). Tries a short list of
- * usernames against the cluster node and pbcopy's the first one that
- * validates -- never returns the token itself, only whether it worked and
- * which username succeeded. Empirically this is denied on at least one real
- * cluster/account combination (docs/PLAN_V8_CDM.md) -- that's a real
- * permission gate, not a bug, and the manual tier below covers it either way.
+ * Tier 1: automatic generation (src/cdmToken.ts) -- picks the one correct
+ * --username for the detected OS account and pbcopy's it on success, never
+ * returning the token itself. Fire-and-forget, same shape as session
+ * startup: returns immediately, and the caller polls GET /sessions/:id to
+ * watch `currentStep` update live and see the final outcome in
+ * `tokenStatus`/`tokenGenError` -- a real generation round-trips through a
+ * bastion session and can take 20-40s, too long to hold one request open
+ * with no visibility into what's happening in the meantime.
  */
-app.post("/sessions/:id/generate-token", async (req, res) => {
+const tokenGenInFlight = new Set<string>();
+
+app.post("/sessions/:id/generate-token", (req, res) => {
   const s = getSession(req.params.id);
   if (!s || s.state !== "open") {
     res.status(409).json({ error: "unknown", message: "Session is not open." });
     return;
   }
-  const result = await generateToken(s.clusterUuid, s.caseNumber);
-  if (!result.ok) {
-    res.status(result.code === "no_permission" ? 403 : 502).json({ error: result.code, message: result.message });
+  if (tokenGenInFlight.has(s.id)) {
+    res.status(409).json({ error: "unknown", message: "A generation attempt is already running for this session." });
     return;
   }
-  s.tokenStatus = "auto";
-  res.json({ ok: true, via: result.via, session: toWire(s) });
+  tokenGenInFlight.add(s.id);
+  s.tokenGenError = null;
+  res.json({ started: true, session: toWire(s) });
+  generateToken(s.clusterUuid, s.caseNumber, (step) => setStep(s, step))
+    .then((result) => {
+      if (result.ok) {
+        s.tokenStatus = "auto";
+      } else {
+        s.tokenGenError = result.message;
+      }
+    })
+    .catch((err) => {
+      s.tokenGenError = "The CDM helper hit an unexpected error generating the token.";
+      log.error("cdm.token_generate_crashed", { error: errText(err) });
+    })
+    .finally(() => {
+      tokenGenInFlight.delete(s.id);
+      setStep(s, null);
+    });
 });
 
 /** Tier 3: manual-token paste, always available regardless of Phase 5's
