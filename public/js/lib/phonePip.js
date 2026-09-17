@@ -34,7 +34,6 @@ import * as store from "./store.js";
 import * as tabSync from "./tabSync.js";
 import { h, mount } from "./dom.js";
 import { button, toast } from "./ui.js";
-import { connectButton } from "./connectLauncher.js";
 
 const KEY_SIZE = "phonePip.size";
 const KEY_PIP_WAS_OPEN = "phonePip.wasOpen";
@@ -280,6 +279,11 @@ function agentsAheadOf(state) {
  * above) rather than a second colour vocabulary, so the board, the page
  * and the pop-out never disagree about what amber means. Moved here from
  * phone.js in v6 phase 3 (see agentsAheadOf's comment above).
+ *
+ * v8 follow-on: deliberately thinner than the dock/page here on purpose --
+ * no queued-caller counts, no Connect launcher. Both stay on the dock and
+ * /phone; this is a request specifically for the floating window, which is
+ * meant to be glanced at, not acted from.
  */
 export function pipContent(host, state) {
   const board = state.board;
@@ -288,15 +292,15 @@ export function pipContent(host, state) {
   host.classList.toggle("phn-ringing", !!ringing);
 
   if (!state.enabled) {
-    mount(host, h("div", { class: "phn-pip" }, h("p", { class: "dim", text: "Phone monitor is off." }), connectButton(state)));
+    mount(host, h("div", { class: "phn-pip" }, h("p", { class: "dim", text: "Phone monitor is off." })));
     return;
   }
   if (!board || !board.ok) {
-    mount(host, h("div", { class: "phn-pip" }, h("p", { class: "dim", text: (board && board.reason) || "Cannot read the board." }), connectButton(state)));
+    mount(host, h("div", { class: "phn-pip" }, h("p", { class: "dim", text: (board && board.reason) || "Cannot read the board." })));
     return;
   }
   if (!mine) {
-    mount(host, h("div", { class: "phn-pip" }, h("p", { class: "dim", text: "\"" + state.myName + "\" is not on the board right now." }), connectButton(state)));
+    mount(host, h("div", { class: "phn-pip" }, h("p", { class: "dim", text: "\"" + state.myName + "\" is not on the board right now." })));
     return;
   }
 
@@ -310,7 +314,6 @@ export function pipContent(host, state) {
     h("div", { class: "phn-pip-status" },
       h("span", { class: `chip ${statusTone(mine.statusClass)}`, text: mine.statusText }),
       h("span", { class: "dim", text: "  " + mine.duration })),
-    h("div", { class: "dim mono", text: board.queuedAgents + " AMER · " + board.queuedFederal + " Federal" }),
     ahead.length
       ? h("div", { class: "phn-pip-ahead" },
           h("p", { class: "eyebrow", text: "Ahead of me" }),
@@ -318,6 +321,5 @@ export function pipContent(host, state) {
             h("span", { text: a.name }),
             h("span", { class: "dim mono", text: a.duration }))))
       : null,
-    board.stale ? h("p", { class: "dim", text: "Stale — the board did not respond just now." }) : null,
-    connectButton(state)));
+    board.stale ? h("p", { class: "dim", text: "Stale — the board did not respond just now." }) : null));
 }
