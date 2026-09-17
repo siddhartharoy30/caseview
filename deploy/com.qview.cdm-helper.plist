@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.qview.cdm-helper</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>/Users/siddhartharoy/qview-work/dist/cdmHelperServer.js</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/siddhartharoy/qview-work</string>
+
+  <!--
+    LaunchAgents do not source .zshrc/.zprofile, so PATH here is minimal.
+    PORTAL_CLIENT_PATH is set explicitly rather than relying on this PATH --
+    the binary lives at /Users/siddhartharoy/portal_client, which this PATH
+    does not include (see docs/PLAN_V8_CDM.md).
+  -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PORTAL_CLIENT_PATH</key>
+    <string>/Users/siddhartharoy/portal_client</string>
+    <key>CDM_HELPER_PORT</key>
+    <string>8757</string>
+    <key>CDM_ALLOWED_ORIGINS</key>
+    <string>http://10.26.118.153:3001,http://localhost:3001</string>
+    <key>QVIEW_LOG_FILE</key>
+    <string>/Users/siddhartharoy/Library/Logs/qview-cdm-helper.log</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <!-- Gives the async stopAllSessions() in cdmHelperServer.ts room to finish
+       cleanly before launchd escalates to SIGKILL on a kickstart -k. -->
+  <key>ExitTimeOut</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/siddhartharoy/Library/Logs/qview-cdm-helper.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/siddhartharoy/Library/Logs/qview-cdm-helper.stderr.log</string>
+</dict>
+</plist>

@@ -9,7 +9,9 @@
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "rsc-helper": "node dist/rscHelperServer.js",
-    "dev:rsc-helper": "tsx watch src/rscHelperServer.ts"
+    "dev:rsc-helper": "tsx watch src/rscHelperServer.ts",
+    "cdm-helper": "node dist/cdmHelperServer.js",
+    "dev:cdm-helper": "tsx watch src/cdmHelperServer.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
