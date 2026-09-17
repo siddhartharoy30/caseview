@@ -23,7 +23,7 @@ export const rscConfig = {
   port: num("RSC_HELPER_PORT", 8756),
   // The known origins the case-detail page can be served from. Anything else
   // gets no Access-Control-Allow-Origin and the browser blocks the response.
-  allowedOrigins: (process.env.RSC_ALLOWED_ORIGINS || "http://10.26.118.153:3001,http://localhost:3001")
+  allowedOrigins: (process.env.RSC_ALLOWED_ORIGINS || "http://10.26.118.153:3001,https://10.26.118.153:3443,http://localhost:3001")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean),

@@ -28,7 +28,7 @@ export const cdmConfig = {
   // section 3) -- a pre-installed macOS/BSD system binary, not a new dependency.
   expectPath: process.env.EXPECT_BIN_PATH || "/usr/bin/expect",
   port: num("CDM_HELPER_PORT", 8757),
-  allowedOrigins: (process.env.CDM_ALLOWED_ORIGINS || "http://10.26.118.153:3001,http://localhost:3001")
+  allowedOrigins: (process.env.CDM_ALLOWED_ORIGINS || "http://10.26.118.153:3001,https://10.26.118.153:3443,http://localhost:3001")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean),

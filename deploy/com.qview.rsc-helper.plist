@@ -29,7 +29,7 @@
     <key>RSC_HELPER_PORT</key>
     <string>8756</string>
     <key>RSC_ALLOWED_ORIGINS</key>
-    <string>http://10.26.118.153:3001,http://localhost:3001</string>
+    <string>http://10.26.118.153:3001,https://10.26.118.153:3443,http://localhost:3001</string>
     <key>QVIEW_LOG_FILE</key>
     <string>/Users/siddhartharoy/Library/Logs/qview-rsc-helper.log</string>
     <key>PATH</key>
