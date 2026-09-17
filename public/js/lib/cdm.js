@@ -20,6 +20,15 @@ import { copyTiered } from "./copyTiered.js";
 
 const POLL_MS = 2000;
 
+// Mirrors src/cdmVersion.ts's uiPathFor() -- kept here too so "Open UI" can
+// open the URL directly in the operator's own browser tab (window.open)
+// instead of routing through the helper's isolated-Chrome-window launch.
+// Trade-off, stated plainly: __Secur-rubrik-token is scoped by host, not
+// port, so two CDM sessions to *different* clusters open concurrently in
+// this same browser will collide on that cookie. Fine for the common case
+// of one session at a time; worth remembering if a second one is ever open.
+const UI_PATHS = { crystal: "/web/bin/index.html#/welcome_support", luna: "/web/v2/#/support_access_login" };
+
 /** Gate is "cluster UUID present" -- Platform__c must NOT gate this (three
  * Polaris-platform cases in the live data have populated clusters). */
 export function computeCdmState(c) {
@@ -183,13 +192,17 @@ export function openCdmPanel(c, opts = {}) {
       h("div", { class: "rsc-actions" }, button("Close", { small: true, onclick: () => d.close() })));
   }
 
-  async function openUi(flavor) {
-    try {
-      session = await cdmHelper.openUi(session.id, flavor);
-      window.open(session.uiUrl, "_blank", "noopener");
-    } catch (err) {
-      renderError(err);
-    }
+  // Opens in the operator's own browser (a plain window.open -- most
+  // browsers give this a new tab, not a new window, by default) rather than
+  // the helper's isolated Chrome profile. See UI_PATHS's comment for the
+  // cookie trade-off that decision makes.
+  function openUi(flavor) {
+    const chosen = flavor === "crystal" || flavor === "luna" ? flavor : session.uiFlavor;
+    if (!chosen) return;
+    const url = `https://127.0.0.1:${session.localPort}${UI_PATHS[chosen]}`;
+    session.uiFlavor = chosen;
+    session.uiUrl = url;
+    window.open(url, "_blank", "noopener");
   }
 
   async function generateToken() {
