@@ -19,7 +19,26 @@
  * Anything reading the rubric imports from here. claude.ts holds no copy.
  */
 
-export const RUBRIC_VERSION = "fy27.1.5.0";
+/**
+ * v9: bumped from fy27.1.5.0 to fy27.1.5.2. The real rubric's two
+ * intervening deltas (sourced from Rick Hill's "Weekly IQS Dry Run"
+ * emails -- no separate "Scoring Guide" document exists locally or in
+ * Confluence for this):
+ *   1.5.1 (Sep 1 2026) -- ghosted (3-strikes/noresponse) closures scored
+ *     on different Clear Resolution signals (layer1.ts's
+ *     scoreClearResolutionNoresponse()); a PTO carve-out for missed
+ *     Reliability commitments (not implemented -- no case in the 62-case
+ *     backtest export surfaced it as a real error contributor, so it
+ *     wasn't built speculatively, per this release's own "fix rules the
+ *     harness points at" rule); Business Impact's 4-signal count
+ *     unaffected here (the real change removed a "priority/severity"
+ *     signal this rubric's 4 signals never modeled in the first place).
+ *   1.5.2 (Sep 11 2026) -- WWW "Why" no longer expected on a pure
+ *     status/standing-by comment (layer1.ts's scoreWww() whyWaived);
+ *     tunnel/log-request WWW-inclusion fix is a no-op here too (this
+ *     rubric never had the "logistics" exclusion the real one removed).
+ */
+export const RUBRIC_VERSION = "fy27.1.5.2";
 
 export type Keyword = "INTRO" | "UPDATE" | "FOLLOWUP" | "CLOSURE";
 

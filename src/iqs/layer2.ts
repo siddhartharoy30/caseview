@@ -57,8 +57,9 @@ import type { CaseFacts, CommentFacts } from "./layer1";
  * did not notice would serve scores no current prompt would produce.
  *
  *   l2.1  first release
+ *   l2.2  (v9) ghosted-closure signal switching, tightened first3 wording
  */
-export const PROMPT_VERSION = "l2.1";
+export const PROMPT_VERSION = "l2.2";
 
 export const LAYER = "layer2";
 

@@ -174,8 +174,16 @@ export interface Layer1Score {
  * on a single line, so the envelope strip consumed the whole comment).
  * l1.4 — strip the run-together envelope too, for the bodies that are stored
  * as one line with no newlines anywhere.
+ * l1.5 (v9) — openingWindow() indexed by author instead of thread position
+ * (a customer posting before my first reply no longer collapses Business
+ * Impact/Technical Definition to one comment); signal-level N/A via
+ * SignalResult.applicable, replacing scoreReliability's old 0.5
+ * fudge-weight; broadened ROOT_CAUSE_DEFINITE; WWW's Why-waiver for
+ * pure-status comments; scoreClearResolutionNoresponse() for ghosted
+ * (3-strikes) closures; WWW scoring excludes internal/non-public
+ * comments (the one dimension that hadn't already made that distinction).
  */
-export const SCORER_VERSION = "l1.4";
+export const SCORER_VERSION = "l1.5";
 
 /**
  * Each banned-phrase occurrence costs a point of the final 100, capped so that
