@@ -978,7 +978,7 @@ body.sidebar-collapsed .nav-item { position: relative; }
 .rsc-panel-body { display: flex; flex-direction: column; gap: 12px; }
 .rsc-loading, .rsc-error, .rsc-expired { color: var(--text-2); font-size: 13px; }
 .rsc-error { color: var(--red); }
-.rsc-hint { color: var(--text-3); font-size: 11.5px; margin: 0; }
+.rsc-hint { color: var(--text-3); font-size: var(--fs-meta); margin: 0; }
 
 .rsc-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; }
 .rsc-label { color: var(--text-3); }
@@ -1003,12 +1003,15 @@ body.sidebar-collapsed .nav-item { position: relative; }
 }
 .rsc-picker-row:hover { background: var(--surface-2); border-color: var(--border-2); }
 .rsc-picker-email { font-weight: 500; font-size: 13px; }
-.rsc-picker-meta { font-size: 11.5px; color: var(--text-3); }
+.rsc-picker-meta { font-size: var(--fs-meta); color: var(--text-3); }
 
-.rsc-token-text {
+/* v9 phase 7: .cdm-token-text used to duplicate this rule byte-for-byte,
+   contradicting this section's own comment below ("only what's genuinely
+   CDM-specific gets its own class") -- consolidated into one declaration. */
+.rsc-token-text, .cdm-token-text {
   width: 100%; resize: none; margin-top: 6px;
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
-  padding: 8px; font-size: 11.5px; color: var(--text);
+  padding: 8px; font-size: var(--fs-meta); color: var(--text);
 }
 
 /* --- CDM UI access (v8 part 2) -------------------------------------------- */
@@ -1019,7 +1022,7 @@ body.sidebar-collapsed .nav-item { position: relative; }
 .cdm-manual { margin-top: 4px; }
 .cdm-manual summary { cursor: pointer; font-size: 12px; color: var(--text-3); }
 .cdm-mono-line {
-  display: block; font-family: var(--mono); font-size: 11.5px;
+  display: block; font-family: var(--mono); font-size: var(--fs-meta);
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
   padding: 6px 8px; margin: 8px 0 6px; word-break: break-all;
 }
@@ -1044,12 +1047,6 @@ body.sidebar-collapsed .nav-item { position: relative; }
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-all;
-}
-
-.cdm-token-text {
-  width: 100%; resize: none; margin-top: 6px;
-  background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
-  padding: 8px; font-size: 11.5px; color: var(--text);
 }
 
 /* Same pill shape as .rsc-flag-btn -- see app.css's queue subject-cell note
@@ -3223,7 +3220,6 @@ a.link:hover { color: var(--blue); }
 .tri-list,
 .esc-list,
 .sr-list,
-.pt-list,
 .set-list {
   display: flex;
   flex-direction: column;
@@ -3232,8 +3228,7 @@ a.link:hover { color: var(--blue); }
 
 .tri-card,
 .esc-card,
-.sr-card,
-.pt-card {
+.sr-card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -3242,12 +3237,11 @@ a.link:hover { color: var(--blue); }
 
 .tri-card:hover,
 .esc-card:hover,
-.sr-card:hover,
-.pt-card:hover {
+.sr-card:hover {
   border-color: var(--border-2);
 }
 
-/* --- toolbar bits shared by Triage, Search and Patterns ------------------ */
+/* --- toolbar bits shared by Triage and Search ----------------------------- */
 
 /* The word before a control group. Deliberately quiet: it labels the thing
    next to it and should never compete with it. */
@@ -3841,199 +3835,6 @@ body.light .esc-card.overdue {
 }
 
 a.sr-more:hover { color: var(--blue); }
-
-/* ==========================================================================
-   Patterns
-   ========================================================================== */
-
-.pt-tabs {
-  display: flex;
-  gap: 2px;
-  margin-bottom: 14px;
-  border-bottom: 1px solid var(--border);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.pt-tabs::-webkit-scrollbar { display: none; }
-
-.pt-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 9px 14px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  background: none;
-  color: var(--text-3);
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.pt-tab:hover { color: var(--text); }
-
-.pt-tab.on {
-  color: var(--blue);
-  border-bottom-color: var(--blue-2);
-}
-
-.pt-tab-count {
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--surface-3);
-  font-size: var(--fs-meta);
-  font-variant-numeric: tabular-nums;
-  color: var(--text-3);
-}
-
-.pt-tab.on .pt-tab-count {
-  background: rgba(66, 133, 244, 0.18);
-  color: var(--blue);
-}
-
-.pt-toolbar { align-items: center; }
-
-/* What this tab groups on and why it might be wrong. Clustering is a
-   heuristic, and a heuristic presented without its caveat gets trusted
-   like a fact. */
-.pt-note {
-  margin: 0 0 14px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-4);
-  max-width: 78ch;
-}
-
-/* More than one case still open on the same signature is the whole reason to
-   look at this page, so those cards are marked. */
-.pt-card.live { border-left: 3px solid var(--purple); padding-left: 13px; }
-
-.pt-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.pt-key {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: var(--fs-section-title);
-  line-height: 1.45;
-  color: var(--text);
-}
-
-.pt-sig {
-  font-size: 12px;
-  color: var(--text-2);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 2px 7px;
-  overflow-wrap: anywhere;
-}
-
-.pt-counts {
-  flex: none;
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-}
-
-.pt-total {
-  font-size: 19px;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
-  color: var(--text);
-}
-
-.pt-total-label {
-  font-size: 11px;
-  color: var(--text-4);
-}
-
-/* Total as the track, open as the overlay: the ratio is the interesting part,
-   and two stacked bars read it faster than two numbers do. */
-.pt-bar {
-  position: relative;
-  height: 5px;
-  margin: 11px 0 0;
-  border-radius: 999px;
-  background: var(--surface-3);
-  overflow: hidden;
-}
-
-.pt-bar-fill,
-.pt-bar-open {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  border-radius: 999px;
-}
-
-.pt-bar-fill { background: var(--border-2); }
-.pt-bar-open { background: var(--purple); }
-
-.pt-members {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 12px;
-}
-
-.pt-member {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 9px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface-2);
-  font-size: var(--fs-table-cell);
-  color: var(--text-2);
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.pt-member:hover {
-  border-color: var(--blue-2);
-  color: var(--text);
-}
-
-.pt-member.closed {
-  opacity: 0.55;
-  text-decoration: line-through;
-  text-decoration-thickness: 1px;
-}
-
-.pt-member-p {
-  font-size: var(--fs-micro);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--text-4);
-}
-
-.pt-foot {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  font-size: var(--fs-table-cell);
-  color: var(--text-4);
-}
-
-@media (max-width: 700px) {
-  .pt-head { flex-direction: column; gap: 8px; }
-}
 
 /* ==========================================================================
    Settings

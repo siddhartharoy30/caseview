@@ -271,3 +271,139 @@ designed against the same tokens and components but not independently
 re-screenshotted a second time in this pass. If a page-specific violation
 exists there that phase 3's spot-checks didn't happen to hit, this pass
 would not have caught it either.
+
+# v9 phase 7 — RSC/CDM audit and post-v4 consistency pass
+
+**Methodology, disclosed up front rather than glossed over:** no login
+credentials are available in this environment to script an authenticated
+browser session (`QVIEW_ALLOWED_EMAIL` and the Salesforce owner
+disambiguation this org's login flow needs both live in `.env`, which is
+outside this session's read/write scope) -- confirmed directly by
+attempting to boot the real server, which failed immediately and loudly
+on a pre-existing, unrelated local-environment gap (this machine's
+`.env` predates the v7 fix for the org's two same-named Salesforce users;
+not a v9 regression). Every prior phase of this project's own test logs
+(`docs/TESTS.md`, v4 through v8) disclosed the identical credential gap
+rather than skip the check silently. This pass follows the same
+discipline: everything below is verified by reading the actual CSS/JS
+that ships, confirming class usage, and tracing the shared components
+(the universal `:focus-visible`/`prefers-reduced-motion` rules, the
+`dialog()`/`overlay` component's responsive width) directly, not by
+looking at a rendered page. **The user should do a hands-on visual pass**
+before trusting this as a substitute for real screenshots, same as every
+prior phase's own honest caveat.
+
+## RSC panel + CDM panel (confirmed via git log 9-10 days newer than the entire v4 design pass, never previously audited)
+
+Two real, concrete bugs found and fixed, not just noted:
+
+1. **A byte-for-byte duplicate rule that contradicted its own doc
+   comment.** `app.css`'s CDM section opens with "Reuses the `.rsc-*`
+   panel vocabulary above... only what's genuinely CDM-specific gets its
+   own class" -- true everywhere except `.cdm-token-text`, which
+   duplicated `.rsc-token-text` exactly instead of sharing it. Consolidated
+   into one rule (`.rsc-token-text, .cdm-token-text { ... }`), the same
+   "one canonical declaration, multiple selectors" shape `.card-head`/
+   `.card-body` already established in phase 3.
+2. **Three reintroduced half-pixel font sizes** (`.rsc-hint`,
+   `.rsc-picker-meta`, `.cdm-mono-line`, and `.rsc-token-text`/
+   `.cdm-token-text` once merged): `11.5px`, hardcoded, in code built
+   after phase 3's type-scale pass explicitly retired the half-pixel tier
+   ("9.5/10.5/11.5/12.5/13.5/14.5px... is retired: each value now
+   resolves to the nearest scale step"). Since this is newer than that
+   pass, it's a regression against an already-established rule, not old
+   debt phase 3 chose not to sweep -- fixed to `var(--fs-meta)` (11px),
+   matching the shared `.hint` utility class's own size for the same kind
+   of muted secondary text.
+
+Three checklist items confirmed with **no gap found**, structurally:
+
+- **Keyboard focus.** Every interactive element in both panels
+  (`rsc.js`/`cdm.js`) is a real `<button type="button">` or the shared
+  `button()` helper -- confirmed by reading every click target in both
+  files. Phase 3's focus rule is a bare `button:focus-visible` selector,
+  unconditional on class, so both inherit it with no additional work.
+- **`prefers-reduced-motion`.** The only animation either panel triggers
+  is the shared `.overlay`'s entrance `fade`, plus the shared
+  `.rsc-flag-btn`/`.cdm-flag-btn` opacity transitions -- both already
+  covered by phase 3's universal `*, *::before, *::after` reduced-motion
+  rule, which overrides every animation/transition's duration regardless
+  of selector or name.
+- **Mobile width.** Both panels render inside the shared `dialog()`
+  component (`ui.js`), whose `.dialog` class is `width: 100%; max-width:
+  520px` inside a `.overlay` with a `24px` padding gutter on every side --
+  the panels' own `width: "440px"`/`"460px"` are `max-width` caps applied
+  on top of that, never a fixed width. At a 375px viewport this leaves
+  ~327px of dialog width with no overflow, confirmed by reading the CSS
+  cascade directly rather than assuming a `max-width` value is safe.
+
+**One drift noted, not fixed:** `iqs.js`'s top-level load-error state uses
+`banner("error", ..., button("Try again", ...))` where every other page
+in scope (`metrics.js`, `triage.js`, `search.js`, `commitments.js`,
+`settings.js`) uses the fuller `emptyState()` component (icon + title +
+message + action) for the same situation. Not a "missing what to do
+next" violation -- `iqs.js`'s banner already includes a retry button --
+just a different visual treatment for the same case. Left alone rather
+than swapped without a way to visually confirm the swap doesn't disturb
+the scope-bar/nav context above it in this no-screenshot session; a
+reasonable small polish item for whoever next touches that page with a
+real browser open.
+
+## Dead CSS from phase 4's Patterns deletion, cleaned up here as planned
+
+Phase 4 deliberately deferred this ("pruning it is more naturally phase
+7's design-pass territory") rather than doing a CSS sweep as part of a
+nav-only change. Confirmed via `grep` that zero remaining JS references
+any `.pt-*` class, then removed: the entire dedicated "Patterns" CSS
+section (`.pt-tabs`/`.pt-tab`/`.pt-card.live`/`.pt-head`/`.pt-key`/
+`.pt-sig`/`.pt-counts`/`.pt-total`/`.pt-bar`/`.pt-members`/`.pt-member`/
+`.pt-foot`, plus its own mobile media-query rule), and `.pt-list`/
+`.pt-card`/`.pt-card:hover`'s entries inside the three combined selectors
+they shared with `.tri-*`/`.esc-*`/`.sr-*`/`.set-*` (those selectors and
+rules stay -- only the Patterns-specific piece of each was removed).
+Comment wording referencing "Triage, Search and Patterns" corrected to
+"Triage and Search." Verified via a brace-count sanity check (1085 open,
+1085 close, unchanged ratio) that the surgical removal didn't corrupt the
+stylesheet, plus `npm run build` staying clean.
+
+## Post-v4 page inventory, corrected
+
+Two corrections to what the source prompt believed, both stated plainly
+rather than silently worked around:
+
+- **There is no "Coverage" sidebar nav group.** `NAV` (`public/js/app.js`)
+  has exactly three groups: Work, Insight, System. "Coverage" is a
+  sub-section rendered *inside* the Time Off page (`timeoff.js`'s
+  `paintCoverage()`), not a nav entry -- confirmed by reading `NAV`
+  directly.
+- **Git-log-dated, not docblock-guessed:** the v4 design pass spans commit
+  `fc2ede6` (2026-09-07 20:14) through `58581fa` (2026-09-07 22:56) the
+  same day. Quality (`iqs.js`) and Scorecard (`metrics.js`) both predate
+  v4 entirely (2026-09-04) and are exactly the two pages this document's
+  own phase 8 section above already named as never independently
+  re-screenshotted -- nothing new to add there this pass. Phone
+  (`phone.js`) was added the same day, between phase 3 and phase 8, and
+  phase 8's own mobile pass already screenshotted it directly (finding
+  the duplicate `.icon-btn` bug fixed there) -- already covered, not a
+  fresh gap. RSC and CDM (above) are the only pages genuinely outside
+  every prior audit's reach.
+
+## What remains open after this pass
+
+Consistent with this document's own running self-critique convention:
+Scorecard, Quality, Triage, Search, and Commitments (phase 8's own
+"never independently re-screenshotted" list, Patterns now dropped from
+it since it no longer exists) were not re-examined again in this pass --
+nothing about v9's own changes touched their markup or CSS, so there was
+no new code to check there, and re-auditing unchanged surfaces on no new
+information wouldn't have found anything phase 8's spot-checks didn't
+already cover. Settings' phone-width behavior (phase 3 held it against
+the system for padding/eyebrow, phase 8 didn't separately re-check it at
+mobile width) and the Coverage sub-section's mobile width were both named
+in this release's scope but not independently verified here for the same
+credential-gap reason as everything else above -- structural review found
+no `.set-*` or coverage-specific CSS that looks obviously unsafe at
+narrow widths (the existing `700px` breakpoint convention covers several
+neighboring sections already), but "looks safe on read" is not the same
+claim as "confirmed in a real narrow viewport," and this document says so
+plainly rather than blurring the two.
