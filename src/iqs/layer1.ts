@@ -182,8 +182,13 @@ export interface Layer1Score {
  * pure-status comments; scoreClearResolutionNoresponse() for ghosted
  * (3-strikes) closures; WWW scoring excludes internal/non-public
  * comments (the one dimension that hadn't already made that distinction).
+ * l1.6 (v9) - detectKeyword() takes Salesforce's IsClosed as ground truth
+ * instead of inferring closure from a status-string substring match (an
+ * interim status like "Resolved - Pending Customer" was misread as a
+ * definitive CLOSURE and scored the case's holding comment against the
+ * full Clear Resolution rubric it was never meant to satisfy).
  */
-export const SCORER_VERSION = "l1.5";
+export const SCORER_VERSION = "l1.6";
 
 /**
  * Each banned-phrase occurrence costs a point of the final 100, capped so that
