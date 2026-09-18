@@ -18,6 +18,7 @@ import {
   getSettingBool,
   getSyncState,
   cacheCounts,
+  dbFileSize,
   rebuildCache,
   logSupportAccess,
   logCdmAccess,
@@ -80,7 +81,7 @@ import {
   startLayer2Sweep,
 } from "./iqs/layer2Store";
 import { resolveRange, scorecard, saveManualMetric, deleteManualMetric } from "./metrics";
-import { syncOnce, startSync, reconcileCommitments } from "./sync";
+import { syncOnce, startSync, reconcileCommitments, lastSyncPhases } from "./sync";
 import { listEvents, unreadEventCount, markEventsRead, sendWebhookTest, EventKind } from "./notify";
 import { getPhoneBoard, positionOf, listRoster, upsertRosterEntry, deleteRosterEntry } from "./phone";
 import type { Region } from "./phone";
@@ -116,6 +117,54 @@ app.use((req, res, next) => {
       ms: Date.now() - started,
       session: sessionDiagnostic(req),
     });
+  });
+  next();
+});
+
+/**
+ * v9 phase 0: per-route latency, for `/api/debug/perf` only.
+ *
+ * A module-level ring buffer (last 500 samples per route key), not a log line
+ * and not persisted -- this is a measurement tool for this release, reset on
+ * every restart, deliberately not a permanent metrics subsystem. Keyed on the
+ * matched route pattern (falls back to the raw path pre-match) so `/api/cases`
+ * and `/case/:caseNumber`-shaped routes aggregate correctly instead of one
+ * bucket per case number.
+ */
+const ROUTE_SAMPLE_CAP = 500;
+const routeSamples = new Map<string, number[]>();
+
+function recordRouteSample(key: string, ms: number): void {
+  let samples = routeSamples.get(key);
+  if (!samples) {
+    samples = [];
+    routeSamples.set(key, samples);
+  }
+  samples.push(ms);
+  if (samples.length > ROUTE_SAMPLE_CAP) samples.shift();
+}
+
+function percentile(sorted: number[], p: number): number {
+  if (!sorted.length) return 0;
+  const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
+  return sorted[idx];
+}
+
+function routePerfSnapshot(): Array<{ route: string; count: number; p50Ms: number; p95Ms: number }> {
+  const out: Array<{ route: string; count: number; p50Ms: number; p95Ms: number }> = [];
+  for (const [route, samples] of routeSamples) {
+    const sorted = [...samples].sort((a, b) => a - b);
+    out.push({ route, count: sorted.length, p50Ms: percentile(sorted, 50), p95Ms: percentile(sorted, 95) });
+  }
+  return out.sort((a, b) => b.p95Ms - a.p95Ms);
+}
+
+app.use((req, res, next) => {
+  const started = Date.now();
+  res.on("finish", () => {
+    if (STATIC_PATH.test(req.path)) return;
+    const key = req.method + " " + (req.route?.path ? req.baseUrl + req.route.path : req.path);
+    recordRouteSample(key, Date.now() - started);
   });
   next();
 });
@@ -941,6 +990,23 @@ app.delete("/api/phone/roster/:name", requireAuth, (req, res) => {
 });
 
 /* ------------------------------------------------------------------ health */
+
+/**
+ * v9 phase 0: authenticated, unlike `/healthz` -- that route is an
+ * unauthenticated container-probe/Prometheus contract and its shape must not
+ * grow. This is a measurement tool for the v9 performance pass: per-route
+ * latency, the last sync's per-phase breakdown, Layer 2 spend/hit-rate
+ * (already computed by `getLayer2Stats`, just surfaced here), and DB size.
+ * Counts and timings only -- no request bodies, no case content.
+ */
+app.get("/api/debug/perf", requireAuth, noStore, (_req, res) => {
+  res.json({
+    routes: routePerfSnapshot(),
+    sync: { lastPhaseMs: lastSyncPhases() },
+    layer2: getLayer2Stats(30),
+    cache: { ...cacheCounts(), dbFileBytes: dbFileSize() },
+  });
+});
 
 /**
  * Unauthenticated on purpose: this is what the container probe and Prometheus

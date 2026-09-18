@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
+import fs from "fs";
 import { parseEmailBody, EMAIL_PARSER_VERSION } from "./emailBody";
 import { log } from "./log";
 
@@ -752,6 +753,15 @@ export function cacheCounts(): Record<string, number> {
     artifacts: one("SELECT COUNT(*) AS n FROM artifacts"),
     events: one("SELECT COUNT(*) AS n FROM events"),
   };
+}
+
+/** v9 phase 0: DB file size in bytes, for the perf debug route. */
+export function dbFileSize(): number {
+  try {
+    return fs.statSync(DB_PATH).size;
+  } catch {
+    return 0;
+  }
 }
 
 /** Drop cached Salesforce data so the next sync rebuilds from scratch. */

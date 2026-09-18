@@ -47,6 +47,17 @@ const MAX_BACKOFF_MS = 30 * 60_000;
 let timer: NodeJS.Timeout | null = null;
 let inFlight: Promise<SyncResult> | null = null;
 
+/**
+ * v9 phase 0: per-phase duration of the most recent sync run, for
+ * `/api/debug/perf`. Module-level and overwritten every run rather than
+ * persisted -- this is a measurement tool for this release, not a permanent
+ * metrics subsystem.
+ */
+let lastPhaseMs: Record<string, number> = {};
+export function lastSyncPhases(): Record<string, number> {
+  return { ...lastPhaseMs };
+}
+
 export interface SyncResult {
   ok: boolean;
   cases: number;
@@ -586,19 +597,29 @@ async function runSync(full: boolean): Promise<SyncResult> {
   const started = Date.now();
   const state = getSyncState();
   const since = full ? null : state.watermark;
+  const phases: Record<string, number> = {};
+  let phaseT = started;
+  const mark = (name: string) => {
+    const t = Date.now();
+    phases[name] = t - phaseT;
+    phaseT = t;
+  };
 
   patchSyncState({ running: 1, last_attempt: started });
   log.info("sync.start", { full, since });
 
   try {
     const cases = await listCasesModifiedSince(since);
+    mark("fetchCases");
 
     if (!cases.length) {
       // Nothing moved in Salesforce, but a deadline can arrive on its own --
       // and so can a transfer, which this delta query can never see (that's
       // exactly why reconciliation exists), so it must run on this path too.
       await runEvents(null, false);
+      mark("events");
       await reconcileOwnership();
+      mark("reconcileOwnership");
       const durationMs = Date.now() - started;
       patchSyncState({
         running: 0,
@@ -607,7 +628,8 @@ async function runSync(full: boolean): Promise<SyncResult> {
         error_count: 0,
         last_duration_ms: durationMs,
       });
-      log.info("sync.done", { cases: 0, comments: 0, durationMs });
+      lastPhaseMs = phases;
+      log.info("sync.done", { cases: 0, comments: 0, durationMs, phases });
       return { ok: true, cases: 0, comments: 0, commitments: 0, durationMs, emailsUnavailable: isEmailAccessDenied() };
     }
 
@@ -619,6 +641,7 @@ async function runSync(full: boolean): Promise<SyncResult> {
     // re-reading every thread on every poll.
     const comments = await getCommentsForCases(caseIds);
     const emails = await getEmailsForCases(caseIds);
+    mark("fetchCommentsEmails");
 
     const syncedAt = now();
     let newCommitments = 0;
@@ -667,14 +690,18 @@ async function runSync(full: boolean): Promise<SyncResult> {
     });
 
     write();
+    mark("write");
     reconcileCommitments();
+    mark("reconcileCommitments");
     await reconcileOwnership();
+    mark("reconcileOwnership");
 
     // Quality scoring runs here and not inside recomputeCase(): the Reliability
     // dimension reads commitment states, and those states are only correct
     // after reconciliation has moved what came due. Layer 1 is pure regex over
     // rows already in hand, so this costs no API call and no round trip.
     const graded = scoreCases(caseIds);
+    mark("scoreLayer1");
 
     const afterRows = db
       .prepare(
@@ -742,6 +769,7 @@ async function runSync(full: boolean): Promise<SyncResult> {
         log.warn("coverage.sweep_failed", { error: (err as Error).message }),
       );
     }
+    mark("eventsAndCoverage");
 
     // Watermark from the data, not the clock: a case modified during the run
     // must not be skipped next time.
@@ -760,6 +788,7 @@ async function runSync(full: boolean): Promise<SyncResult> {
       last_duration_ms: durationMs,
     });
 
+    lastPhaseMs = phases;
     log.info("sync.done", {
       cases: cases.length,
       comments: comments.length,
@@ -769,6 +798,7 @@ async function runSync(full: boolean): Promise<SyncResult> {
       scoreFailures: graded.failed,
       durationMs,
       watermark,
+      phases,
     });
 
     return {
@@ -789,7 +819,8 @@ async function runSync(full: boolean): Promise<SyncResult> {
       error_count: prior.error_count + 1,
       last_duration_ms: durationMs,
     });
-    log.error("sync.failed", { error: message, durationMs, errorCount: prior.error_count + 1 });
+    lastPhaseMs = phases;
+    log.error("sync.failed", { error: message, durationMs, errorCount: prior.error_count + 1, phases });
     return {
       ok: false,
       cases: 0,
