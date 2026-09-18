@@ -376,7 +376,7 @@ export function listOfficialComparisons(): OfficialComparison[] {
     caseNumber: r.case_number,
     predicted: r.predicted,
     official: r.official,
-    delta: r.predicted === null ? null : Math.round((r.predicted - r.official) * 10) / 10,
+    delta: r.predicted === null ? null : Math.round((r.predicted - r.official) * 100) / 100, // v9 phase 3: 2 decimals, matching predicted's own precision now
     importedAt: r.imported_at,
   }));
 }

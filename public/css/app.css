@@ -2368,6 +2368,32 @@ mark {
   flex-wrap: wrap;
 }
 
+/* v9 phase 3 (Part A.5): before/after score delta. Self-contained rather
+   than reusing .iqs-delta (the Layer1-vs-Layer2/official comparison
+   tables' delta cell) -- that class's actual color/weight styling is
+   scoped under .iqs-delta-row specifically, and coupling this row to
+   that unrelated parent selector would be more fragile than a few
+   duplicate lines. */
+.draft-delta-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-body);
+}
+
+.draft-delta {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--tone);
+}
+.draft-delta.t-good { --tone: var(--green); }
+.draft-delta.t-bad  { --tone: var(--red); }
+.draft-delta.t-none { --tone: var(--text-4); font-weight: 400; }
+
 .draft-www-row {
   display: flex;
   gap: 6px;

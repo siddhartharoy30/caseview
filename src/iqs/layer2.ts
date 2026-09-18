@@ -516,7 +516,7 @@ export function buildScore(args: {
     promptVersion: PROMPT_VERSION,
     model,
     contentHash: hash,
-    overall: overall === null ? null : Math.round(overall * 10) / 10,
+    overall: overall === null ? null : Math.round(overall * 100) / 100, // v9 phase 3: 2 decimals, matching layer1.ts
     band: overall === null ? null : bandFor(overall / 100),
     dimensions,
     summary: str(raw.summary) || "",

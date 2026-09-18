@@ -1044,8 +1044,12 @@ export function scoreCase(facts: CaseFacts, keywordOverride?: Keyword): Layer1Sc
   } else {
     base = overallScore(dimensions.map((d) => ({ id: d.id, earned: d.earned })));
     if (base !== null) {
-      base = Math.round(base * 10) / 10;
-      overall = Math.round(Math.max(0, base - penalty) * 10) / 10;
+      // v9 phase 3: 2 decimals, not 1 -- matching the real export's own
+      // precision (e.g. 93.57%) and dimension-level `earned`, which was
+      // already rounded to 2 decimals here while the overall score alone
+      // was coarser.
+      base = Math.round(base * 100) / 100;
+      overall = Math.round(Math.max(0, base - penalty) * 100) / 100;
       band = bandFor(overall / 100);
     }
   }

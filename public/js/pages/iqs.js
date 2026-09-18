@@ -80,7 +80,7 @@ const because = (reason, fallback) => String(reason || fallback).replace(/\s*\.+
 
 const pctText = (n) => (n === null || n === undefined ? "—" : n.toFixed(1).replace(/\.0$/, "") + "%");
 
-const signed = (n) => (n > 0 ? "+" : "") + n.toFixed(1).replace(/\.0$/, "");
+const signed = (n, decimals = 1) => (n > 0 ? "+" : "") + n.toFixed(decimals).replace(/\.0+$/, "");
 
 /* ------------------------------------------------------------------- links */
 
@@ -328,7 +328,7 @@ function officialTable(rows, onOpen) {
       h("td", { class: "right" }, r.predicted === null ? "not scored" : scoreMeter(r.predicted, null, { width: 44, decimals: 2 })),
       h("td", { class: "right mono" }, r.official.toFixed(2)),
       h("td", { class: "right" },
-        h("span", { class: "iqs-delta t-" + dTone }, d === null ? "—" : signed(d))),
+        h("span", { class: "iqs-delta t-" + dTone }, d === null ? "—" : signed(d, 2))),
       h("td", { class: "nowrap hint" }, fmt.dateTimeShort(r.importedAt)));
   });
 

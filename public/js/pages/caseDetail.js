@@ -1194,10 +1194,21 @@ export function render(ctx, host, shell) {
       const draftWww = score.comments.find((cm) => cm.id === "draft-preview");
       const draftViolations = score.violations.filter((v) => v.commentId === "draft-preview");
 
+      // v9 phase 3 (Part A.5): the case's current stored score is already
+      // loaded on this page's initial fetch (state.detail.case.iqs) --
+      // the same field that already drives the Quality tab's own badge
+      // count before that tab is ever opened -- so this needs no new
+      // network call. Prefers the fuller state.iqs.score once the Quality
+      // tab has been opened this visit (freshest), same fallback order
+      // used elsewhere on this page (see paintQuality()).
+      const current = state.iqs?.score ?? state.detail?.case?.iqs;
+      const currentOverall = current && current.overall !== null && current.overall !== undefined ? current.overall : null;
+      const delta = scoped && currentOverall !== null ? Math.round((score.overall - currentOverall) * 100) / 100 : null;
+
       mount(scoreHost,
         h("div", { class: `card draft-score-card t-${scoped ? iqsTone(score.band) : "none"}` },
           h("div", { class: "draft-score-top" },
-            scoreMeter(score.overall, score.band, { width: 90 }),
+            scoreMeter(score.overall, score.band, { width: 90, decimals: 2 }),
             scoped ? bandChip(score.band) : h("span", { class: "dim", text: "Not enough to score" }),
             h("span", {
               class: "chip neutral", title: KEYWORD_HINT[score.keyword] || "",
@@ -1205,6 +1216,16 @@ export function render(ctx, host, shell) {
             }),
             h("div", { class: "spacer" }),
             h("span", { class: "hint", text: "Predicted, Layer 1 — free, nothing sent" })),
+
+          delta !== null ? h("div", { class: "draft-delta-row" },
+            h("span", { class: "hint", text: "Posting this would move the score" }),
+            h("span", { class: "mono", text: currentOverall.toFixed(2) }),
+            h("span", { class: "dim", text: "→" }),
+            h("span", { class: "mono", text: score.overall.toFixed(2) }),
+            h("span", {
+              class: `draft-delta ${delta > 0.004 ? "t-good" : delta < -0.004 ? "t-bad" : "t-none"}`,
+              text: `${delta > 0 ? "+" : ""}${delta.toFixed(2)}`,
+            })) : null,
 
           draftWww ? h("div", { class: "draft-www-row" },
             wwwPill("What", draftWww.what),
@@ -1424,7 +1445,9 @@ export function render(ctx, host, shell) {
   const MARK_NONE = ["M6.5 6.5l11 11", "M17.5 6.5l-11 11"];
 
   /** Points, to one decimal, without a pointless ".0". */
-  const pts = (n) => String(Math.round((Number(n) || 0) * 10) / 10);
+  // v9 phase 3: 2 decimals, matching the real export's own precision --
+  // this dimension breakdown is a comparison surface, not a glanceable one.
+  const pts = (n) => (Number(n) || 0).toFixed(2);
 
   function signalRow(sig) {
     const w = Number(sig.weight) || 0;
@@ -1609,7 +1632,7 @@ export function render(ctx, host, shell) {
 
     const header = h("div", { class: `card iqs-hero t-${scoped ? iqsTone(score.band) : "none"}` },
       h("div", { class: "iqs-hero-left" },
-        h("div", { class: "iqs-hero-meter" }, scoreMeter(score.overall, score.band, { width: 168 })),
+        h("div", { class: "iqs-hero-meter" }, scoreMeter(score.overall, score.band, { width: 168, decimals: 2 })),
         h("div", {
           class: "iqs-hero-of",
           // The headline rounds; the tenth lives here rather than being lost.
