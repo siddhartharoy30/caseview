@@ -520,17 +520,29 @@ function assemble(d: Dimension, basis: string, signals: SignalResult[]): Dimensi
 /**
  * The window the `first3` dimensions are read from.
  *
- * The rubric puts business impact and technical definition in the case's first
- * three comments. When the customer posts three times before I get a word in,
- * my opening still is my opening, so it is included even if it falls outside
- * that window. Anything later is a case that took too long to define itself,
- * and it scores that way.
+ * The rubric puts business impact and technical definition in *my* first
+ * three comments -- not the case's first three thread entries by any
+ * author. v9 phase 3.2: the old version anchored to `all.slice(0, 3)`, so
+ * when the customer posted two or three times before my first reply
+ * (routine -- an initial description plus a clarifying comment or two
+ * before ownership), the window came up empty and fell back to `mine[0]`
+ * alone, locking these two dimensions to whatever my very first reply
+ * happened to contain, permanently, even if the real business impact or
+ * technical detail came out in my second or third comment. Walking the
+ * full thread and collecting my first three, wherever they fall, fixes
+ * that without changing anything for the common case where my first reply
+ * already falls inside the literal first three entries.
  */
 function openingWindow(all: CommentFacts[], mine: MyComment[]): MyComment[] {
-  const firstThreeIds = new Set(all.slice(0, 3).map((c) => c.id));
-  const inWindow = mine.filter((c) => firstThreeIds.has(c.id));
-  if (inWindow.length) return inWindow;
-  return mine.length ? [mine[0]] : [];
+  const byId = new Map(mine.map((c) => [c.id, c]));
+  const window: MyComment[] = [];
+  for (const c of all) {
+    const m = byId.get(c.id);
+    if (!m) continue;
+    window.push(m);
+    if (window.length === 3) break;
+  }
+  return window.length ? window : mine.length ? [mine[0]] : [];
 }
 
 function scoreBusinessImpact(d: Dimension, window: MyComment[], all: CommentFacts[]): DimensionResult {
@@ -872,8 +884,17 @@ export function scoreCase(facts: CaseFacts, keywordOverride?: Keyword): Layer1Sc
     }
   }
 
-  if (window.length && !all.slice(0, 3).some((c) => window.some((w) => w.id === c.id))) {
-    notes.push("The customer wrote three times before my first reply, so my opening comment was read outside the usual first-three window.");
+  // v9 phase 3.2: the window is now indexed by author, not by thread
+  // position, so "outside the usual window" means the window's own last
+  // entry sits later in the thread than the literal first three entries --
+  // not "none of the window overlaps the first three," which the old,
+  // narrower window made equivalent but this one does not.
+  if (window.length) {
+    const lastWindowId = window[window.length - 1].id;
+    const lastWindowIndex = all.findIndex((c) => c.id === lastWindowId);
+    if (lastWindowIndex >= 3) {
+      notes.push("The customer wrote before my first reply, so my opening comment was read outside the usual first-three window.");
+    }
   }
   if (keyword === "CLOSURE" && !facts.isClosed) {
     notes.push("Scored as a closure: the case status reads closed-side, or three of my comments have gone unanswered.");
