@@ -142,6 +142,21 @@ async function fetchBoard(): Promise<PhoneBoard | PhoneBoardError> {
 }
 
 /**
+ * v9 phase 5: read whatever is already cached, with no chance of
+ * triggering an upstream fetch -- unlike `getPhoneBoard()`, which fetches
+ * on a cache miss. Settings' collapsed roster summary wants an
+ * unclassified-agent count, but Settings loading is not itself a reason to
+ * hit the external board; it should only ever show real live-board data
+ * when something else (the monitor, or the `/phone` page) has already
+ * made it warm. "Off means zero requests" (docs/TESTS.md phase 6.3) stays
+ * true for a Settings page load specifically because this never calls
+ * `fetchBoard()`.
+ */
+export function cachedPhoneBoard(): PhoneBoard | null {
+  return lastGood;
+}
+
+/**
  * Serve on demand. A request within MIN_FETCH_INTERVAL_MS of the last real
  * fetch gets the cached result (stale-flagged if it's the error case and
  * there's nothing cached yet); no request means no upstream call, which is

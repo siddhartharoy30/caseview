@@ -32,7 +32,7 @@
  * off, and labelled as what it is.
  */
 
-import { h, mount } from "../lib/dom.js";
+import { h, mount, icon } from "../lib/dom.js";
 import { api } from "../lib/api.js";
 import * as store from "../lib/store.js";
 import {
@@ -174,7 +174,7 @@ function segmented(options, current, onpick) {
 /* ------------------------------------------------------------------ render */
 
 export function render(_ctx, host, shell) {
-  const state = { data: null, loading: true, error: null, roster: [] };
+  const state = { data: null, loading: true, error: null, roster: [], unclassifiedCount: null };
   const bodyHost = h("div", {});
   let disposed = false;
 
@@ -184,10 +184,11 @@ export function render(_ctx, host, shell) {
     state.loading = true;
     paint();
     try {
-      const [data, rosterRes] = await Promise.all([api.settings(), api.phoneRoster().catch(() => ({ roster: [] }))]);
+      const [data, rosterRes] = await Promise.all([api.settings(), api.phoneRoster().catch(() => ({ roster: [], unclassifiedCount: null }))]);
       if (disposed) return;
       state.data = data;
       state.roster = (rosterRes && rosterRes.roster) || [];
+      state.unclassifiedCount = (rosterRes && rosterRes.unclassifiedCount) ?? null;
       state.error = null;
     } catch (err) {
       state.error = err;
@@ -546,13 +547,52 @@ export function render(_ctx, host, shell) {
     return section("Webhook", "Optional, and off unless you switch it on.", children);
   }
 
+  const KEY_ROSTER_COLLAPSED = "settings.phoneRoster.collapsed";
+
   /**
    * v5 phase 2: nothing on the wire tells QView an agent's region (see
    * docs/PHONE.md's discovery section), so classification is either done
    * here or from the board table on /phone directly -- this is the "before
    * they've ever appeared on a fetched board" path.
+   *
+   * v9 phase 5: this section grows with usage (one row per classified
+   * agent, unbounded) unlike every other section on this page, which is
+   * fixed or hardcoded-constant-bounded regardless of data volume --
+   * confirmed by reading all of them, so no other section gets this
+   * treatment. Collapsed by default (same localStorage-boolean pattern as
+   * phoneDock.js/tzstrip.js's own collapse state, both already imported by
+   * this page's shared `store` module), with a summary line naming the
+   * unclassified count too -- burying that signal behind a collapse would
+   * undo the v5 work that made queue-position uncertainty visible at all.
    */
   function phoneRosterSection() {
+    const collapsed = store.get(KEY_ROSTER_COLLAPSED, true);
+
+    function toggle() {
+      store.set(KEY_ROSTER_COLLAPSED, !collapsed);
+      paint();
+    }
+
+    const count = state.roster.length;
+    const summary = `${count} agent${count === 1 ? "" : "s"}`
+      + (state.unclassifiedCount ? ` · ${state.unclassifiedCount} unclassified` : "");
+
+    const head = h("button", {
+      class: `set-roster-head${collapsed ? " is-collapsed" : ""}`, type: "button",
+      "aria-expanded": collapsed ? "false" : "true",
+      title: collapsed ? "Show the roster" : "Hide the roster",
+      onclick: toggle,
+    },
+      h("div", {},
+        h("h2", { class: "card-title", text: "Phone roster" }),
+        h("p", { class: "card-sub", text: summary })),
+      h("div", { class: "spacer" }),
+      h("span", { class: `iqs-caret${collapsed ? "" : " is-open"}` }, icon(["M9 5l7 7-7 7"], 13)));
+
+    if (collapsed) {
+      return h("section", { class: "card" }, head);
+    }
+
     const nameInput = h("input", { class: "input", type: "text", placeholder: "Agent name, as it appears on the board" });
     const regionSelect = select(
       [{ value: "india", label: "India" }, { value: "us", label: "US" }, { value: "unknown", label: "Unclassified" }],
@@ -585,23 +625,25 @@ export function render(_ctx, host, shell) {
           },
         })));
 
-    return section(
-      "Phone roster",
-      "Which region each AMER-line agent works from, since nothing the phone board or Case Desk exposes says so — see docs/PHONE.md. Never inferred from a name or timezone.",
-      h("div", { class: "set-rows" }, rows.length ? rows : h("p", { class: "dim", text: "No one classified yet." })),
-      h("div", { class: "set-inline" },
-        nameInput,
-        regionSelect,
-        button("Add", {
-          small: true,
-          kind: "primary",
-          onclick: async () => {
-            const name = nameInput.value.trim();
-            if (!name) return toast("Name is required", "err");
-            await saveEntry(name, regionSelect.value);
-            nameInput.value = "";
-          },
-        })));
+    return h("section", { class: "card" },
+      head,
+      h("div", { class: "card-body" },
+        h("p", { class: "hint", style: { margin: "0 0 10px" } },
+          "Which region each AMER-line agent works from, since nothing the phone board or Case Desk exposes says so — see docs/PHONE.md. Never inferred from a name or timezone."),
+        h("div", { class: "set-rows set-roster-scroll" }, rows.length ? rows : h("p", { class: "dim", text: "No one classified yet." })),
+        h("div", { class: "set-inline" },
+          nameInput,
+          regionSelect,
+          button("Add", {
+            small: true,
+            kind: "primary",
+            onclick: async () => {
+              const name = nameInput.value.trim();
+              if (!name) return toast("Name is required", "err");
+              await saveEntry(name, regionSelect.value);
+              nameInput.value = "";
+            },
+          }))));
   }
 
   /**

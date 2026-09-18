@@ -82,7 +82,7 @@ import {
 import { resolveRange, scorecard, saveManualMetric, deleteManualMetric } from "./metrics";
 import { syncOnce, startSync, reconcileCommitments, lastSyncPhases } from "./sync";
 import { listEvents, unreadEventCount, markEventsRead, sendWebhookTest, EventKind } from "./notify";
-import { getPhoneBoard, positionOf, listRoster, upsertRosterEntry, deleteRosterEntry } from "./phone";
+import { getPhoneBoard, cachedPhoneBoard, positionOf, listRoster, upsertRosterEntry, deleteRosterEntry } from "./phone";
 import type { Region } from "./phone";
 import { log, errText } from "./log";
 
@@ -977,8 +977,25 @@ app.get("/api/phone/board", requireAuth, noStore, async (_req, res) => {
   res.json({ ...board, agents, myName, position });
 });
 
+/**
+ * v9 phase 5: Settings' collapsed roster summary wants an unclassified
+ * count. Reuses the exact same live-board definition `/api/phone/board`
+ * already computes (`positionOf().unclassified`) rather than a second,
+ * board-hours-independent metric that doesn't exist anywhere in this
+ * schema (there is no persisted board-history table, only a live
+ * snapshot) -- so this number is `null` outside the hours the configured
+ * board name is actually on the board, same as the board page's own
+ * banner. Deliberately `cachedPhoneBoard()`, not `getPhoneBoard()`: a
+ * Settings page load must never itself trigger an upstream fetch to the
+ * external board (that would break "off means zero requests" for anyone
+ * who opens Settings without ever turning the phone monitor on) -- this
+ * only reads whatever is already warm from the monitor or the /phone page.
+ */
 app.get("/api/phone/roster", requireAuth, noStore, (_req, res) => {
-  res.json({ roster: listRoster() });
+  const board = cachedPhoneBoard();
+  const myName = getSetting("phoneBoardName");
+  const position = board && board.ok && myName ? positionOf(board, myName) : null;
+  res.json({ roster: listRoster(), unclassifiedCount: position ? position.unclassified.length : null });
 });
 
 app.post("/api/phone/roster", requireAuth, (req, res) => {

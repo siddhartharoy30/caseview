@@ -4235,6 +4235,33 @@ a.sr-more:hover { color: var(--blue); }
   white-space: nowrap;
 }
 
+/* v9 phase 5: the one settings section whose length grows with data (one
+   row per classified phone-roster agent) rather than being fixed or
+   bounded by a hardcoded constant like every other section on this page --
+   collapsed by default, same button-reset shape as .iqs-dim-head. */
+.set-roster-head {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--speed);
+}
+.set-roster-head:hover { background: var(--surface-2); }
+.set-roster-head.is-collapsed { border-bottom: none; }
+
+.set-roster-scroll {
+  max-height: 380px;
+  overflow-y: auto;
+}
+
 .set-url {
   display: flex;
   align-items: center;
