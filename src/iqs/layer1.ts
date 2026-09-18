@@ -710,7 +710,21 @@ function scoreTechnicalDefinition(d: Dimension, window: MyComment[], all: Commen
 }
 
 function scoreWww(d: Dimension, mine: MyComment[], keyword: Keyword): { dim: DimensionResult; perComment: CommentWww[] } {
-  const perComment: CommentWww[] = mine.map((c) => {
+  // v9 phase 3: "Meaningful Updates" is explicitly a customer-facing
+  // standard (the IQS Guidebook: "must be clearly communicated to the
+  // customer") -- an internal-only note was being graded on it anyway,
+  // the one dimension in this file that hadn't already excluded them.
+  // scoreClearResolution() already picks only a public comment as "the
+  // closing comment" (lines above), and the banned-phrase scorer already
+  // skips non-public comments outright ("nobody is harmed by the word
+  // 'Jira' in a note only I read") -- this brings WWW in line with both
+  // existing precedents instead of being the one exception. Confirmed via
+  // the backtest's worst-10 breakdown: real cases had internal
+  // investigation notes ("=== PRIVATE NOTE ===...") averaged into the
+  // customer-facing WWW score, dragging it down for text nobody but this
+  // engineer ever reads.
+  const publicMine = mine.filter((c) => c.isPublic);
+  const perComment: CommentWww[] = publicMine.map((c) => {
     const what = has(c.text, WHAT_DONE);
     const why = has(c.text, WHY_REASON);
     // The "When" point is a commitment with an absolute time, read by the same
@@ -721,7 +735,10 @@ function scoreWww(d: Dimension, mine: MyComment[], keyword: Keyword): { dim: Dim
     // Closure comments are scored on What and Why only: the close statement and
     // the reopen date replace the follow-up commitment, so requiring a "when"
     // would penalise following the rubric.
-    const whenWaived = keyword === "CLOSURE" && c.id === mine[mine.length - 1]?.id;
+    // publicMine, not mine -- the last comment overall could be an
+    // internal note left after the public closing reply, which must not
+    // stop the real closing reply from getting its When waiver.
+    const whenWaived = keyword === "CLOSURE" && c.id === publicMine[publicMine.length - 1]?.id;
     // v9 phase 3.3 (1.5.2): a pure status/standing-by comment -- no action
     // taken, no request of the customer -- does not need a "Why". A true
     // exclusion (the signal drops from this comment's applicable count),
