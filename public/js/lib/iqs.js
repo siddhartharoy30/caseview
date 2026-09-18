@@ -51,8 +51,15 @@ export const bandLabel = (band) => BAND_LABEL[band] || "Unscored";
  * A percentage as the rubric means it: a score out of 100 is already a
  * percentage of the *applicable* maximum, because dimensions that do not apply
  * to the response type drop out of the denominator rather than scoring zero.
+ *
+ * Rounds to a whole integer by default (every glanceable surface: queue
+ * column, CSV export, clipboard-copy summaries). `decimals` is an opt-in for
+ * comparison surfaces (the Quality tab, the dimension breakdown, the
+ * predicted-vs-official table) where matching the export's own precision is
+ * the point, not glanceability.
  */
-export const scoreText = (n) => (n === null || n === undefined ? "—" : String(Math.round(n)));
+export const scoreText = (n, decimals = 0) =>
+  n === null || n === undefined ? "—" : decimals > 0 ? Number(n).toFixed(decimals) : String(Math.round(n));
 
 /**
  * The compact score read: a short track plus the number.
@@ -61,14 +68,14 @@ export const scoreText = (n) => (n === null || n === undefined ? "—" : String(
  * the same score is the same shape in both places. `width` is the track length
  * in pixels; everything else follows from the band.
  */
-export function scoreMeter(overall, band, { width = 34, showNumber = true } = {}) {
+export function scoreMeter(overall, band, { width = 34, showNumber = true, decimals = 0 } = {}) {
   const has = overall !== null && overall !== undefined;
   const pct = has ? Math.max(0, Math.min(100, overall)) : 0;
 
   return h("span", { class: `iqs-meter t-${has ? tone(band) : "none"}` },
     h("span", { class: "iqs-track", style: { width: `${width}px` } },
       has ? h("span", { class: "iqs-fill", style: { width: `${pct}%` } }) : null),
-    showNumber ? h("span", { class: "iqs-num", text: scoreText(overall) }) : null,
+    showNumber ? h("span", { class: "iqs-num", text: scoreText(overall, decimals) }) : null,
   );
 }
 

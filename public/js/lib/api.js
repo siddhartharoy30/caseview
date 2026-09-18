@@ -90,7 +90,8 @@ export const api = {
   iqsOverview:    (p)       => request("GET",  "/api/iqs/overview" + qs(p)),
   iqsSweep:       ()        => request("POST", "/api/iqs/sweep", {}),
 
-  /* Phase 9 — SentryAI Tier 3: paste a CSV/table, get back predicted-vs-official. */
+  /* Phase 9 — SentryAI Tier 3, rewritten v9 phase 1: paste or upload a CSV, get back predicted-vs-official. */
+  previewOfficialImport: (text) => request("POST", "/api/iqs/official/preview", { text }),
   importOfficialScores: (text) => request("POST", "/api/iqs/official/import", { text }),
 
   /* commitments */

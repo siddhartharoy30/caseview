@@ -436,6 +436,19 @@ ensureColumn("suggested_replies", "self_check", "TEXT");
 // is a timestamp, not a delete.
 ensureColumn("coverage_posts", "discarded_at", "INTEGER");
 
+// v9 phase 1: the real SentryAI export carries more than one score.
+// `overall` keeps its existing meaning end to end (the number every join/UI
+// already treats as "the official score") but that meaning is now pinned to
+// Contributor Score specifically -- `case_score` is stored alongside as
+// context only, never compared against. `contributor_count`/`contributors`/
+// `rules_version`/`report_date` make the multi-contributor split and the
+// like-for-like backtest comparison (phase 2) possible.
+ensureColumn("iqs_official_scores", "case_score", "REAL");
+ensureColumn("iqs_official_scores", "contributor_count", "INTEGER");
+ensureColumn("iqs_official_scores", "contributors", "TEXT");
+ensureColumn("iqs_official_scores", "rules_version", "TEXT");
+ensureColumn("iqs_official_scores", "report_date", "INTEGER");
+
 // v4 phase 4: envelope parsing and quote stripping, moved server-side and
 // done once during sync instead of client-side on every paint. Same
 // `parser_version`-gated staleness precedent as iqs/store.ts's

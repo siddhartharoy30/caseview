@@ -303,11 +303,17 @@ function deltaTable(rows, onOpen) {
 /**
  * Predicted vs official, side by side, never averaged (phase 0's rule --
  * the two are not measured against the same dimensions or weights, so a
- * blended number would claim a precision neither score has).
+ * blended number would claim a precision neither score has). `official` is
+ * Contributor Score (v9 phase 1) -- this engineer's own contribution, never
+ * the whole-case number. Both columns render to two decimals, matching the
+ * export's own precision, once phase 3 carries that precision through the
+ * predicted side too -- today `r.predicted` is still 1-decimal internally,
+ * so the extra digit is a trailing zero until then, not a claim of false
+ * precision.
  */
 function officialTable(rows, onOpen) {
   if (!rows.length) {
-    return h("p", { class: "hint" }, "Nothing imported yet — paste a report above.");
+    return h("p", { class: "hint" }, "Nothing imported yet — paste or upload a report above.");
   }
   const body = rows.map((r) => {
     const d = r.delta;
@@ -319,8 +325,8 @@ function officialTable(rows, onOpen) {
       onkeydown: (e) => { if (e.key === "Enter") onOpen(r.caseNumber); },
     },
       h("td", { class: "mono nowrap" }, r.caseNumber),
-      h("td", { class: "right" }, r.predicted === null ? "not scored" : scoreMeter(r.predicted, null, { width: 44 })),
-      h("td", { class: "right mono" }, r.official.toFixed(1)),
+      h("td", { class: "right" }, r.predicted === null ? "not scored" : scoreMeter(r.predicted, null, { width: 44, decimals: 2 })),
+      h("td", { class: "right mono" }, r.official.toFixed(2)),
       h("td", { class: "right" },
         h("span", { class: "iqs-delta t-" + dTone }, d === null ? "—" : signed(d))),
       h("td", { class: "nowrap hint" }, fmt.dateTimeShort(r.importedAt)));
@@ -332,41 +338,116 @@ function officialTable(rows, onOpen) {
         h("tr", {},
           h("th", {}, "Case"),
           h("th", { class: "right" }, "Predicted (Layer 1)"),
-          h("th", { class: "right" }, "Official (SentryAI)"),
+          h("th", { class: "right" }, "Contributor Score (SentryAI)"),
           h("th", { class: "right" }, "Δ"),
           h("th", {}, "Imported"))),
       h("tbody", {}, body)));
 }
 
 /**
- * The paste box. Column names are matched by alias, not one exact format --
- * nobody on this project has seen a real SentryAI export, so this reports
- * what it understood before committing rather than assuming it guessed right.
+ * Preview rows before anything is written -- matched (with the case's own
+ * subject, so a mismatch is obvious before it's committed), not-in-cache
+ * (informational, not an error: a case genuinely outside the local cache is
+ * normal), and parse failures (a real error: the line couldn't be read at
+ * all).
+ */
+function previewSections(result) {
+  const parts = [
+    h("p", { class: "hint" },
+      `Parsed ${result.matched.length + result.unmatched.length + result.parseFailures.length} row(s), `
+      + `delimiter "${result.delimiter === "\t" ? "tab" : result.delimiter}".`),
+  ];
+
+  if (result.matched.length) {
+    parts.push(
+      h("div", { class: "table-wrap", style: { marginTop: "8px" } },
+        h("table", { class: "tbl" },
+          h("thead", {},
+            h("tr", {},
+              h("th", {}, "Case"), h("th", {}, "Subject"),
+              h("th", { class: "right" }, "Contributor"), h("th", { class: "right" }, "Case"),
+              h("th", { class: "right" }, "Contributors"), h("th", {}, "Rules"))),
+          h("tbody", {},
+            result.matched.map((m) => h("tr", {},
+              h("td", { class: "mono nowrap" }, m.caseNumber),
+              h("td", { class: "hint" }, m.subject || "—"),
+              h("td", { class: "right mono" }, m.overall.toFixed(2)),
+              h("td", { class: "right mono" }, m.caseScore === null ? "—" : m.caseScore.toFixed(2)),
+              h("td", { class: "right" }, m.contributorCount ?? "—"),
+              h("td", { class: "hint" }, m.rulesVersion || "—")))))));
+  }
+
+  if (result.unmatched.length) {
+    parts.push(banner("info",
+      `${result.unmatched.length} case${result.unmatched.length === 1 ? "" : "s"} not in your cache, not an error: `
+      + result.unmatched.map((u) => `${u.caseNumber} (line ${u.line})`).join(", ")));
+  }
+
+  if (result.parseFailures.length) {
+    parts.push(banner("error", `${result.parseFailures.length} row(s) could not be parsed:`),
+      h("ul", { class: "hint", style: { margin: "6px 0 0 18px" } },
+        result.parseFailures.map((f) => h("li", {}, `Line ${f.line}: ${f.reason} — "${f.raw}"`))));
+  }
+
+  return h("div", {}, parts);
+}
+
+/**
+ * The paste/upload box. Column names are matched by alias -- see
+ * iqs/official.ts's module doc for the one exception (Contributor Score
+ * must match exactly, never by substring, or the import fails loudly).
  */
 function officialImportCard(onImported) {
   const area = h("textarea", {
     class: "input",
     rows: "6",
     style: { fontFamily: "ui-monospace, monospace", fontSize: "12px" },
-    placeholder: "Paste a CSV or a copied table from the IQS Report page — needs a case number column and a score column, any header names.",
+    placeholder: "Paste a CSV, or use Upload — needs a case number column and a Contributor Score column, any header names.",
+  });
+  const fileInput = h("input", {
+    type: "file", accept: ".csv,text/csv", hidden: true,
+    onchange: async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      area.value = await file.text();
+      e.target.value = "";
+    },
   });
   const resultHost = h("div", { style: { marginTop: "10px" } });
+
+  const previewBtn = button("Preview", {
+    small: true,
+    onclick: async () => {
+      const text = area.value.trim();
+      if (!text) { toast("Paste or upload some rows first", "error"); return; }
+      previewBtn.disabled = true;
+      try {
+        const result = await api.previewOfficialImport(text);
+        mount(resultHost, previewSections(result));
+      } catch (err) {
+        toast(err.message || "Preview failed", "error");
+      }
+      previewBtn.disabled = false;
+    },
+  });
+
   const importBtn = button("Import", {
     kind: "primary", small: true,
     onclick: async () => {
       const text = area.value.trim();
-      if (!text) { toast("Paste some rows first", "error"); return; }
+      if (!text) { toast("Paste or upload some rows first", "error"); return; }
       importBtn.disabled = true;
       importBtn.textContent = "Importing…";
       try {
         const result = await api.importOfficialScores(text);
         mount(resultHost,
-          banner(result.unmatched.length || result.warnings.length ? "warn" : "info",
+          banner(result.unmatched.length || result.parseFailures.length ? "warn" : "info",
             `Imported ${result.imported} score${result.imported === 1 ? "" : "s"}.`
-            + (result.unmatched.length ? ` ${result.unmatched.length} case number(s) not in the cache: ${result.unmatched.join(", ")}.` : "")
-            + (result.warnings.length ? ` ${result.warnings.length} row(s) skipped.` : "")),
-          result.warnings.length
-            ? h("ul", { class: "hint", style: { margin: "6px 0 0 18px" } }, result.warnings.map((w) => h("li", {}, w)))
+            + (result.unmatched.length ? ` ${result.unmatched.length} case number(s) not in the cache (not an error): ${result.unmatched.map((u) => u.caseNumber).join(", ")}.` : "")
+            + (result.parseFailures.length ? ` ${result.parseFailures.length} row(s) failed to parse.` : "")),
+          result.parseFailures.length
+            ? h("ul", { class: "hint", style: { margin: "6px 0 0 18px" } },
+                result.parseFailures.map((f) => h("li", {}, `Line ${f.line}: ${f.reason} — "${f.raw}"`)))
             : null);
         if (result.imported) { area.value = ""; onImported(); }
       } catch (err) {
@@ -379,7 +460,9 @@ function officialImportCard(onImported) {
 
   return h("div", { class: "card iqs-card" },
     area,
-    h("div", { style: { marginTop: "8px" } }, importBtn),
+    h("div", { class: "sc-head-inline", style: { marginTop: "8px", gap: "8px" } },
+      h("label", { class: "btn sm" }, "Upload CSV", fileInput),
+      previewBtn, importBtn),
     resultHost);
 }
 

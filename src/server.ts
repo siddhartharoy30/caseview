@@ -69,7 +69,7 @@ import {
   scoreAndStoreCase,
 } from "./iqs/store";
 import { mechanicalRepair, repairNotesFor } from "./iqs/layer1";
-import { importOfficialScores, listOfficialComparisons } from "./iqs/official";
+import { importOfficialScores, previewOfficialImport, listOfficialComparisons } from "./iqs/official";
 import {
   getComparisons,
   getLayer2Stats,
@@ -449,21 +449,36 @@ app.get("/api/iqs/overview", requireAuth, noStore, (req, res) => {
 });
 
 /**
- * Phase 9, SentryAI Tier 3: paste a CSV or table from the IQS Report page.
- * Column names are matched by alias, not one exact format -- see
- * PLAN_V3.md's phase 9 section for why. Never writes into iqs_scores; an
- * official score has no keyword or dimension tree of ours to attach to.
+ * Phase 9, SentryAI Tier 3, rewritten v9 phase 1: a CSV (pasted or uploaded)
+ * or table from the IQS Report page. Column names are matched by alias, but
+ * "Contributor Score" is matched exactly, never by substring, and its
+ * absence is a hard failure -- see iqs/official.ts's module doc for why.
+ * Never writes into iqs_scores; an official score has no keyword or
+ * dimension tree of ours to attach to.
  */
 app.post("/api/iqs/official/import", requireAuth, (req, res) => {
   const text = String(req.body?.text || "");
   if (!text.trim()) return res.status(400).json({ error: "Paste some rows first" });
   try {
     const result = importOfficialScores(text, req.body?.sourceNote ? String(req.body.sourceNote) : undefined);
-    // fatal means the paste could not be read at all (no case/score column
-    // found) -- a real 400, not a "success" with zero imports. A data row
-    // that failed to parse is a warning on an otherwise-understood paste and
-    // stays a 200.
-    if (result.fatal) return res.status(400).json({ error: result.warnings[0] || "Could not read this paste" });
+    // fatal means the paste could not be read at all (no case/contributor-
+    // score column found) -- a real 400, not a "success" with zero imports.
+    // A data row that failed to parse is a parseFailure on an otherwise-
+    // understood paste and stays a 200.
+    if (result.fatal) return res.status(400).json({ error: result.fatalReason || "Could not read this paste" });
+    res.json({ ok: true, ...result });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/** Preview before committing: parsed/matched/unmatched/parse-failed, no writes. */
+app.post("/api/iqs/official/preview", requireAuth, (req, res) => {
+  const text = String(req.body?.text || "");
+  if (!text.trim()) return res.status(400).json({ error: "Paste some rows first" });
+  try {
+    const result = previewOfficialImport(text);
+    if (result.fatal) return res.status(400).json({ error: result.fatalReason || "Could not read this paste" });
     res.json({ ok: true, ...result });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
