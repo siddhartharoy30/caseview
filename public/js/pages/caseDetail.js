@@ -1208,7 +1208,7 @@ export function render(ctx, host, shell) {
 
           draftWww ? h("div", { class: "draft-www-row" },
             wwwPill("What", draftWww.what),
-            wwwPill("Why", draftWww.why),
+            wwwPill("Why", draftWww.why || draftWww.whyWaived),
             wwwPill("When", draftWww.when || draftWww.whenWaived)) : null,
 
           draftViolations.length ? h("div", { class: "draft-viols" }, draftViolations.map((v) =>
@@ -1222,7 +1222,7 @@ export function render(ctx, host, shell) {
       const score = state.draftScore;
       if (!score) return false;
       const draftWww = score.comments.find((cm) => cm.id === "draft-preview");
-      const missingWww = draftWww && (!draftWww.what || !draftWww.why || (!draftWww.when && !draftWww.whenWaived));
+      const missingWww = draftWww && (!draftWww.what || (!draftWww.why && !draftWww.whyWaived) || (!draftWww.when && !draftWww.whenWaived));
       return score.violations.some((v) => v.commentId === "draft-preview") || !!missingWww;
     };
 
@@ -1540,9 +1540,9 @@ export function render(ctx, host, shell) {
                 text: cm.isPublic ? "Public" : "Internal" }),
               cm.source === "email" ? h("span", { class: "chip neutral", text: "Email" }) : null),
             cell(cm.what, false),
-            cell(cm.why, false),
+            cell(cm.why, cm.whyWaived),
             cell(cm.when, cm.whenWaived),
-            h("td", { class: "right mono", text: `${pts(cm.earned)}/3` }),
+            h("td", { class: "right mono", text: `${pts(cm.earned)}/${cm.applicableSignals}` }),
             h("td", { class: "iqs-www-ex" },
               cm.excerpt ? textNodes(cm.excerpt, "", "iqs-ex") : h("span", { class: "dim", text: "—" })))))))));
   }

@@ -124,6 +124,10 @@ export interface CommentWww {
   why: boolean;
   when: boolean;
   whenWaived: boolean;
+  /** v9 phase 3.3: true when this comment is a pure status update -- no action taken, no request of the customer -- so "Why" isn't expected. */
+  whyWaived: boolean;
+  /** 3 normally, 2 when whyWaived -- how many of the 3 WWW points this specific comment could earn. */
+  applicableSignals: number;
   earned: number;
   excerpt: string;
 }
@@ -503,6 +507,18 @@ const ROOT_CAUSE_DEFINITE =
 
 const HEDGE = /\b(?:appears?\s+to\s+have\s+been|appears?\s+to\s+be|likely\s+(?:caused|due)|probably|might\s+have|may\s+have\s+been|possibly|we think|seems to)\b/i;
 
+/**
+ * v9 phase 3.3, grounded in the real IQS program's own v1.5.2 changelog
+ * (Sep 11 2026 -- no separate "Scoring Guide" document exists locally or
+ * in Confluence for this, so the weekly program-update email was the
+ * authoritative source): a comment that asks the customer to do
+ * something or requests information is scored on WWW like any other --
+ * only a comment with neither an action taken (WHAT_DONE) nor a request
+ * like this is a pure status update, per `scoreWww()` below.
+ */
+const REQUESTS_OF_CUSTOMER =
+  /\b(?:could you|can you|would you|please\s+(?:provide|share|confirm|send|run|upload|check|verify|try|let us know)|we(?:'d| would)\s+like you to|need you to|requesting\b)\b/i;
+
 const VALIDATION_QUANTIFIED =
   /\b(?:\d{1,4}\s+consecutive|\d{1,4}\s+successful|\d{1,4}\s+(?:jobs?|runs?|backups?|snapshots?|restores?)\s+(?:completed|succeeded|passed)|success rate of\s+\d|completed\s+(?:in|at)\s+\d|\d{1,3}%\s+(?:success|complete))\b/i;
 
@@ -697,6 +713,20 @@ function scoreWww(d: Dimension, mine: MyComment[], keyword: Keyword): { dim: Dim
     // the reopen date replace the follow-up commitment, so requiring a "when"
     // would penalise following the rubric.
     const whenWaived = keyword === "CLOSURE" && c.id === mine[mine.length - 1]?.id;
+    // v9 phase 3.3 (1.5.2): a pure status/standing-by comment -- no action
+    // taken, no request of the customer -- does not need a "Why". A true
+    // exclusion (the signal drops from this comment's applicable count),
+    // not an auto-credit like whenWaived above: crediting a waived signal
+    // outright, the way whenWaived does, would reproduce hypothesis #1's
+    // exact bug in the fix meant for #3. But a comment that gives Why
+    // anyway, despite not being required to, must still get credit for
+    // it -- excluding the signal unconditionally (an earlier version of
+    // this fix did exactly that) silently threw away real credit and
+    // made the backtest's MAE *worse*, caught by re-running it after this
+    // change, not assumed correct on the first try.
+    const whyEligibleForWaiver = !what && !has(c.text, REQUESTS_OF_CUSTOMER);
+    const whyWaived = whyEligibleForWaiver && !why;
+    const applicableSignals = whyWaived ? 2 : 3;
     const points = (what ? 1 : 0) + (why ? 1 : 0) + (when || whenWaived ? 1 : 0);
     return {
       id: c.id,
@@ -707,6 +737,8 @@ function scoreWww(d: Dimension, mine: MyComment[], keyword: Keyword): { dim: Dim
       why,
       when,
       whenWaived: whenWaived && !when,
+      whyWaived,
+      applicableSignals,
       earned: points,
       excerpt: excerpt(c.text, 220),
     };
@@ -716,15 +748,27 @@ function scoreWww(d: Dimension, mine: MyComment[], keyword: Keyword): { dim: Dim
     ? `${perComment.length} comment${perComment.length === 1 ? "" : "s"} of mine, averaged`
     : "no comment of mine to read";
 
-  const mean = perComment.length
-    ? perComment.reduce((sum, c) => sum + c.earned, 0) / (perComment.length * d.max)
+  // v9 phase 3.3: divide by the sum of each comment's own applicable-signal
+  // count, not perComment.length * d.max -- a whyWaived comment can only
+  // ever earn 2 of the 3 points, so the mean must reflect that instead of
+  // silently treating the waived Why as a failure.
+  const totalApplicable = perComment.reduce((sum, c) => sum + c.applicableSignals, 0);
+  const mean = totalApplicable
+    ? perComment.reduce((sum, c) => sum + c.earned, 0) / totalApplicable
     : 0;
 
   const count = (fn: (c: CommentWww) => boolean) => perComment.filter(fn).length;
+  const whyApplicable = perComment.filter((c) => !c.whyWaived);
   const n = perComment.length || 1;
   const signals = [
     signal(d.signals[0], count((c) => c.what) / n, null, `${count((c) => c.what)} of ${perComment.length} comments name an action taken`),
-    signal(d.signals[1], count((c) => c.why) / n, null, `${count((c) => c.why)} of ${perComment.length} give the reasoning`),
+    signal(
+      d.signals[1],
+      whyApplicable.length ? whyApplicable.filter((c) => c.why).length / whyApplicable.length : 1,
+      null,
+      `${whyApplicable.filter((c) => c.why).length} of ${whyApplicable.length} applicable comments give the reasoning` +
+        (perComment.length - whyApplicable.length ? `, ${perComment.length - whyApplicable.length} waived (pure status update)` : ""),
+    ),
     signal(
       d.signals[2],
       count((c) => c.when || c.whenWaived) / n,
