@@ -157,6 +157,17 @@ export interface Dimension {
   signals: string[];
   scope: DimensionScope;
   appliesTo: Keyword[];
+  /**
+   * v9 phase 3.4 (1.5.1): the alternate 4 signals `clearResolution` is
+   * scored against on a "noresponse" (3-strikes / ghosted) closure --
+   * the customer stopped responding, so the standard signals (a customer
+   * confirmation the case couldn't get) don't fit. Kept here, alongside
+   * `signals`, rather than hardcoded in layer1.ts, so both scorers (and
+   * this dimension's own label set) read from one place -- the same
+   * "rubric is not restated" discipline every other dimension already
+   * follows.
+   */
+  noresponseSignals?: string[];
 }
 
 export const DIMENSIONS: Dimension[] = [
@@ -224,6 +235,16 @@ export const DIMENSIONS: Dimension[] = [
       "numbered resolution steps naming the artifacts touched",
       "quantified validation evidence",
       "reopen window given as an absolute date",
+    ],
+    // v9 phase 3.4 (1.5.1): a customer who stopped responding after 3+
+    // unanswered substantive follow-ups can't give the confirmation the
+    // standard signals above measure -- no penalty for a confirmation
+    // that structurally couldn't be obtained.
+    noresponseSignals: [
+      "states the case is being archived/closed",
+      "acknowledges the repeated unanswered attempts",
+      "recaps the work done and any leftover actions",
+      "invites the customer to reopen",
     ],
     scope: "closure",
     appliesTo: ["CLOSURE"],

@@ -43,7 +43,9 @@ import {
   overallScore,
 } from "./rubric";
 import type { Band, Keyword } from "./rubric";
-import { toPlainText, ownText, detectKeywordFromComments } from "./layer1";
+import { toPlainText, ownText } from "./layer1";
+import { detectKeyword } from "../nextAction";
+import type { ClosurePath } from "../nextAction";
 import type { CaseFacts, CommentFacts } from "./layer1";
 
 /**
@@ -231,13 +233,20 @@ export function scorableComments(facts: CaseFacts): ScorableComment[] {
  * the same score, which is the whole point of hashing content rather than
  * expiring on a clock.
  */
-export function contentHash(facts: CaseFacts, keyword: Keyword, model: string): string {
+export function contentHash(facts: CaseFacts, keyword: Keyword, model: string, path: ClosurePath = "confirmed"): string {
   const h = createHash("sha256");
   h.update("qview-iqs-l2-v1\n");
   h.update(RUBRIC_VERSION + "\n");
   h.update(PROMPT_VERSION + "\n");
   h.update(model + "\n");
   h.update(keyword + "\n");
+  // v9 phase 3.4: a ghosted (noresponse) closure is scored on different
+  // Clear Resolution signals than a confirmed one -- without this, a case
+  // whose customer thread crosses the 3-unanswered-follow-ups threshold
+  // (changing which prompt is sent) but whose own comment text is
+  // unchanged would hash identically to its pre-ghosted self and wrongly
+  // serve a stale cached score.
+  h.update(path + "\n");
   for (const c of scorableComments(facts)) {
     // The separators are what stop two different comment splits hashing alike.
     h.update(c.id + "\t" + (c.isPublic ? "public" : "internal") + "\n");
@@ -249,7 +258,12 @@ export function contentHash(facts: CaseFacts, keyword: Keyword, model: string): 
 /* -------------------------------------------------------------- the prompt */
 
 const SCOPE_PROSE: Record<string, string> = {
-  first3: "judge the first three comments on the case, where this should be established",
+  // v9 phase 3: "the first three comments on the case" read as the case's
+  // first three thread entries by any author -- Layer 1 had exactly this
+  // bug (openingWindow(), fixed in 3.2). Layer 2 never had the bug (it
+  // only ever sees isMine comments -- there's no "any author" index to
+  // get wrong), but the wording should say what's actually meant either way.
+  first3: "judge the engineer's first three comments on the case, where this should be established",
   everyOwnerComment: "judge each of the engineer's comments and average",
   case: "judge the case as a whole",
   closure: "judge the closing comment",
@@ -264,17 +278,27 @@ function pct(n: number): number {
  *
  * Every number and every signal string below is read out of ./rubric, so the
  * prompt cannot drift from what Layer 1 applies (constraint 10).
+ *
+ * v9 phase 3.4: `path` selects clearResolution's alternate signal list on a
+ * ghosted (noresponse) closure, the same distinction Layer 1's
+ * scoreClearResolution() makes -- so a disagreement between the two layers
+ * reflects genuine judgment, not two different rubrics being applied.
  */
-export function buildSystemPrompt(keyword: Keyword): string {
+export function buildSystemPrompt(keyword: Keyword, path: ClosurePath = "confirmed"): string {
   const dims = applicableDimensions(keyword);
 
-  const dimBlocks = dims.map((d) =>
-    [
+  const dimBlocks = dims.map((d) => {
+    const signals = d.id === "clearResolution" && path === "noresponse" && d.noresponseSignals ? d.noresponseSignals : d.signals;
+    return [
       "  " + d.id + " (" + d.label + "), worth " + d.max + " points. Scope: " + SCOPE_PROSE[d.scope] + ".",
-      "    Signals the rubric asks for:",
-      d.signals.map((s) => "      - " + s).join("\n"),
-    ].join("\n"),
-  );
+      d.id === "clearResolution" && path === "noresponse"
+        ? "    This case closed with the customer unresponsive after 3+ substantive follow-ups (a \"ghosted\" case)."
+        + " Score it on these signals instead of the usual ones -- there is no penalty for a customer confirmation"
+        + " that structurally could not be obtained:"
+        : "    Signals the rubric asks for:",
+      signals.map((s) => "      - " + s).join("\n"),
+    ].join("\n");
+  });
 
   return [
     "You are auditing a Rubrik support engineer's own comments on a Salesforce case",
@@ -528,9 +552,15 @@ export async function scoreWithModel(
     return { ok: false, reason: "no-content", detail: "This case has no comments of mine to score." };
   }
 
-  const keyword = keywordOverride || detectKeywordFromComments(facts.status, facts.comments);
+  // v9 phase 3.4: detectKeyword() directly, not a wrapper that discards
+  // .path -- the model needs to know a ghosted (3-strikes/noresponse)
+  // closure is scored on different Clear Resolution signals, the same
+  // thing Layer 1 and claude.ts's drafting template already know.
+  const detection = detectKeyword(facts.status, facts.comments);
+  const keyword = keywordOverride || detection.keyword;
+  const path: ClosurePath = keywordOverride ? "confirmed" : detection.path || "confirmed";
   const model = config.iqs.layer2.model;
-  const hash = contentHash(facts, keyword, model);
+  const hash = contentHash(facts, keyword, model, path);
 
   const t0 = Date.now();
   try {
@@ -538,7 +568,7 @@ export async function scoreWithModel(
       model,
       max_tokens: 2048,
       temperature: 0,
-      system: buildSystemPrompt(keyword),
+      system: buildSystemPrompt(keyword, path),
       messages: [{ role: "user", content: buildUserPrompt(facts, comments) }],
     });
 

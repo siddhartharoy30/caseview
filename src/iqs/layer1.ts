@@ -33,6 +33,7 @@ import {
 import { extractArtifacts } from "../artifacts";
 import { parseCommitments } from "../commitments";
 import { detectKeyword } from "../nextAction";
+import type { ClosurePath } from "../nextAction";
 
 /* ----------------------------------------------------------------- inputs */
 
@@ -523,6 +524,14 @@ const VALIDATION_QUANTIFIED =
   /\b(?:\d{1,4}\s+consecutive|\d{1,4}\s+successful|\d{1,4}\s+(?:jobs?|runs?|backups?|snapshots?|restores?)\s+(?:completed|succeeded|passed)|success rate of\s+\d|completed\s+(?:in|at)\s+\d|\d{1,3}%\s+(?:success|complete))\b/i;
 
 const REOPEN_WINDOW = /\b(?:re-?open(?:ed|ing)?)\b/i;
+
+/** v9 phase 3.4 (1.5.1): the 3 signals unique to a ghosted-case closure (the 4th, reopen, reuses REOPEN_WINDOW/ABSOLUTE_DATE above). */
+const ARCHIVING_STATEMENT =
+  /\b(?:archiv(?:e|ing|ed)\s+this|closing\s+this\s+(?:case|out)|will\s+close\s+this|marking\s+this\s+(?:case\s+)?(?:as\s+)?closed|closing\s+(?:out\s+)?(?:the\s+)?case)\b/i;
+const REPEATED_ATTEMPTS_ACK =
+  /\b(?:(?:multiple|several|repeated|three|3)\s+(?:attempts?|follow-?ups?|times?)|have(?:n'?t| not)\s+heard\s+(?:back|from you)|no\s+response\s+(?:from you|received)|unable\s+to\s+reach\s+you|after\s+(?:multiple|several|repeated)\s+attempts)\b/i;
+const WORK_RECAP =
+  /\b(?:to\s+recap|in\s+summary|to\s+summarize|here'?s\s+(?:a|the)\s+(?:summary|recap)|for\s+your\s+records|summary\s+of\s+(?:the\s+)?work)\b/i;
 const ABSOLUTE_DATE =
   /\b(?:20\d\d-\d\d-\d\d|\d{1,2}\/\d{1,2}\/\d{2,4}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:,\s*20\d\d)?)\b/;
 
@@ -841,7 +850,51 @@ function scoreReliability(d: Dimension, facts: CaseFacts, mine: MyComment[]): Di
   return dim;
 }
 
-function scoreClearResolution(d: Dimension, mine: MyComment[]): DimensionResult {
+/**
+ * v9 phase 3.4 (1.5.1): a ghosted-case closure -- 3+ unanswered
+ * substantive follow-ups -- can't give a customer confirmation that
+ * structurally couldn't be obtained, so it's scored on 4 different
+ * signals (`d.noresponseSignals`, rubric.ts) instead of the standard 4.
+ * The reopen-window signal (s4) is the one exception: "invites the
+ * customer to reopen" is the same real-world thing the standard path's
+ * "reopen window given as an absolute date" already checks, so it reuses
+ * that logic verbatim rather than a near-duplicate regex.
+ */
+function scoreClearResolutionNoresponse(d: Dimension, mine: MyComment[]): DimensionResult {
+  const closing = [...mine].reverse().find((c) => c.isPublic) || mine[mine.length - 1];
+  const text = closing ? closing.text : "";
+  const basis = closing ? "my closing comment (ghosted -- 3+ unanswered attempts)" : "no closing comment of mine to read";
+  const labels = d.noresponseSignals || d.signals;
+
+  const archiving = ARCHIVING_STATEMENT.exec(text);
+  const s1 = archiving
+    ? signal(labels[0], 1, sentenceAround(text, archiving.index, archiving[0].length))
+    : signal(labels[0], 0, null, "no statement that the case is being archived/closed");
+
+  const ack = REPEATED_ATTEMPTS_ACK.exec(text);
+  const s2 = ack
+    ? signal(labels[1], 1, sentenceAround(text, ack.index, ack[0].length))
+    : signal(labels[1], 0, null, "no acknowledgment of the repeated unanswered attempts");
+
+  const numbered = text.match(NUMBERED_STEP) || [];
+  const recap = WORK_RECAP.exec(text);
+  const s3 = recap || numbered.length
+    ? signal(labels[2], 1, recap ? sentenceAround(text, recap.index, recap[0].length) : excerpt(numbered.join(" "), 180))
+    : signal(labels[2], 0, null, "no recap of the work done or leftover actions");
+
+  const reopen = REOPEN_WINDOW.exec(text);
+  const s4 = reopen && ABSOLUTE_DATE.test(text)
+    ? signal(labels[3], 1, sentenceAround(text, reopen.index, reopen[0].length))
+    : reopen
+    ? signal(labels[3], 0.5, sentenceAround(text, reopen.index, reopen[0].length), "a reopen window is offered without an absolute date")
+    : signal(labels[3], 0, null, "no reopen window");
+
+  return assemble(d, basis, [s1, s2, s3, s4]);
+}
+
+function scoreClearResolution(d: Dimension, mine: MyComment[], path: ClosurePath): DimensionResult {
+  if (path === "noresponse") return scoreClearResolutionNoresponse(d, mine);
+
   const closing = [...mine].reverse().find((c) => c.isPublic) || mine[mine.length - 1];
   const text = closing ? closing.text : "";
   const basis = closing ? "my closing comment" : "no closing comment of mine to read";
@@ -907,7 +960,17 @@ export function scoreCase(facts: CaseFacts, keywordOverride?: Keyword): Layer1Sc
     .map((c) => ({ ...c, text: ownText(c.body) }))
     .filter((c) => c.text.length > 0);
 
-  const keyword = keywordOverride || detectKeywordFromComments(facts.status, all);
+  // v9 phase 3.4: calls detectKeyword() directly (not the
+  // detectKeywordFromComments() wrapper) so the "noresponse" (3-strikes /
+  // ghosted) closure path -- already derived here, already driving
+  // claude.ts's drafting template -- reaches scoreClearResolution() too.
+  // An explicit keywordOverride (the draft-preview path) means "score as
+  // if this text were posted as a standard closure" -- it defaults to
+  // "confirmed" rather than inheriting whatever the case's real thread
+  // shape happens to be.
+  const detection = detectKeyword(facts.status, all);
+  const keyword = keywordOverride || detection.keyword;
+  const path: ClosurePath = keywordOverride ? "confirmed" : detection.path || "confirmed";
   const applicable = APPLICABLE_DIMENSIONS[keyword];
   const window = openingWindow(all, mine);
   const notes: string[] = [];
@@ -923,7 +986,7 @@ export function scoreCase(facts: CaseFacts, keywordOverride?: Keyword): Layer1Sc
       dimensions.push(dim);
       wwwComments = perComment;
     } else if (d.id === "reliability") dimensions.push(scoreReliability(d, facts, mine));
-    else if (d.id === "clearResolution") dimensions.push(scoreClearResolution(d, mine));
+    else if (d.id === "clearResolution") dimensions.push(scoreClearResolution(d, mine, path));
   }
 
   // Banned phrases are a customer-facing language rule, so internal notes are

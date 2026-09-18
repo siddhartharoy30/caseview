@@ -37,7 +37,8 @@ import { log } from "../log";
 import { RUBRIC_VERSION } from "./rubric";
 import type { Band, Keyword } from "./rubric";
 import { loadCaseFacts } from "./store";
-import { detectKeywordFromComments } from "./layer1";
+import { detectKeyword } from "../nextAction";
+import type { ClosurePath } from "../nextAction";
 import {
   LAYER as LAYER2,
   PROMPT_VERSION,
@@ -249,7 +250,13 @@ export function getStoredByNumber(caseNumber: string): Layer2Stored {
   if (!facts) return { score, stale: false, keyword: score.keyword, scorable: 0 };
 
   const keyword = score.keyword;
-  const want = contentHash(facts, keyword, CFG().model);
+  // v9 phase 3.4: recomputed fresh against the case's current thread, not
+  // read from the stored score -- if a case has crossed the 3-unanswered-
+  // follow-ups threshold since this score was written, that alone must
+  // show as stale even though `keyword` itself (still CLOSURE) hasn't
+  // changed.
+  const path = detectKeyword(facts.status, facts.comments).path || "confirmed";
+  const want = contentHash(facts, keyword, CFG().model, path);
   return {
     score,
     stale: r.content_hash !== want,
@@ -334,8 +341,10 @@ export async function scoreLayer2(
     return { ok: false, reason: "no-content", detail };
   }
 
-  const keyword = opts.keyword || detectKeywordFromComments(facts.status, facts.comments);
-  const hash = contentHash(facts, keyword, model);
+  const detection = detectKeyword(facts.status, facts.comments);
+  const keyword = opts.keyword || detection.keyword;
+  const path: ClosurePath = opts.keyword ? "confirmed" : detection.path || "confirmed";
+  const hash = contentHash(facts, keyword, model, path);
 
   /* --- cache ---------------------------------------------------------- */
 
