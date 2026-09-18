@@ -255,7 +255,7 @@ export function getStoredByNumber(caseNumber: string): Layer2Stored {
   // follow-ups threshold since this score was written, that alone must
   // show as stale even though `keyword` itself (still CLOSURE) hasn't
   // changed.
-  const path = detectKeyword(facts.status, facts.comments).path || "confirmed";
+  const path = detectKeyword(facts.status, facts.isClosed, facts.comments).path || "confirmed";
   const want = contentHash(facts, keyword, CFG().model, path);
   return {
     score,
@@ -341,7 +341,7 @@ export async function scoreLayer2(
     return { ok: false, reason: "no-content", detail };
   }
 
-  const detection = detectKeyword(facts.status, facts.comments);
+  const detection = detectKeyword(facts.status, facts.isClosed, facts.comments);
   const keyword = opts.keyword || detection.keyword;
   const path: ClosurePath = opts.keyword ? "confirmed" : detection.path || "confirmed";
   const hash = contentHash(facts, keyword, model, path);

@@ -161,6 +161,7 @@ function composeBody(c: CaseRow, triggerStatus: string): string {
   const na = nextActionForKeyword({
     keyword,
     status: c.status,
+    isClosed: !!c.is_closed,
     custQuietDays: c.last_customer_update
       ? (Date.now() - new Date(c.last_customer_update).getTime()) / 86400000
       : null,

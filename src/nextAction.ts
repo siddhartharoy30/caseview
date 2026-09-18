@@ -38,10 +38,27 @@ export interface KeywordDetection {
   trailingMine: number;
 }
 
-/** Status text that, on its own, settles the case regardless of the thread. */
-function isTerminalStatus(status: string | null | undefined): boolean {
-  const s = (status || "").toLowerCase();
-  return s.includes("pending closure") || s.includes("resolved") || s.includes("closed");
+/**
+ * Whether the case is genuinely settled, regardless of the thread.
+ *
+ * v9: `isClosed` (Salesforce's own IsClosed flag, ground truth -- it's what
+ * the Status picklist's own "Closed" checkbox in Salesforce setup means)
+ * is the real signal, not a substring match against the status text. The
+ * old version -- `status.includes("resolved")` -- treated a case still in
+ * an interim, not-yet-closed state (confirmed live: "Resolved - Pending
+ * Customer", `IsClosed = false`) as a definitive closure just as readily
+ * as one that actually is one, so the comment that happened to be last in
+ * the thread (routinely a holding message, "marking this resolved-pending
+ * for now, case stays open on our side") got judged against the full
+ * Clear Resolution rubric instead of being read as what it is. `isClosed`
+ * alone isn't quite enough either: "pending closure" is a real status
+ * where Salesforce's flag can still read false for a case that's
+ * functionally done and ready to score as a closure, so it stays as the
+ * one string-based carve-out on top of the ground truth.
+ */
+function isTerminalStatus(status: string | null | undefined, isClosed: boolean): boolean {
+  if (isClosed) return true;
+  return (status || "").toLowerCase().includes("pending closure");
 }
 
 /**
@@ -55,8 +72,8 @@ function isTerminalStatus(status: string | null | undefined): boolean {
  * does not move the conversation with the customer forward, so it can
  * neither reset nor extend the trailing streak.
  */
-export function detectKeyword(status: string | null | undefined, comments: CommentSignal[]): KeywordDetection {
-  if (isTerminalStatus(status)) {
+export function detectKeyword(status: string | null | undefined, isClosed: boolean, comments: CommentSignal[]): KeywordDetection {
+  if (isTerminalStatus(status, isClosed)) {
     return { keyword: "CLOSURE", path: "confirmed", trailingMine: 0 };
   }
 
@@ -102,6 +119,8 @@ const LABEL_BY_KIND: Record<NextActionKind, string> = {
 export interface NextActionFacts {
   keyword: Keyword;
   status: string | null;
+  /** v9: ground truth for isTerminalStatus(), replacing a status-string guess. */
+  isClosed: boolean;
   custQuietDays: number | null;
   nccOverdue: boolean;
   isEscalated: boolean;
@@ -119,7 +138,7 @@ export function nextActionForKeyword(facts: NextActionFacts): NextAction {
 }
 
 function reasonFor(facts: NextActionFacts): string {
-  const { keyword, status, custQuietDays, nccOverdue, isEscalated } = facts;
+  const { keyword, status, isClosed, custQuietDays, nccOverdue, isEscalated } = facts;
   const quiet = custQuietDays !== null ? Math.floor(custQuietDays) : null;
 
   switch (keyword) {
@@ -136,7 +155,7 @@ function reasonFor(facts: NextActionFacts): string {
     case "CLOSURE":
       // Terminal status settled it outright; a non-terminal status here can
       // only mean the 3-strikes no-response path fired instead.
-      if (!isTerminalStatus(status)) {
+      if (!isTerminalStatus(status, isClosed)) {
         return "No response after 2 follow-ups — close per non-response process";
       }
       return quiet !== null && quiet >= 4

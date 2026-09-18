@@ -557,7 +557,7 @@ export async function scoreWithModel(
   // .path -- the model needs to know a ghosted (3-strikes/noresponse)
   // closure is scored on different Clear Resolution signals, the same
   // thing Layer 1 and claude.ts's drafting template already know.
-  const detection = detectKeyword(facts.status, facts.comments);
+  const detection = detectKeyword(facts.status, facts.isClosed, facts.comments);
   const keyword = keywordOverride || detection.keyword;
   const path: ClosurePath = keywordOverride ? "confirmed" : detection.path || "confirmed";
   const model = config.iqs.layer2.model;

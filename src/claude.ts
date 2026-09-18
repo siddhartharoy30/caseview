@@ -86,7 +86,7 @@ export async function draftSuggestedReply(c: SalesforceCase, opts: DraftOptions 
   const comments = await getPublicCaseComments(c.Id);
   const detection: KeywordDetection = opts.keywordOverride
     ? { keyword: opts.keywordOverride, path: "confirmed", attempt: 1, trailingMine: 0 }
-    : detectKeyword(c.Status, asCommentSignals(c, comments));
+    : detectKeyword(c.Status, c.IsClosed, asCommentSignals(c, comments));
   const ownerName = c.Owner?.Name || "the case owner";
   const ownerTitle = c.Owner?.Title || "Support Engineer";
 

@@ -58,6 +58,7 @@ export function deriveNextAction(c: SalesforceCase, keyword: Keyword) {
   return nextActionForKeyword({
     keyword,
     status: c.Status,
+    isClosed: !!c.IsClosed,
     custQuietDays: daysSince(c.Last_Customer_Update__c),
     nccOverdue: c.NCC_date__c ? new Date(c.NCC_date__c).getTime() < Date.now() : false,
     isEscalated: !!c.IsEscalated,

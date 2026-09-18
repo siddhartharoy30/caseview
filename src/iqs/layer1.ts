@@ -361,24 +361,6 @@ function has(text: string, re: RegExp): boolean {
   return rx.test(text);
 }
 
-/* ---------------------------------------------------------------- keyword */
-
-/**
- * Which response type the case's current posture calls for, decided from
- * cached rows.
- *
- * Phase 4 moved the actual derivation to ../nextAction, which drafting
- * (claude.ts) and the queue's Next Action column also call, so all three can
- * no longer disagree. This stays as the entry point cached rows go through
- * because CommentFacts is already exactly the shape that derivation needs.
- */
-export function detectKeywordFromComments(
-  status: string | null,
-  comments: CommentFacts[],
-): Keyword {
-  return detectKeyword(status, comments).keyword;
-}
-
 /* --------------------------------------------------------- banned phrases */
 
 interface Span {
@@ -993,7 +975,7 @@ export function scoreCase(facts: CaseFacts, keywordOverride?: Keyword): Layer1Sc
   // if this text were posted as a standard closure" -- it defaults to
   // "confirmed" rather than inheriting whatever the case's real thread
   // shape happens to be.
-  const detection = detectKeyword(facts.status, all);
+  const detection = detectKeyword(facts.status, facts.isClosed, all);
   const keyword = keywordOverride || detection.keyword;
   const path: ClosurePath = keywordOverride ? "confirmed" : detection.path || "confirmed";
   const applicable = APPLICABLE_DIMENSIONS[keyword];
