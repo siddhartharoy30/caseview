@@ -478,8 +478,14 @@ const WHAT_DONE =
 const WHY_REASON =
   /\b(?:because|since\s+the|which\s+(?:indicates|confirms|means|points to|explains)|this\s+(?:means|indicates|suggests|confirms|explains|points to)|in order to|so that|to\s+(?:determine|confirm|isolate|rule out|validate|identify|establish|narrow)|the reason|due to|as a result|root cause)\b/i;
 
+// v9 phase 3: confirmed via the backtest's worst-10 breakdown that this
+// under-matched real, definitive closure language -- "were confirmed to
+// be" (plural, the singular-only original missed it), "the root cause we
+// isolated ... carries forward", and "I have identified [finding] that
+// explains why" all read as definitive to a human but matched none of the
+// original six fixed phrasings.
 const ROOT_CAUSE_DEFINITE =
-  /\b(?:root cause\s+(?:was|is)\b|was confirmed to be\b|the cause\s+(?:was|is)\b|caused by\b|traced to\b|resulted from\b|stemmed from\b)/i;
+  /\b(?:root cause\s+(?:was|is|has been)\b|root cause[^\n]{0,40}\bcarries forward\b|(?:was|were|is|are)\s+confirmed to be\b|the cause\s+(?:was|is)\b|caused by\b|traced to\b|resulted from\b|stemmed from\b|identified[^\n]{0,100}?\b(?:that|which)\s+(?:explains?|confirms?|caused|means)\b)/i;
 
 const HEDGE = /\b(?:appears?\s+to\s+have\s+been|appears?\s+to\s+be|likely\s+(?:caused|due)|probably|might\s+have|may\s+have\s+been|possibly|we think|seems to)\b/i;
 
