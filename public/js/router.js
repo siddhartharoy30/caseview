@@ -150,7 +150,7 @@ let onQueryOnly = null;
  * pattern and params, different query string). Remounting never happens for
  * this case regardless of whether a hook is registered — a page whose own
  * event handlers already repaint themselves (commitments.js, triage.js,
- * patterns.js, caseDetail.js) needs no hook at all. Pages whose filter/sort
+ * caseDetail.js) needs no hook at all. Pages whose filter/sort
  * paths depend on being told about the change (queue.js, search.js — the
  * latter also for browser back/forward through its own search history)
  * register one to react in place.

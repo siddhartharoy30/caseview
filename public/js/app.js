@@ -29,11 +29,14 @@ const ICONS = {
   metrics:     ["M5 20V10", "M12 20V4", "M19 20v-7"],
   iqs:         ["M4 17a8 8 0 0 1 16 0", "M12 17l4.2-4.6", "circle:12,17,1.3"],
   search:      ["circle:11,11,7", "M20 20l-3.5-3.5"],
-  patterns:    ["circle:6,7,2.4", "circle:17,7,2.4", "circle:11.5,17,2.4", "M8.1,8.4 L10.2,14.8", "M15,8.6 L12.8,14.8"],
   phone:       ["M6.5 3h3l1.5 4-2 1.5a11 11 0 005 5l1.5-2 4 1.5v3a2 2 0 01-2.2 2A17 17 0 014.5 5.2 2 2 0 016.5 3z"],
   settings:    ["circle:12,12,3", "M12 3v2.2M12 18.8V21M4.2 7.5l1.9 1.1M17.9 15.4l1.9 1.1M4.2 16.5l1.9-1.1M17.9 8.6l1.9-1.1"],
 };
 
+// v9 phase 4: Patterns is gone (page, route, query, nav -- confirmed zero
+// other callers of queries.ts's patterns()). Search keeps its route and
+// page (the topbar box and `/` shortcut still need them) but drops its
+// sidebar entry and `g s` chord -- see GOTO and SHORTCUTS below.
 const NAV = [
   { section: "Work" },
   { id: "queue",       label: "Queue",       path: "/",            key: "q", badge: "queue" },
@@ -45,8 +48,6 @@ const NAV = [
   { section: "Insight" },
   { id: "metrics",     label: "Scorecard",   path: "/metrics",     key: "m" },
   { id: "iqs",         label: "Quality",     path: "/iqs",         key: "i" },
-  { id: "search",      label: "Search",      path: "/search",      key: "s" },
-  { id: "patterns",    label: "Patterns",    path: "/patterns" },
   { section: "System" },
   { id: "settings",    label: "Settings",    path: "/settings" },
 ];
@@ -61,7 +62,6 @@ const PAGES = {
   triage:      () => import("./pages/triage.js"),
   escalations: () => import("./pages/escalations.js"),
   search:      () => import("./pages/search.js"),
-  patterns:    () => import("./pages/patterns.js"),
   settings:    () => import("./pages/settings.js"),
   phone:       () => import("./pages/phone.js"),
 };
@@ -510,8 +510,9 @@ function registerRoutes() {
   route("/iqs", page(PAGES.iqs));
   route("/triage", page(PAGES.triage));
   route("/escalations", page(PAGES.escalations));
+  // Search has no sidebar entry (v9 phase 4) but the route stays -- the
+  // topbar search box and the `/` focus shortcut both depend on it.
   route("/search", page(PAGES.search));
-  route("/patterns", page(PAGES.patterns));
   route("/settings", page(PAGES.settings));
   route("/phone", page(PAGES.phone));
 
@@ -534,10 +535,17 @@ function registerRoutes() {
   });
 }
 
+// v9 phase 4: routes that have a page but no sidebar entry (currently just
+// Search) aren't in NAV, so they need a small fallback table here instead
+// of losing their document title.
+const ROUTE_TITLES = { "/search": "Search" };
+
 function titleFor(ctx) {
   if (ctx.path.startsWith("/case/")) return `${ctx.params.caseNumber} · QView`;
   const hit = NAV.find((n) => n.path && n.path === ctx.path);
-  return hit ? `${hit.label} · QView` : "QView";
+  if (hit) return `${hit.label} · QView`;
+  const fallback = ROUTE_TITLES[ctx.path];
+  return fallback ? `${fallback} · QView` : "QView";
 }
 
 function rerender() { resolve(); }
@@ -559,7 +567,10 @@ export const shell = {
 
 /* -------------------------------------------------------------- keyboard */
 
-const GOTO = { q: "/", c: "/commitments", m: "/metrics", t: "/triage", e: "/escalations", s: "/search", p: "/patterns", g: "/settings" };
+// v9 phase 4: `s`/`p` (Search/Patterns) dropped along with their sidebar
+// entries and SHORTCUTS rows below. Search keeps its route (see
+// registerRoutes()); the top-bar box and `/` are how it's actually reached.
+const GOTO = { q: "/", c: "/commitments", m: "/metrics", t: "/triage", e: "/escalations", g: "/settings" };
 
 function isTyping(e) {
   const t = e.target;
@@ -619,8 +630,6 @@ const SHORTCUTS = [
     ["g then c", "Commitments"],
     ["g then e", "Escalations"],
     ["g then m", "Scorecard"],
-    ["g then s", "Search"],
-    ["g then p", "Patterns"],
     ["g then g", "Settings"],
   ]],
   ["Global", [

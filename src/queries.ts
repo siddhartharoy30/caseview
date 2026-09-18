@@ -803,60 +803,6 @@ function ftsQuery(q: string): string {
   return [...phrases, ...terms].join(" AND ") || `"${q.replace(/"/g, "")}"`;
 }
 
-/* ---------------------------------------------------------------- patterns */
-
-/** Clusters worth noticing: repeated error signatures, product areas, accounts. */
-export function patterns() {
-  const bySignature = db
-    .prepare(
-      `SELECT error_signature AS key, COUNT(*) AS count,
-              SUM(CASE WHEN is_closed = 0 AND owned = 1 THEN 1 ELSE 0 END) AS open_count
-       FROM cases WHERE error_signature IS NOT NULL
-       GROUP BY error_signature HAVING COUNT(*) > 1
-       ORDER BY count DESC, key LIMIT 50`,
-    )
-    .all() as Array<{ key: string; count: number; open_count: number }>;
-
-  const byArea = db
-    .prepare(
-      `SELECT COALESCE(product_area, 'Unclassified') AS key, COUNT(*) AS count,
-              SUM(CASE WHEN is_closed = 0 AND owned = 1 THEN 1 ELSE 0 END) AS open_count
-       FROM cases GROUP BY key ORDER BY count DESC`,
-    )
-    .all() as Array<{ key: string; count: number; open_count: number }>;
-
-  const byAccount = db
-    .prepare(
-      `SELECT account AS key, COUNT(*) AS count,
-              SUM(CASE WHEN is_closed = 0 AND owned = 1 THEN 1 ELSE 0 END) AS open_count
-       FROM cases WHERE account IS NOT NULL
-       GROUP BY account HAVING COUNT(*) > 1
-       ORDER BY count DESC, key LIMIT 50`,
-    )
-    .all() as Array<{ key: string; count: number; open_count: number }>;
-
-  const cases = db.prepare(
-    `SELECT case_number, subject, status, priority, is_closed, created_date
-     FROM cases WHERE error_signature = ? ORDER BY created_date DESC LIMIT 20`,
-  );
-
-  return {
-    signatures: bySignature.map((s) => ({
-      ...s,
-      cases: (cases.all(s.key) as any[]).map((c) => ({
-        caseNumber: c.case_number,
-        subject: c.subject,
-        status: c.status,
-        priority: c.priority,
-        isClosed: !!c.is_closed,
-        createdDate: c.created_date,
-      })),
-    })),
-    productAreas: byArea,
-    accounts: byAccount,
-  };
-}
-
 /* ------------------------------------------------------------------ counts */
 
 /**

@@ -111,10 +111,9 @@ export const api = {
   saveManualMetric: (payload) => request("POST",   "/api/metrics/manual", payload),
   deleteManualMetric: (p)     => request("DELETE", "/api/metrics/manual", p),
 
-  /* search + patterns. search() takes an optional AbortSignal so a caller can
-     cancel a stale in-flight request once a newer one supersedes it. */
-  search:   (q, signal) => request("GET", "/api/search" + qs({ q }), undefined, { signal }),
-  patterns: ()          => request("GET", "/api/patterns"),
+  /* search. Takes an optional AbortSignal so a caller can cancel a stale
+     in-flight request once a newer one supersedes it. */
+  search: (q, signal) => request("GET", "/api/search" + qs({ q }), undefined, { signal }),
 
   /* settings + sync */
   settings:     ()      => request("GET",   "/api/settings"),

@@ -42,7 +42,6 @@ import {
   renegotiateCommitment,
   commitmentsInRange,
   search,
-  patterns,
   badgeCounts,
   facets,
 } from "./queries";
@@ -628,7 +627,7 @@ app.delete("/api/metrics/manual", requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-/* ------------------------------------------------------ search and patterns */
+/* ------------------------------------------------------------------ search */
 
 app.get("/api/search", requireAuth, noStore, (req, res) => {
   const q = String(req.query.q || "");
@@ -640,10 +639,6 @@ app.get("/api/search", requireAuth, noStore, (req, res) => {
     // A malformed FTS expression is a user typo, not a server fault.
     res.status(400).json({ error: "Could not parse that search", detail: err.message });
   }
-});
-
-app.get("/api/patterns", requireAuth, noStore, (_req, res) => {
-  res.json(patterns());
 });
 
 /* ---------------------------------------------------------------- settings */
@@ -1068,7 +1063,6 @@ const SPA_ROUTES = [
   "/triage",
   "/escalations",
   "/search",
-  "/patterns",
   "/settings",
   "/phone",
 ];
