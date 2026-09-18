@@ -273,6 +273,32 @@ export function getSummary(caseId: string): IqsSummary | null {
   return { overall: r.overall, band: r.band, keyword: r.keyword, scoredAt: r.scored_at };
 }
 
+/**
+ * v9 phase 6: the batched sibling of `getSummary()`, for `queries.ts`'s
+ * `listCases()` -- one query for up to `chunkSize` cases instead of one
+ * query per case. Chunked defensively rather than a single `IN (...)`
+ * covering every id at once: SQLite's compiled `SQLITE_MAX_VARIABLE_NUMBER`
+ * varies by build (999 on older SQLite, much higher on recent bundles), and
+ * this should not depend on which one better-sqlite3 happens to ship.
+ */
+export function getSummaries(caseIds: string[], chunkSize = 500): Map<string, IqsSummary> {
+  const out = new Map<string, IqsSummary>();
+  for (let i = 0; i < caseIds.length; i += chunkSize) {
+    const slice = caseIds.slice(i, i + chunkSize);
+    if (!slice.length) continue;
+    const rows = db
+      .prepare(
+        `SELECT case_id, overall, band, keyword, scored_at FROM iqs_scores
+         WHERE layer = '${LAYER}' AND case_id IN (${slice.map(() => "?").join(",")})`,
+      )
+      .all(...slice) as Array<{ case_id: string; overall: number | null; band: Band | null; keyword: Keyword; scored_at: number }>;
+    for (const r of rows) {
+      out.set(r.case_id, { overall: r.overall, band: r.band, keyword: r.keyword, scoredAt: r.scored_at });
+    }
+  }
+  return out;
+}
+
 /** Full breakdown for the Quality tab, straight from the stored JSON. */
 export function getDetail(caseNumber: string): Layer1Score | null {
   const r = selectDetailByNumber.get(caseNumber) as

@@ -480,6 +480,22 @@ ensureColumn("cases", "left_queue_at", "TEXT");
 ensureColumn("cases", "left_reason", "TEXT");
 ensureColumn("cases", "current_owner", "TEXT");
 
+// v9 phase 6: the queue's default (is_closed=0 AND owned=1) query seeks
+// idx_cases_open on is_closed only, residual-filters owned, and falls back
+// to a full temp B-tree sort for ORDER BY created_date DESC -- confirmed
+// via EXPLAIN QUERY PLAN. `owned` didn't exist yet when idx_cases_open was
+// created above, so this couldn't have been a covering index from the
+// start; added here, after ensureColumn has guaranteed the column exists,
+// rather than in the original schema block. Same reasoning for
+// commitments: the per-row lookup batched in queries.ts's
+// batchNextCommitments() seeks idx_commitments_state(state, due_at) and
+// residual-filters case_id, backwards for a `case_id IN (...) AND state = ?`
+// access pattern.
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_cases_open_created ON cases(is_closed, owned, created_date);
+  CREATE INDEX IF NOT EXISTS idx_commitments_case_state_due ON commitments(case_id, state, due_at);
+`);
+
 // v8: RSC support access (docs/PLAN_V8.md). rsc_url is already the resolved
 // primary/fallback value (see sync.ts's caseRow()), not the raw Salesforce
 // fields -- there's nothing to re-derive on read.

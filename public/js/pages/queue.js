@@ -586,8 +586,15 @@ export async function render(ctx, host, shell) {
 
   async function load() {
     try {
+      // v9 phase 6: `limit` was a no-op -- the server route never read
+      // req.query.limit and listCases() has no LIMIT clause at all, so
+      // every matching row was always returned regardless of this value.
+      // Removed rather than wired up server-side, since adding a real
+      // LIMIT with no pagination UI behind it would silently truncate the
+      // queue instead of doing nothing, a worse regression than the
+      // no-op it replaces.
       const [res, f] = await Promise.all([
-        api.cases({ status: state.scope, limit: 1000 }),
+        api.cases({ status: state.scope }),
         api.facets(state.scope === "open" ? undefined : "all").catch(() => null),
       ]);
       if (f) facets = f;

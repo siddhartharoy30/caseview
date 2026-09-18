@@ -8,7 +8,8 @@
 
 import { db, newId, now } from "./db";
 import { ARTIFACT_LABELS, ArtifactKind } from "./artifacts";
-import { getSummary as iqsSummaryFor } from "./iqs/store";
+import { getSummary as iqsSummaryFor, getSummaries as iqsSummariesFor } from "./iqs/store";
+import type { IqsSummary } from "./iqs/store";
 
 /* --------------------------------------------------------------- case rows */
 
@@ -76,9 +77,20 @@ const CASE_COLUMNS = `
   cluster2_uuid, cluster2_tag, cluster2_version, platform, case_version_raw
 `;
 
+/**
+ * v9 phase 6: batched lookups for `listCases()`'s many-row path, built once
+ * for the whole result set instead of per row inside `toApiCase()`. Omitted
+ * (the single-case path, `getCase()`) falls back to the original per-row
+ * queries below -- that path is never a hot N+1 concern.
+ */
+interface CaseApiMaps {
+  nextCommitment: Map<string, ReturnType<typeof nextCommitmentFor>>;
+  iqsSummary: Map<string, IqsSummary>;
+}
+
 /** Shape a cache row for the client. Field names match the old API. */
-export function toApiCase(r: CaseRow) {
-  const next = nextCommitmentFor(r.id);
+export function toApiCase(r: CaseRow, maps?: CaseApiMaps) {
+  const next = maps ? maps.nextCommitment.get(r.id) ?? null : nextCommitmentFor(r.id);
   return {
     id: r.id,
     caseNumber: r.case_number,
@@ -132,7 +144,7 @@ export function toApiCase(r: CaseRow) {
     // Three numbers, not the whole breakdown. The queue sorts and colours on
     // these; the dimension tree stays behind /api/cases/:n/iqs so a 200-row
     // page does not carry 200 of them.
-    iqs: iqsSummaryFor(r.id),
+    iqs: maps ? maps.iqsSummary.get(r.id) ?? null : iqsSummaryFor(r.id),
   };
 }
 
@@ -186,6 +198,70 @@ function nextCommitmentFor(caseId: string) {
     (breachedCommitmentStmt.get(caseId) as CommitmentPeek | undefined);
   if (!row) return null;
   return { id: row.id, dueAt: row.due_at, rawText: row.raw_text, state: row.state };
+}
+
+/**
+ * v9 phase 6: the batched sibling of `nextCommitmentFor()`, for
+ * `listCases()`'s many-row path. Confirmed live before this fix: at the
+ * dev DB's scale (10,336 open+owned rows), the per-row version cost
+ * 20,000-40,000+ separate prepared-statement executions on a single queue
+ * load, dominating latency over the base SELECT.
+ *
+ * One `ROW_NUMBER() OVER (PARTITION BY case_id ...)` query per tier
+ * (active/unparsed/breached) instead of up to three prepared-statement
+ * calls per case, merged in JS with the exact precedence
+ * `nextCommitmentFor()` already uses (active > unparsed > breached) --
+ * filled in reverse-precedence order so a later, higher-precedence pass
+ * overwrites an earlier, lower-precedence one for the same case.
+ * Chunked, not one `IN (...)` for every id: SQLite's compiled
+ * `SQLITE_MAX_VARIABLE_NUMBER` varies by build and this should not depend
+ * on which one better-sqlite3 happens to ship.
+ */
+function batchNextCommitments(caseIds: string[], chunkSize = 500): Map<string, ReturnType<typeof nextCommitmentFor>> {
+  const out = new Map<string, ReturnType<typeof nextCommitmentFor>>();
+  if (!caseIds.length) return out;
+
+  type PeekRow = CommitmentPeek & { case_id: string };
+  const tiers: Array<{ sql: string }> = [
+    {
+      sql: `SELECT case_id, id, due_at, raw_text, state FROM (
+              SELECT case_id, id, due_at, raw_text, state,
+                     ROW_NUMBER() OVER (PARTITION BY case_id ORDER BY due_at ASC) AS rn
+              FROM commitments
+              WHERE state = 'active' AND due_at IS NOT NULL AND case_id IN (%IDS%)
+            ) WHERE rn = 1`,
+    },
+    {
+      sql: `SELECT case_id, id, due_at, raw_text, state FROM (
+              SELECT case_id, id, due_at, raw_text, state,
+                     ROW_NUMBER() OVER (PARTITION BY case_id ORDER BY created_at DESC) AS rn
+              FROM commitments
+              WHERE state = 'unparsed' AND case_id IN (%IDS%)
+            ) WHERE rn = 1`,
+    },
+    {
+      sql: `SELECT case_id, id, due_at, raw_text, state FROM (
+              SELECT case_id, id, due_at, raw_text, state,
+                     ROW_NUMBER() OVER (PARTITION BY case_id ORDER BY due_at DESC) AS rn
+              FROM commitments
+              WHERE state = 'breached' AND case_id IN (%IDS%)
+            ) WHERE rn = 1`,
+    },
+  ];
+
+  for (let i = 0; i < caseIds.length; i += chunkSize) {
+    const slice = caseIds.slice(i, i + chunkSize);
+    const placeholders = slice.map(() => "?").join(",");
+    // Reverse order (breached, unparsed, active) so the final map.set() for
+    // a given case is always the highest-precedence tier that has a row.
+    for (const tier of [tiers[2], tiers[1], tiers[0]]) {
+      const rows = db.prepare(tier.sql.replace("%IDS%", placeholders)).all(...slice) as PeekRow[];
+      for (const row of rows) {
+        out.set(row.case_id, { id: row.id, dueAt: row.due_at, rawText: row.raw_text, state: row.state });
+      }
+    }
+  }
+  return out;
 }
 
 export interface CaseFilters {
@@ -247,7 +323,14 @@ export function listCases(f: CaseFilters = {}) {
     where.length ? "WHERE " + where.join(" AND ") : ""
   } ORDER BY created_date DESC`;
 
-  return (db.prepare(sql).all(...params) as CaseRow[]).map(toApiCase);
+  const rows = db.prepare(sql).all(...params) as CaseRow[];
+  // v9 phase 6: batch the per-row commitment/IQS lookups once for the whole
+  // result set instead of inside toApiCase() per row -- see
+  // batchNextCommitments()'s and iqs/store.ts's getSummaries()'s own
+  // comments for the N+1 this replaces.
+  const ids = rows.map((r) => r.id);
+  const maps: CaseApiMaps = { nextCommitment: batchNextCommitments(ids), iqsSummary: iqsSummariesFor(ids) };
+  return rows.map((r) => toApiCase(r, maps));
 }
 
 export function getCase(caseNumber: string) {
