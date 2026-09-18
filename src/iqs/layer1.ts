@@ -76,6 +76,20 @@ export interface SignalResult {
   /** A short quote from my own text, so a score can be argued with. */
   evidence: string | null;
   note: string | null;
+  /**
+   * v9 phase 3.1: false when this signal structurally cannot apply to this
+   * comment/case (there is nothing to prove either way), as opposed to
+   * weight 0 (evidence was looked for and not found). Defaults to true via
+   * `signal()`'s parameter default -- every existing call site is
+   * unaffected unless it opts in. An inapplicable signal drops out of its
+   * dimension's average entirely, the same "excluded, not scored zero"
+   * rule `rubric.ts`'s `appliesTo` already gives whole dimensions -- this
+   * extends it to individual signals, which previously had only one
+   * hand-carved exception (`whenWaived`, below) and one confirmed
+   * fudge-weight workaround (`scoreReliability`'s s4) instead of a general
+   * mechanism.
+   */
+  applicable?: boolean;
 }
 
 export interface DimensionResult {
@@ -502,13 +516,20 @@ interface MyComment extends CommentFacts {
   text: string;
 }
 
-function signal(label: string, weight: number, evidence: string | null, note: string | null = null): SignalResult {
-  return { label, weight: Math.max(0, Math.min(1, weight)), evidence, note };
+function signal(
+  label: string,
+  weight: number,
+  evidence: string | null,
+  note: string | null = null,
+  applicable = true,
+): SignalResult {
+  return { label, weight: Math.max(0, Math.min(1, weight)), evidence, note, applicable };
 }
 
 function assemble(d: Dimension, basis: string, signals: SignalResult[]): DimensionResult {
-  const fraction = signals.length
-    ? signals.reduce((sum, s) => sum + s.weight, 0) / signals.length
+  const applicable = signals.filter((s) => s.applicable !== false);
+  const fraction = applicable.length
+    ? applicable.reduce((sum, s) => sum + s.weight, 0) / applicable.length
     : 0;
   return {
     id: d.id,
@@ -759,10 +780,17 @@ function scoreReliability(d: Dimension, facts: CaseFacts, mine: MyComment[]): Di
     ? signal(d.signals[2], 0, excerpt(breached[0].rawText), `${breached.length} deadline${breached.length === 1 ? "" : "s"} passed unmet`)
     : signal(d.signals[2], 1, null, "nothing outstanding is overdue");
 
+  // v9 phase 3.1: this used to average in a fixed 0.5 "coin flip" when
+  // nothing had come due yet -- a fudge-weight standing in for true
+  // exclusion, confirmed via the backtest as exactly hypothesis #1 (a
+  // signal absent-because-inapplicable being scored as if it were a real
+  // measurement). Marked inapplicable instead, so it drops out of the
+  // dimension's average entirely rather than dragging every case with no
+  // resolved commitment yet toward the middle.
   const resolved = met.length + breached.length;
   const s4 = resolved
     ? signal(d.signals[3], met.length / resolved, null, `${met.length} of ${resolved} met when they came due`)
-    : signal(d.signals[3], 0.5, null, "no commitment has come due yet, so there is nothing to prove either way");
+    : signal(d.signals[3], 0, null, "no commitment has come due yet, so there is nothing to prove either way", false);
 
   const dim = assemble(d, basis, [s1, s2, s3, s4]);
   if (!mine.length) dim.basis = "no comment of mine to read";
