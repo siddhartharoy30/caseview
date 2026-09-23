@@ -336,10 +336,16 @@ function queueRow(c, isNew) {
     onclick: () => openCaseFromConsole(c.caseNumber),
     onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCaseFromConsole(c.caseNumber); } },
   },
-    h("span", { class: "mono qv-console-queue-case", text: c.caseNumber }),
+    // No .mono here (app.css's global utility class) -- it would pull in
+    // --mono and re-introduce the exact same font clash just fixed at the
+    // pane-header level, just inside every row instead. tabular-nums alone,
+    // set directly on these two classes in console.css, keeps the digits
+    // from jittering without switching font family away from the row's
+    // other text.
+    h("span", { class: "qv-console-queue-case", text: c.caseNumber }),
     h("span", { class: `chip ${fmt.priorityClass(c.priority)}`, text: c.priority || "—" }),
     h("span", { class: "qv-console-queue-subject", text: c.subject || "(no subject)" }),
-    h("span", { class: "dim mono qv-console-queue-age", text: age }));
+    h("span", { class: "dim qv-console-queue-age", text: age }));
 }
 
 /** A group toggle for one status bucket -- "— Waiting on Customer (5)",

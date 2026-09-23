@@ -212,6 +212,7 @@
 }
 
 .qv-console-queue-case {
+  font-variant-numeric: tabular-nums;
   font-size: var(--fs-table-cell);
   color: var(--text);
   flex-shrink: 0;
@@ -226,6 +227,7 @@
   color: var(--text-3);
 }
 .qv-console-queue-age {
+  font-variant-numeric: tabular-nums;
   flex-shrink: 0;
   font-size: var(--fs-meta);
 }
