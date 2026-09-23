@@ -265,6 +265,18 @@ function applyConsoleTheme(pipWindow) {
   pipWindow.document.body.classList.toggle("dark", theme !== "light");
 }
 
+/** The same headset mark used app-wide (login screen, favicon) -- reused
+ * verbatim rather than a new asset, so the console still reads as QView at
+ * a glance instead of introducing a second brand mark. */
+const BRAND_MARK_SVG =
+  '<svg viewBox="0 0 24 24" width="60%" height="60%" fill="none" stroke="white" stroke-width="2" ' +
+  'stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/>' +
+  '<path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>';
+
+function consoleBrandMark() {
+  return h("div", { class: "qv-console-brand", html: BRAND_MARK_SVG });
+}
+
 function consoleThemeButton(pipWindow) {
   return h("button", {
     class: "qv-console-theme-btn", type: "button", title: "Toggle console theme",
@@ -286,11 +298,18 @@ function openCaseFromConsole(caseNumber) {
   navigate("/case/" + encodeURIComponent(caseNumber));
 }
 
+// Requested by name, not read from coverageTriggerStatuses -- the trigger
+// list can grow (Reopen, New, Assigned...) without every one of those
+// deserving a continuous blink. This is specifically the "someone at
+// Rubrik owes this customer a response" status.
+const WAITING_ON_RUBRIK_STATUS = "Waiting for Rubrik Support";
+
 function queueRow(c, isNew) {
   const urgent = fmt.priorityClass(c.priority) === "p1" || c.isEscalated;
+  const waitingOnRubrik = c.status === WAITING_ON_RUBRIK_STATUS;
   const age = c.createdDate ? fmt.ageDays(c.createdDate).days + "d" : "—";
   return h("div", {
-    class: `qv-console-queue-row ${urgent ? "is-urgent" : ""} ${isNew ? "qv-console-row-enter" : ""}`,
+    class: `qv-console-queue-row ${urgent ? "is-urgent" : ""} ${waitingOnRubrik ? "qv-console-blink" : ""} ${isNew ? "qv-console-row-enter" : ""}`,
     role: "button", tabindex: "0",
     title: c.subject || "",
     onclick: () => openCaseFromConsole(c.caseNumber),
@@ -404,6 +423,11 @@ function queuePaneMeta(snap) {
 }
 
 const TICKER_POLL_MS = 60_000;
+// A session sparkline, not a trading chart -- built entirely from prices
+// this console itself has polled (Finnhub's free tier has no cheap
+// intraday-history endpoint), so it shows "how RBRK has moved since I
+// opened this," capped so it never grows unbounded over a long shift.
+const TICKER_HISTORY_MAX = 60;
 
 /** The always-visible header line -- shown whether or not the pane is
  * collapsed, same as the phone pane's position summary, so a collapsed
@@ -414,17 +438,46 @@ function tickerMetaText(quote) {
   return quote.price.toFixed(2) + "  " + sign + quote.changePercent.toFixed(2) + "%" + (quote.marketOpen ? "" : " · closed");
 }
 
-/** Expanded detail -- deliberately thin: no chart, no history, no alerts,
- * per the spec's own "this is a glance, not a trading tool." */
-function tickerBody(quote) {
+/** A small inline SVG polyline built from locally-accumulated poll prices
+ * -- no history endpoint, no chart library, just numbers this session has
+ * already fetched. `pts`/`stroke` below are numeric or CSS-var strings
+ * only, never user-supplied text, so building the SVG as a string is safe. */
+function tickerSparkline(history) {
+  if (history.length < 2) return null;
+  const w = 140, h2 = 28, pad = 3;
+  const min = Math.min(...history);
+  const max = Math.max(...history);
+  const range = max - min || 1;
+  const pts = history.map((v, i) => {
+    const x = (i / (history.length - 1)) * w;
+    const y = pad + (1 - (v - min) / range) * (h2 - pad * 2);
+    return x.toFixed(1) + "," + y.toFixed(1);
+  }).join(" ");
+  const up = history[history.length - 1] >= history[0];
+  const stroke = up ? "var(--green)" : "var(--red)";
+  return h("div", {
+    class: "qv-console-ticker-spark",
+    html: '<svg viewBox="0 0 ' + w + ' ' + h2 + '" width="' + w + '" height="' + h2 + '" preserveAspectRatio="none">' +
+      '<polyline points="' + pts + '" fill="none" stroke="' + stroke + '" stroke-width="1.5" ' +
+      'stroke-linejoin="round" stroke-linecap="round"/></svg>',
+  });
+}
+
+/** Expanded detail: the change/prev-close line, a closed-market note when
+ * applicable, and the session sparkline above. Still no real-time chart,
+ * no price alerts -- one lightweight visual on top of the original
+ * "glance, not a trading tool" design. */
+function tickerBody(quote, history) {
   if (!quote) return h("p", { class: "dim", text: "No quote yet." });
   const up = quote.change >= 0;
   const sign = up ? "+" : "";
-  return h("div", { class: "qv-console-ticker-detail" },
-    h("span", { class: `mono ${up ? "qv-console-ticker-up" : "qv-console-ticker-down"}`,
-      text: sign + quote.change.toFixed(2) + " (" + sign + quote.changePercent.toFixed(2) + "%)" }),
-    h("span", { class: "dim", text: "prev close " + quote.previousClose.toFixed(2) }),
-    !quote.marketOpen ? h("span", { class: "dim", text: "market closed" }) : null);
+  return h("div", { class: "qv-console-ticker-body" },
+    tickerSparkline(history),
+    h("div", { class: "qv-console-ticker-detail" },
+      h("span", { class: `mono ${up ? "qv-console-ticker-up" : "qv-console-ticker-down"}`,
+        text: sign + quote.change.toFixed(2) + " (" + sign + quote.changePercent.toFixed(2) + "%)" }),
+      h("span", { class: "dim", text: "prev close " + quote.previousClose.toFixed(2) }),
+      !quote.marketOpen ? h("span", { class: "dim", text: "market closed" }) : null));
 }
 
 /**
@@ -439,6 +492,7 @@ function startTickerPoll(pane, cleanups) {
   let timer = null;
   let stopped = false;
   let prevPrice = null; // null until the first real quote -- no flash on arrival, no entrance animation
+  const history = []; // this session's own polled prices -- see tickerSparkline()
 
   async function tick() {
     try {
@@ -446,7 +500,11 @@ function startTickerPoll(pane, cleanups) {
       pane.root.hidden = !data.enabled;
       if (data.enabled) {
         pane.setMeta(tickerMetaText(data.quote));
-        mount(pane.body, tickerBody(data.quote));
+        if (data.quote) {
+          history.push(data.quote.price);
+          if (history.length > TICKER_HISTORY_MAX) history.shift();
+        }
+        mount(pane.body, tickerBody(data.quote, history));
         if (data.quote) {
           if (prevPrice !== null && data.quote.price !== prevPrice) pane.flash(false);
           prevPrice = data.quote.price;
@@ -485,7 +543,8 @@ function buildConsole(host, pipWindow, cleanups) {
   tickerPane.root.hidden = true;
   const phonePane = consolePane("phone", "PHONE");
   const queuePane = consolePane("queue", "QUEUE");
-  mount(host, consoleThemeButton(pipWindow), tickerPane.root, phonePane.root, queuePane.root);
+  const topbar = h("div", { class: "qv-console-topbar" }, consoleBrandMark(), consoleThemeButton(pipWindow));
+  mount(host, topbar, tickerPane.root, phonePane.root, queuePane.root);
 
   startTickerPoll(tickerPane, cleanups);
 
@@ -643,9 +702,15 @@ export function openPopupFallback() {
  * already owns the pop-out, this offers "Focus pop-out" instead of trying
  * (and failing) to open a second one -- Chrome allows only one PiP window
  * at a time regardless of tab.
+ *
+ * v9 part 3 follow-on: no longer gated on state.enabled ("I'm on the phone
+ * queue"). That gate made sense when this was a phone-only pop-out with
+ * nothing to show otherwise; now the console's ticker and queue panes are
+ * useful whether or not phone monitoring is even on, so the trigger is
+ * available unconditionally (still subject to the browser-support tier
+ * check below).
  */
 export function popoutRow(state) {
-  if (!state.enabled) return null;
   const t = tier();
 
   if (t === "pip") {
@@ -667,21 +732,13 @@ export function popoutRow(state) {
     h("span", { class: "dim", text: why }));
 }
 
-/**
- * Phase 4's own rule: a window that stays on top after the master toggle
- * (or the 5-minute-offline auto-off) turns the monitor off is a bug. This
- * subscriber is the one place that rule is enforced, regardless of which
- * of the two window kinds is open. v6 phase 2's "enabled" broadcast already
- * keeps every tab's local state.enabled in sync (including whichever tab
- * owns the pop-out), so this only needs the isPipOpenLocally() rename to
- * stay correct cross-tab -- it must only ever close a window this tab
- * actually holds.
- */
-phoneMonitor.subscribe((state) => {
-  if (state.enabled) return;
-  if (isPipOpenLocally()) documentPictureInPicture.window.close();
-  if (isPopupOpen()) popupRef.close();
-});
+// v5 phase 4's "close the window when phone monitoring turns off" rule is
+// deliberately gone as of the v9 part 3 follow-on: that made sense when
+// this pop-out only ever showed a phone-queue position, so a window with
+// nothing left to show was correctly treated as a bug. Now the console's
+// ticker and queue panes are useful on their own, so turning off "I'm on
+// the phone queue" must not blow away a console someone's using for
+// something else entirely.
 
 /**
  * The same same-line/same-region pool `positionOf()` builds server-side,

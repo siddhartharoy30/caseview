@@ -42,8 +42,10 @@ export function initPhoneDock() {
     paint(phoneMonitor.getState());
   }
 
-  function restoreBanner(state) {
-    if (!state.enabled) return null; // a restore offer for a deliberately-off monitor is noise
+  function restoreBanner() {
+    // v9 part 3 follow-on: no longer gated on state.enabled -- the console
+    // is useful (ticker, queue) whether or not phone monitoring is on, so
+    // losing one is worth offering to restore regardless.
     if (shiftConsole.isPipOpen()) return null; // nothing to restore
     if (!shiftConsole.pipWasOpen()) return null;
     return h("div", { class: "phn-dock-restore" },
@@ -102,7 +104,7 @@ export function initPhoneDock() {
       // it applies; shiftConsole.popoutRow (the exact same control /phone
       // shows) is the fallback the rest of the time, so there's always a
       // one-click way to open the always-on-top window right from here.
-      showBody ? (restoreBanner(state) || shiftConsole.popoutRow(state)) : null);
+      showBody ? (restoreBanner() || shiftConsole.popoutRow(state)) : null);
   }
 
   shiftConsole.onOwnershipChange((ownerId, { lostUngracefully } = {}) => {

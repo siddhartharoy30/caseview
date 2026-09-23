@@ -149,14 +149,34 @@
 
 /* ---- console-wide chrome --------------------------------------------------- */
 
+/* A real strip above the panes rather than floating chrome over the
+   ticker's own head row -- the brand mark and theme toggle used to be
+   position:absolute over the first pane, which visually collided with its
+   title text. */
+.qv-console-topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.qv-console-brand {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, var(--blue-2), var(--green-2));
+}
+
 /* Independent of the main app's light/dark setting -- its own persisted
-   preference (shiftConsole.theme), defaulting to dark. Pinned so it's
-   reachable regardless of which panes are collapsed. */
+   preference (shiftConsole.theme), defaulting to dark. */
 .qv-console-theme-btn {
-  position: absolute;
-  top: var(--space-1);
-  right: var(--space-1);
-  z-index: 1;
+  margin-left: auto;
   width: 22px;
   height: 22px;
   display: flex;
@@ -184,6 +204,24 @@
 }
 .qv-console-queue-row:hover { background: var(--surface-2); }
 .qv-console-queue-row.is-urgent { border-left-color: var(--red); }
+
+/* Requested continuous signal for "Waiting for Rubrik Support" specifically
+   -- deliberately loops, unlike everything in the motion pass above (spec
+   phase 5 forbids looping animation on principle; this is a specific,
+   later, explicit exception for one named status). Gentle by design: a
+   slow fade, not a strobe, so nine hours of it stays legible instead of
+   becoming ignorable noise or an actual seizure risk. */
+@keyframes qv-console-blink {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: color-mix(in srgb, var(--red) 16%, transparent); }
+}
+.qv-console-queue-row.qv-console-blink { animation: qv-console-blink 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .qv-console-queue-row.qv-console-blink {
+    animation: none;
+    background-color: color-mix(in srgb, var(--red) 14%, transparent);
+  }
+}
 
 .qv-console-queue-case {
   font-size: var(--fs-table-cell);
@@ -218,6 +256,13 @@
 
 /* ---- ticker pane (v9 part 3 phase 4) -------------------------------------- */
 
+.qv-console-ticker-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.qv-console-ticker-spark { line-height: 0; }
+.qv-console-ticker-spark svg { display: block; width: 100%; height: 28px; }
 .qv-console-ticker-detail {
   display: flex;
   align-items: center;
