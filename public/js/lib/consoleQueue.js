@@ -6,11 +6,12 @@
  * shiftConsole.js can wire it the same way it wires the phone pane.
  *
  * "Needs my response" for this pane's header count and full-row bucket
- * reuses `coverageTriggerStatuses` verbatim -- the spec's own instruction:
- * don't write a third definition, two already agree (the coverage setting
- * and the case.waiting_on_support notification). This is a *different*
- * question from queueRank's `_state === "reply"` (which drives sort order,
- * same as the Queue page); both are reused, neither is redefined here.
+ * starts from `coverageTriggerStatuses` verbatim -- the spec's own
+ * instruction: don't write a third definition, two already agree (the
+ * coverage setting and the case.waiting_on_support notification) -- plus
+ * one console-specific addition (see EXTRA_NEEDS_REPLY_STATUSES below).
+ * This is a *different* question from queueRank's `_state === "reply"`
+ * (which drives sort order, same as the Queue page).
  *
  * No polling loop of its own. refresh() is called by shiftConsole.js on
  * open and whenever the watch poll (v9 part 3 phase 3) reports a change --
@@ -35,8 +36,17 @@ function parseTriggerStatuses(raw) {
   return new Set(String(raw || "").split(",").map((s) => s.trim()).filter(Boolean));
 }
 
+// A case actively "In Progress" needs a reply just as much as the
+// configured trigger statuses do, but adding it to coverageTriggerStatuses
+// itself would also make it fire Slack coverage posts and the
+// case.waiting_on_support notification for every in-progress case -- side
+// effects this pane's own header count shouldn't cause. Kept separate from
+// shiftConsole.js's own BLINK_STATUSES (same status, different file) rather
+// than introducing a shared module for one string.
+const EXTRA_NEEDS_REPLY_STATUSES = new Set(["In Progress"]);
+
 function needsResponse(c) {
-  return triggerStatuses.has(c.status);
+  return triggerStatuses.has(c.status) || EXTRA_NEEDS_REPLY_STATUSES.has(c.status);
 }
 
 function snapshot() {

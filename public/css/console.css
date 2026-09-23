@@ -76,7 +76,13 @@
 .qv-console-ticker-logo { border-radius: 3px; flex-shrink: 0; }
 
 .qv-console-pane-meta {
-  font-family: var(--mono);
+  /* Was --mono: sat right next to the --sans pane title (QUEUE, PHONE,
+     RBRK) and visibly clashed -- different letterforms and line metrics
+     read as "wrong font" and made the two look vertically misaligned even
+     though the flex row centers both correctly. tabular-nums alone (a
+     feature most sans fonts support too) still keeps digits from jittering
+     as they update, which was the actual reason --mono was here. */
+  font-family: var(--sans);
   font-variant-numeric: tabular-nums;
   font-size: var(--fs-meta);
   color: var(--text-2);
