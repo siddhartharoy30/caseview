@@ -371,6 +371,44 @@ export function closeCdmAccess(id: string): void {
   db.prepare(`UPDATE cdm_access_log SET stopped_at = @stopped_at WHERE id = @id`).run({ id, stopped_at: now() });
 }
 
+/* --------------------------------------------------- shift console watch poll */
+
+/**
+ * v9 part 3 phase 3: one row per watch-poll tick (not per Salesforce call
+ * within it -- each tick is exactly one SOQL query), so Settings can show
+ * "calls today" the same way iqs_layer2_usage backs the IQS budget bar --
+ * day-bucketed and queryable, unlike sync_state.api_calls (lifetime, never
+ * resets, can't answer "today").
+ */
+db.exec(`
+CREATE TABLE IF NOT EXISTS watch_poll_log (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_watch_poll_log_created ON watch_poll_log(created_at);
+`);
+
+const insertWatchPoll = db.prepare("INSERT INTO watch_poll_log (created_at) VALUES (?)");
+const countWatchPollSince = db.prepare("SELECT COUNT(*) AS n FROM watch_poll_log WHERE created_at >= ?");
+
+export function logWatchPoll(): void {
+  insertWatchPoll.run(now());
+}
+
+/** Start of today, UTC -- same boundary choice as iqs/layer2Store.ts's
+ * startOfUtcDay, redefined locally rather than imported to avoid a
+ * db.ts <-> iqs/layer2Store.ts import cycle (layer2Store.ts already imports
+ * db from here). */
+function startOfUtcDayLocal(atMs: number): number {
+  const d = new Date(atMs);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+export function watchPollCallsToday(atMs: number = Date.now()): number {
+  const r = countWatchPollSince.get(startOfUtcDayLocal(atMs)) as { n: number };
+  return r.n;
+}
+
 /* --------------------------------------------------------------- full text */
 
 /**
@@ -606,6 +644,10 @@ export function saveSuggestedReply(
 
 export const SETTING_DEFAULTS: Record<string, string> = {
   syncIntervalMinutes: "5",
+  // v9 part 3 phase 3: the shift console's watch poll, separate from the
+  // 5-minute full sync above -- a single lightweight SOQL call so a status
+  // change is caught inside a shift, not up to 5 minutes late.
+  watchPollIntervalSeconds: "60",
   activeWindowStart: "8",       // hour, NY. Sync only inside the window.
   activeWindowEnd: "20",
   activeWindowWeekdaysOnly: "false",

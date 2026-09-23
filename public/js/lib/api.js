@@ -121,6 +121,7 @@ export const api = {
   rebuildCache: ()      => request("POST",  "/api/settings/rebuild-cache"),
   sync:         (full)  => request("POST",  "/api/sync" + (full ? "?full=1" : "")),
   syncStatus:   ()      => request("GET",   "/api/sync/status"),
+  consoleWatchPoll: ()  => request("POST",  "/api/console/watch-poll"),
   testWebhook:  (url)   => request("POST",  "/api/settings/test-webhook", { url }),
 
   /* events — the notification feed. sinceMs is a millisecond timestamp; omit it

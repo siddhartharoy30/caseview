@@ -19,11 +19,13 @@ import {
   getSettingBool,
   getSyncState,
   patchSyncState,
+  logWatchPoll,
 } from "./db";
 import {
   SalesforceCase,
   SalesforceCaseComment,
   SalesforceEmail,
+  CaseWatchRow,
   listCasesModifiedSince,
   listOpenCases,
   getOwnershipStatus,
@@ -580,6 +582,76 @@ export async function reconcileOwnership(): Promise<{ left: number; skipped: boo
   } catch (e) {
     log.warn("sync.reconcile_ownership_failed", { error: errText(e) });
     return { left: 0, skipped: true };
+  }
+}
+
+/* --------------------------------------------------- shift console watch poll */
+
+const selectLocalWatchRows = db.prepare(
+  "SELECT case_number, status, is_escalated, last_modified_date FROM cases WHERE owned = 1 AND is_closed = 0",
+);
+
+export interface WatchPollResult {
+  changed: boolean;
+  changedCaseNumbers: string[];
+  skipped?: boolean;
+}
+
+/**
+ * v9 part 3 phase 3: the shift console's watch poll -- a single lightweight
+ * SOQL call (listOpenCases(true)), diffed against the local open+owned set.
+ * Any Status, IsEscalated or LastModifiedDate change means Salesforce has
+ * something the 5-minute full sync hasn't picked up yet.
+ *
+ * A brand-new case (in `remote` but not yet local) is deliberately not
+ * flagged here -- that is the regular sync's job (case.new), not this one's;
+ * this poll exists specifically to catch a *status change on a case I
+ * already know about* inside a shift, not to shrink the "new case" latency.
+ * A case that left the queue (local but not in `remote`) is
+ * reconcileOwnership()'s job, which needs the full-field requery this
+ * lightweight call doesn't carry -- not duplicated here.
+ *
+ * On a diff, this runs the real incremental sync (syncOnce(false)) rather
+ * than a second, parallel single-case pipeline: listCasesModifiedSince() is
+ * already watermark-based, so a batch of one changed case naturally syncs
+ * just that case through the exact same code path -- including the exact
+ * same case.waiting_on_support / sweepTransitions() detection every other
+ * sync uses. Always logs one watch_poll_log row, hit or miss, since it is
+ * one Salesforce call either way -- that is the row the Settings cost
+ * counter (db.watchPollCallsToday) reads.
+ */
+export async function runWatchPoll(): Promise<WatchPollResult> {
+  logWatchPoll();
+  try {
+    const remote = await listOpenCases(true);
+    const local = selectLocalWatchRows.all() as Array<{
+      case_number: string;
+      status: string | null;
+      is_escalated: number;
+      last_modified_date: string;
+    }>;
+    const localByNumber = new Map(local.map((r) => [r.case_number, r]));
+
+    const changedCaseNumbers: string[] = [];
+    for (const r of remote as CaseWatchRow[]) {
+      const localRow = localByNumber.get(r.CaseNumber);
+      if (!localRow) continue;
+      if (
+        localRow.status !== r.Status ||
+        !!localRow.is_escalated !== !!r.IsEscalated ||
+        localRow.last_modified_date !== r.LastModifiedDate
+      ) {
+        changedCaseNumbers.push(r.CaseNumber);
+      }
+    }
+
+    if (!changedCaseNumbers.length) return { changed: false, changedCaseNumbers: [] };
+
+    await syncOnce(false);
+    return { changed: true, changedCaseNumbers };
+  } catch (e) {
+    log.warn("sync.watch_poll_failed", { error: errText(e) });
+    return { changed: false, changedCaseNumbers: [], skipped: true };
   }
 }
 

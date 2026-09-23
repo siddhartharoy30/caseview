@@ -23,6 +23,7 @@ import {
   logSupportAccess,
   logCdmAccess,
   closeCdmAccess,
+  watchPollCallsToday,
 } from "./db";
 import { draftSuggestedReply, repairDraft } from "./claude";
 import {
@@ -80,7 +81,7 @@ import {
   startLayer2Sweep,
 } from "./iqs/layer2Store";
 import { resolveRange, scorecard, saveManualMetric, deleteManualMetric } from "./metrics";
-import { syncOnce, startSync, reconcileCommitments, lastSyncPhases } from "./sync";
+import { syncOnce, startSync, reconcileCommitments, lastSyncPhases, runWatchPoll, withinActiveWindow } from "./sync";
 import { listEvents, unreadEventCount, markEventsRead, sendWebhookTest, EventKind } from "./notify";
 import { getPhoneBoard, cachedPhoneBoard, positionOf, listRoster, upsertRosterEntry, deleteRosterEntry } from "./phone";
 import type { Region } from "./phone";
@@ -665,8 +666,25 @@ app.get("/api/settings", requireAuth, noStore, (_req, res) => {
       ownerName: config.salesforce.ownerName,
       emailsUnavailable: isEmailAccessDenied(),
     },
+    console: {
+      watchPollCallsToday: watchPollCallsToday(),
+      watchPollProjectedDaily: projectedWatchPollCallsDaily(),
+    },
   });
 });
+
+/** "Calls today" alone doesn't say whether the current interval is
+ * reasonable -- the projection does. Window hours handles the same
+ * always-on (start === end) and wraps-midnight (start > end) cases
+ * withinActiveWindow() does, so this can't disagree with when the poll is
+ * actually allowed to run. */
+function projectedWatchPollCallsDaily(): number {
+  const start = getSettingNumber("activeWindowStart");
+  const end = getSettingNumber("activeWindowEnd");
+  const windowHours = start === end ? 24 : start < end ? end - start : 24 - start + end;
+  const intervalSeconds = Math.max(1, getSettingNumber("watchPollIntervalSeconds"));
+  return Math.round((windowHours * 3600) / intervalSeconds);
+}
 
 app.patch("/api/settings", requireAuth, (req, res) => {
   const patch = req.body || {};
@@ -829,6 +847,26 @@ app.get("/api/sync/status", requireAuth, noStore, (_req, res) => {
     cache: cacheCounts(),
     emailsUnavailable: isEmailAccessDenied(),
   });
+});
+
+/* ------------------------------------------------ shift console watch poll */
+
+/**
+ * v9 part 3 phase 3. POST, not GET, because a diff triggers a real sync as
+ * a side effect -- not a pure read. The frontend is expected to gate calling
+ * this on tabSync leadership and withinActiveWindow() (surfaced via
+ * activeWindowStart/End/WeekdaysOnly above), but this route re-checks the
+ * coverage window itself server-side too: a stale tab, a clock skew, or a
+ * leader-election edge case must not be the only thing standing between
+ * "off shift" and a Salesforce call every 15-60 seconds all night.
+ */
+app.post("/api/console/watch-poll", requireAuth, noStore, async (_req, res) => {
+  if (!withinActiveWindow()) {
+    res.json({ changed: false, changedCaseNumbers: [], skipped: true, reason: "outside_active_window" });
+    return;
+  }
+  const result = await runWatchPoll();
+  res.json(result);
 });
 
 /* --------------------------------------------------------------- AI draft */

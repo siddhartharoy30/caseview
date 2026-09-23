@@ -264,14 +264,30 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
-export async function listOpenCases(): Promise<SalesforceCase[]> {
+/** v9 part 3: the shift console's watch poll needs "is anything about my
+ * open cases different" every 15-60s, not the full ~30-field row
+ * reconcileOwnership() needs. Same query shape, a smaller field list --
+ * not a second query, per the spec's own instruction. */
+export interface CaseWatchRow {
+  Id: string;
+  CaseNumber: string;
+  Status: string | null;
+  IsEscalated: boolean;
+  LastModifiedDate: string;
+}
+const WATCH_FIELDS = ["Id", "CaseNumber", "Status", "IsEscalated", "LastModifiedDate"];
+
+export async function listOpenCases(): Promise<SalesforceCase[]>;
+export async function listOpenCases(light: true): Promise<CaseWatchRow[]>;
+export async function listOpenCases(light?: boolean): Promise<SalesforceCase[] | CaseWatchRow[]> {
   // No LIMIT: a SOQL-level LIMIT makes Salesforce return done:true on page
   // one, which makes soqlQueryAll's own pagination unreachable -- silently
   // truncating the authoritative "what's open and mine" set is exactly the
   // failure mode reconciliation exists to avoid. soqlQueryAll's own 20,000
   // cap is the real ceiling now.
-  const soql = `SELECT ${CASE_FIELDS} FROM Case WHERE ${ownerClause()}IsClosed = false ORDER BY CreatedDate ASC`;
-  return soqlQueryAll<SalesforceCase>(soql);
+  const fields = light ? WATCH_FIELDS : CASE_FIELDS;
+  const soql = `SELECT ${fields} FROM Case WHERE ${ownerClause()}IsClosed = false ORDER BY CreatedDate ASC`;
+  return light ? soqlQueryAll<CaseWatchRow>(soql) : soqlQueryAll<SalesforceCase>(soql);
 }
 
 export interface CaseOwnershipRow {

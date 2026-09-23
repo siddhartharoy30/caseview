@@ -49,6 +49,9 @@ import { button, toast } from "./ui.js";
 import * as consoleQueue from "./consoleQueue.js";
 import * as fmt from "./fmt.js";
 import { navigate } from "../router.js";
+import { api } from "./api.js";
+
+const DEFAULT_WATCH_POLL_INTERVAL_S = 60;
 
 const KEY_SIZE = "phonePip.size";
 const KEY_PIP_WAS_OPEN = "phonePip.wasOpen";
@@ -370,10 +373,66 @@ function buildConsole(host, pipWindow, cleanups) {
   // Free local re-render: ages and the "Nd" countdown-style figures move
   // even though the underlying data hasn't -- no network call, per the
   // spec's own "the UI re-render at 15 seconds is free" framing. A real
-  // data refresh (initial load, or a future watch-poll signal) goes through
-  // consoleQueue.refresh() instead, which is a separate, explicit call.
+  // data refresh (initial load, or a watch-poll-detected change below) goes
+  // through consoleQueue.refresh() instead, which is a separate, explicit
+  // call.
   const queueTicker = setInterval(() => renderQueueBody(queuePane, consoleQueue.getSnapshot(), showAllRef), 15000);
   cleanups.push(() => clearInterval(queueTicker));
+
+  startWatchPoll(cleanups);
+}
+
+/** How often the watch poll hits /api/console/watch-poll -- read once per
+ * console open, not re-checked mid-session (same "takes effect on the next
+ * cycle" trade-off syncIntervalMinutes already has). */
+async function watchPollIntervalMs() {
+  try {
+    const res = await api.settings();
+    const s = Number(res.settings && res.settings.watchPollIntervalSeconds);
+    return (Number.isFinite(s) && s > 0 ? s : DEFAULT_WATCH_POLL_INTERVAL_S) * 1000;
+  } catch {
+    return DEFAULT_WATCH_POLL_INTERVAL_S * 1000;
+  }
+}
+
+/**
+ * Leader-gated, self-rescheduling (same idiom as phoneMonitor.js's poll() --
+ * a setTimeout loop, not setInterval, so a slow request can't overlap the
+ * next tick), started only while the console is open. The server is the
+ * authoritative gate on the coverage window (withinActiveWindow()) -- it
+ * no-ops outside it without logging a call or touching Salesforce, so this
+ * doesn't duplicate that timezone math on the client. A three-tabs-open
+ * scenario naturally produces one poll, not three: only the leader tab
+ * (the one owning the console, per announceOwnership()'s
+ * setLeaderOverride()) ever calls the endpoint.
+ */
+function startWatchPoll(cleanups) {
+  let timer = null;
+  let stopped = false;
+
+  (async () => {
+    const intervalMs = await watchPollIntervalMs();
+    if (stopped) return; // console closed before settings even finished loading
+
+    const tick = async () => {
+      if (tabSync.isLeader()) {
+        try {
+          const result = await api.consoleWatchPoll();
+          if (result && result.changed) consoleQueue.refresh();
+        } catch {
+          // Transient network hiccup -- the next tick tries again, same as
+          // every other poll in this app.
+        }
+      }
+      if (!stopped) timer = setTimeout(tick, intervalMs);
+    };
+    timer = setTimeout(tick, intervalMs);
+  })();
+
+  cleanups.push(() => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+  });
 }
 
 /**

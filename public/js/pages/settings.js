@@ -84,6 +84,17 @@ const SCHEDULE_FIELDS = [
     max: 24,
     hint: "Set 0 and 24 to sync around the clock.",
   },
+  {
+    // v9 part 3 phase 3: separate from the sync interval above -- a single
+    // lightweight call, only while the shift console is open, inside the
+    // same window.
+    key: "watchPollIntervalSeconds",
+    label: "Console watch-poll interval",
+    unit: "seconds",
+    min: 15,
+    max: 300,
+    hint: "How often the shift console checks for a status change while it's open. Separate from the sync interval above.",
+  },
 ];
 
 const THRESHOLD_FIELDS = [
@@ -719,6 +730,7 @@ export function render(_ctx, host, shell) {
   function cacheSection() {
     const cache = (state.data && state.data.cache) || {};
     const sync = (state.data && state.data.sync) || {};
+    const consoleUsage = (state.data && state.data.console) || {};
 
     const counts = CACHE_ROWS
       .filter(([k]) => cache[k] !== undefined)
@@ -734,7 +746,13 @@ export function render(_ctx, host, shell) {
         row("Salesforce API calls this run", fmt.num(sync.apiCalls || 0), { mono: true }),
         row("Consecutive failures", Number(sync.errorCount || 0) > 0
           ? h("span", { class: "chip p1", text: String(sync.errorCount) })
-          : h("span", { class: "chip ok", text: "0" }))),
+          : h("span", { class: "chip ok", text: "0" })),
+        // v9 part 3 phase 3: "show the cost" of the shift console's watch
+        // poll -- a day-bucketed count, separate from the lifetime counter
+        // above, so it actually answers "today" rather than "ever".
+        row("Console watch-poll calls today", fmt.num(consoleUsage.watchPollCallsToday || 0), { mono: true }),
+        row("Projected daily total at the current interval",
+          fmt.num(consoleUsage.watchPollProjectedDaily || 0), { mono: true })),
 
       h("div", { class: "set-danger" },
         h("p", { class: "set-danger-note",
