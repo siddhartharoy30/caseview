@@ -122,6 +122,49 @@
 .qv-console-theme-btn:hover { background: var(--surface-2); color: var(--text-2); }
 .qv-console-theme-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
 
+/* ---- queue pane (v9 part 3 phase 2) --------------------------------------- */
+
+.qv-console-queue-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+.qv-console-queue-row:hover { background: var(--surface-2); }
+.qv-console-queue-row.is-urgent { border-left-color: var(--red); }
+
+.qv-console-queue-case {
+  font-size: var(--fs-table-cell);
+  color: var(--text);
+  flex-shrink: 0;
+}
+.qv-console-queue-contact {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+}
+.qv-console-queue-age {
+  flex-shrink: 0;
+  font-size: var(--fs-meta);
+}
+
+.qv-console-queue-rest-toggle {
+  margin-top: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--fs-meta);
+  color: var(--text-3);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.qv-console-queue-rest-toggle:hover { background: var(--surface-2); color: var(--text-2); }
+
 .qv-console * { scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
 .qv-console *::-webkit-scrollbar { width: 6px; }
 .qv-console *::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: var(--radius-sm); }

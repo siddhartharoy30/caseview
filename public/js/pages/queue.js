@@ -23,6 +23,7 @@ import { scoreMeter, bandExplain, bandLabel, KEYWORD_LABEL } from "../lib/iqs.js
 import { computeRscState, openRscPanel } from "../lib/rsc.js";
 import { computeCdmState, openCdmPanel } from "../lib/cdm.js";
 import * as bh from "../lib/bizhours.js";
+import { STATE_RANK, prioRank, decorate, byUrgency } from "../lib/queueRank.js";
 import { pageHead, page } from "./_shared.js";
 import { navigate, setQuery } from "../router.js";
 
@@ -260,7 +261,8 @@ const STATE_LABEL = {
   waiting:   "Waiting on customer",
   escalated: "Escalated",
 };
-const STATE_RANK = { reply: 0, breached: 1, due: 2, stale: 3, waiting: 4, "": 5 };
+// STATE_RANK now lives in lib/queueRank.js, shared with the shift console's
+// queue pane (v9 part 3) -- see the import above.
 
 /**
  * Drill-through parameters.
@@ -316,10 +318,7 @@ function rangeLabel(range) {
 
 /* ----------------------------------------------------------------- helpers */
 
-function prioRank(p) {
-  const m = /^P(\d)/i.exec(p || "");
-  return m ? Number(m[1]) : 9;
-}
+// prioRank now lives in lib/queueRank.js -- see the import above.
 
 /**
  * Real states for the Next Commitment column (v4 plan phase 2.2). `tier`
@@ -439,40 +438,8 @@ const saveLayout = (layout) => store.set(KEY_COLS, { order: layout.order, hidden
 const visibleColumns = (layout) =>
   layout.order.map((id) => COL_BY_ID.get(id)).filter((c) => c && !layout.hidden.has(c.id));
 
-/** Derives the row states the whole page keys off. */
-function decorate(cases, staleDays, now = Date.now()) {
-  for (const c of cases) {
-    const due = c.nextCommitment?.dueAt ? Date.parse(c.nextCommitment.dueAt) : NaN;
-    c._due = Number.isFinite(due) ? due : null;
-    c._ageMs = c.createdDate ? now - Date.parse(c.createdDate) : 0;
-
-    const flags = new Set();
-    if (c.needsMyReply) flags.add("reply");
-    if (c._due !== null) {
-      if (c._due < now) flags.add("breached");
-      if (fmt.isToday(c._due)) flags.add("due");
-    }
-    if (!c.needsMyReply && /wait|pending|customer/i.test(c.status || "")) flags.add("waiting");
-    const touch = c.lastMyTouch ? Date.parse(c.lastMyTouch) : null;
-    if (!c.isClosed && (touch === null || now - touch > staleDays * 86400000)) flags.add("stale");
-    if (c.isEscalated) flags.add("escalated");
-
-    c._flags = flags;
-    c._state = ["reply", "breached", "due", "stale", "waiting"].find((k) => flags.has(k)) || "";
-  }
-  return cases;
-}
-
-/** Default ordering when the user has not chosen one: most urgent first. */
-function byUrgency(a, b) {
-  const d = STATE_RANK[a._state] - STATE_RANK[b._state];
-  if (d) return d;
-  const ad = a._due ?? Infinity, bd = b._due ?? Infinity;
-  if (ad !== bd) return ad - bd;
-  const p = prioRank(a.priority) - prioRank(b.priority);
-  if (p) return p;
-  return b._ageMs - a._ageMs;
-}
+// decorate() and byUrgency() now live in lib/queueRank.js, shared with the
+// shift console's queue pane (v9 part 3) -- see the import above.
 
 function parseSort(spec) {
   return String(spec || "").split(",").map((s) => s.trim()).filter(Boolean)

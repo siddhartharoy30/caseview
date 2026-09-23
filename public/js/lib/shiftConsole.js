@@ -46,6 +46,9 @@ import * as store from "./store.js";
 import * as tabSync from "./tabSync.js";
 import { h, mount, icon } from "./dom.js";
 import { button, toast } from "./ui.js";
+import * as consoleQueue from "./consoleQueue.js";
+import * as fmt from "./fmt.js";
+import { navigate } from "../router.js";
 
 const KEY_SIZE = "phonePip.size";
 const KEY_PIP_WAS_OPEN = "phonePip.wasOpen";
@@ -253,24 +256,124 @@ function consoleThemeButton(pipWindow) {
   }, icon(["M20 14a8 8 0 01-10-10 8 8 0 1010 10z"], 13));
 }
 
+/** Last word of a contact's full name -- "contact surname" per the spec's
+ * compact row, since a 380px pane has no room for a full name next to a
+ * case number, priority chip and age. */
+function surname(contactName) {
+  const parts = String(contactName || "").trim().split(/\s+/);
+  return parts.length ? parts[parts.length - 1] : "";
+}
+
+function openCaseFromConsole(caseNumber) {
+  // The PiP window's content runs in the same script realm as the tab that
+  // opened it -- no cross-window messaging needed, unlike requestPipFocus()
+  // above (which exists because a *different* tab can't reach into this
+  // one at all). window here is always the opening tab's window.
+  window.focus();
+  navigate("/case/" + encodeURIComponent(caseNumber));
+}
+
+function queueRow(c) {
+  const urgent = fmt.priorityClass(c.priority) === "p1" || c.isEscalated;
+  const age = c.createdDate ? fmt.ageDays(c.createdDate).days + "d" : "—";
+  return h("div", {
+    class: `qv-console-queue-row ${urgent ? "is-urgent" : ""}`,
+    role: "button", tabindex: "0",
+    onclick: () => openCaseFromConsole(c.caseNumber),
+    onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCaseFromConsole(c.caseNumber); } },
+  },
+    h("span", { class: "mono qv-console-queue-case", text: c.caseNumber }),
+    h("span", { class: `chip ${fmt.priorityClass(c.priority)}`, text: c.priority || "—" }),
+    h("span", { class: "qv-console-queue-contact", text: surname(c.contactName) }),
+    h("span", { class: "dim mono qv-console-queue-age", text: age }));
+}
+
 /**
- * Builds the console's fixed pane skeleton once and wires the phone pane's
- * subscription into it. `cleanups` collects unsubscribe functions the
- * pagehide handler runs on close -- phases 2 (queue) and 4 (ticker) push
- * their own subscriptions' cleanups into the same array rather than this
- * function growing a bespoke teardown path per pane.
+ * The queue pane's body: needs-reply cases in full, everything else
+ * collapsed behind one expandable summary line (a second, inner collapse
+ * independent of the pane's own head-collapse). `showAllRef` is a one-item
+ * array used as a mutable box so this closes over the *same* boolean across
+ * repeated calls -- both the 15s local re-render and a real data refresh
+ * call this function again and neither should reset the operator's choice
+ * to expand "everything else".
+ */
+function renderQueueBody(pane, snap, showAllRef) {
+  if (!snap.loaded) {
+    mount(pane.body, h("p", { class: "dim", text: "Loading…" }));
+    return;
+  }
+  if (snap.error) {
+    mount(pane.body, h("p", { class: "dim", text: "Could not load the queue." }));
+    return;
+  }
+  const needReply = snap.needReply;
+  const rest = snap.cases.filter((c) => !needReply.includes(c));
+
+  const restSummary = rest.length
+    ? h("div", {
+        class: "qv-console-queue-rest-toggle", role: "button", tabindex: "0",
+        onclick: () => { showAllRef[0] = !showAllRef[0]; renderQueueBody(pane, snap, showAllRef); },
+        onkeydown: (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            showAllRef[0] = !showAllRef[0];
+            renderQueueBody(pane, snap, showAllRef);
+          }
+        },
+      }, `— ${rest.length} more`)
+    : null;
+
+  mount(pane.body,
+    needReply.length ? needReply.map(queueRow) : h("p", { class: "dim", text: "Nothing needs a reply right now." }),
+    restSummary,
+    showAllRef[0] ? rest.map(queueRow) : null);
+}
+
+function queuePaneMeta(snap) {
+  if (!snap.loaded) return "…";
+  if (snap.error) return "error";
+  return `${snap.needReply.length} need reply · ${snap.waitingOnCustomerCount} waiting on customer`;
+}
+
+/**
+ * Builds the console's fixed pane skeleton once and wires each pane's
+ * subscription into it. `cleanups` collects unsubscribe/stop functions the
+ * pagehide handler runs on close -- phase 4 (ticker) pushes its own
+ * subscription's cleanup into the same array rather than this function
+ * growing a bespoke teardown path per pane.
  */
 function buildConsole(host, pipWindow, cleanups) {
   host.classList.add("qv-console");
 
   const phonePane = consolePane("phone", "PHONE");
-  mount(host, consoleThemeButton(pipWindow), phonePane.root);
+  const queuePane = consolePane("queue", "QUEUE");
+  mount(host, consoleThemeButton(pipWindow), phonePane.root, queuePane.root);
 
   const unsubPhone = phoneMonitor.subscribe((state) => {
     phonePane.setMeta(phoneMetaText(state));
     pipContent(phonePane.body, state, pipWindow);
   });
   cleanups.push(unsubPhone);
+
+  // The "everything else" disclosure's state must survive both a real data
+  // refresh and the 15s no-network re-render below -- a plain closure
+  // variable captured by both would work too, but a one-item array makes
+  // the "this is a shared mutable box, not a fresh copy" intent explicit.
+  const showAllRef = [false];
+  const unsubQueue = consoleQueue.subscribe((snap) => {
+    queuePane.setMeta(queuePaneMeta(snap));
+    renderQueueBody(queuePane, snap, showAllRef);
+  });
+  cleanups.push(unsubQueue);
+  consoleQueue.refresh();
+
+  // Free local re-render: ages and the "Nd" countdown-style figures move
+  // even though the underlying data hasn't -- no network call, per the
+  // spec's own "the UI re-render at 15 seconds is free" framing. A real
+  // data refresh (initial load, or a future watch-poll signal) goes through
+  // consoleQueue.refresh() instead, which is a separate, explicit call.
+  const queueTicker = setInterval(() => renderQueueBody(queuePane, consoleQueue.getSnapshot(), showAllRef), 15000);
+  cleanups.push(() => clearInterval(queueTicker));
 }
 
 /**
