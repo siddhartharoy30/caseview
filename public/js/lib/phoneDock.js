@@ -19,7 +19,7 @@ import * as store from "./store.js";
 import * as phoneMonitor from "./phoneMonitor.js";
 import { statusTone } from "./phoneMonitor.js";
 import { connectButton } from "./connectLauncher.js";
-import * as phonePip from "./phonePip.js";
+import * as shiftConsole from "./shiftConsole.js";
 import { button } from "./ui.js";
 
 const KEY_COLLAPSED = "phoneDock.collapsed";
@@ -33,7 +33,7 @@ export function initPhoneDock() {
   // right after the pop-out owner disappears, or on first boot if a pop-out
   // was left open before a browser restart -- an explicit user action
   // (collapsing/expanding, or the pop-out reopening) always overrides it.
-  let forceExpanded = phonePip.pipWasOpen() && !phonePip.isPipOpen();
+  let forceExpanded = shiftConsole.pipWasOpen() && !shiftConsole.isPipOpen();
 
   function setCollapsed(next) {
     collapsed = next;
@@ -44,11 +44,11 @@ export function initPhoneDock() {
 
   function restoreBanner(state) {
     if (!state.enabled) return null; // a restore offer for a deliberately-off monitor is noise
-    if (phonePip.isPipOpen()) return null; // nothing to restore
-    if (!phonePip.pipWasOpen()) return null;
+    if (shiftConsole.isPipOpen()) return null; // nothing to restore
+    if (!shiftConsole.pipWasOpen()) return null;
     return h("div", { class: "phn-dock-restore" },
       h("p", { class: "dim", text: "Pop-out isn't open right now." }),
-      button("Restore pop-out", { small: true, onclick: () => phonePip.openPip(phonePip.pipContent) }));
+      button("Restore pop-out", { small: true, onclick: () => shiftConsole.openPip() }));
   }
 
   function body(state) {
@@ -99,13 +99,13 @@ export function initPhoneDock() {
       // pop-out that existed once and was lost) -- with no way to start one
       // for the first time without leaving the page you're on to visit
       // /phone. restoreBanner's specific "it disappeared" framing wins when
-      // it applies; phonePip.popoutRow (the exact same control /phone
+      // it applies; shiftConsole.popoutRow (the exact same control /phone
       // shows) is the fallback the rest of the time, so there's always a
       // one-click way to open the always-on-top window right from here.
-      showBody ? (restoreBanner(state) || phonePip.popoutRow(state)) : null);
+      showBody ? (restoreBanner(state) || shiftConsole.popoutRow(state)) : null);
   }
 
-  phonePip.onOwnershipChange((ownerId, { lostUngracefully } = {}) => {
+  shiftConsole.onOwnershipChange((ownerId, { lostUngracefully } = {}) => {
     if (lostUngracefully) forceExpanded = true; // no blind window between the owner dying and the restore offer appearing
     if (ownerId != null) forceExpanded = false; // a pop-out exists again -- nothing left to restore
     paint(phoneMonitor.getState());

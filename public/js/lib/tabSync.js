@@ -96,7 +96,7 @@ function dispatchMessage(envelope) {
 }
 
 /** Idempotent -- safe to call from more than one module (phoneMonitor.js
- * and phonePip.js both do). */
+ * and shiftConsole.js both do). */
 export function init() {
   if (inited) return;
   inited = true;
@@ -144,7 +144,7 @@ export function onLeaderChange(fn) {
 }
 
 /** Pins leadership to a specific tab regardless of id ordering -- used by
- * phonePip.js so the pop-out owner becomes (and stays) the leader. */
+ * shiftConsole.js so the pop-out owner becomes (and stays) the leader. */
 export function setLeaderOverride(overrideTabId) {
   leaderOverrideId = overrideTabId;
   broadcast("leader-override", { overrideTabId });

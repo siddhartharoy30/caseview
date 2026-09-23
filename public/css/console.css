@@ -1,0 +1,140 @@
+/* ==========================================================================
+   Shift console (v9 part 3) -- layout for the Document PiP pop-out.
+
+   app.css's :root tokens resolve here for free: the pop-out's stylesheet
+   list is a clone of the main document's (see shiftConsole.js's
+   cloneStylesheets()), so this file loads alongside app.css in the same
+   document and inherits the same custom properties. It never redeclares a
+   color/spacing/radius/shadow token -- the one addition this release makes
+   (--fs-console-hero) lives in app.css's own :root, so a token audit has one
+   home. Everything here is layout, scoped under .qv-console so no rule can
+   reach the rest of the app and no app rule can reach in here.
+
+   Reference: docs/PLAN_V9_CONSOLE.md, ~/Downloads/qview-v9-part3-shift-console-prompt.md
+   ========================================================================== */
+
+.qv-console {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 100vh;
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: var(--fs-table-cell);
+  overflow: hidden;
+}
+
+/* ---- panes ---------------------------------------------------------------- */
+
+.qv-console-pane {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+/* The last pane fills remaining height and scrolls internally rather than
+   letting the whole window grow past the screen -- the spec's "scroll rather
+   than letting the window outgrow the screen." */
+.qv-console-pane:last-child {
+  border-bottom: none;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.qv-console-pane:last-child .qv-console-pane-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.qv-console-pane-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  cursor: pointer;
+  user-select: none;
+}
+.qv-console-pane-head:hover { background: var(--surface-2); }
+.qv-console-pane-head:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
+}
+
+.qv-console-pane-title {
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: var(--fs-micro);
+  letter-spacing: .04em;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.qv-console-pane-meta {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-meta);
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qv-console-pane-caret {
+  flex-shrink: 0;
+  margin-left: auto;
+  width: 13px;
+  height: 13px;
+  color: var(--text-4);
+  transition: transform var(--speed) ease;
+}
+.qv-console-pane[data-collapsed="true"] .qv-console-pane-caret { transform: rotate(-90deg); }
+
+.qv-console-pane-body {
+  padding: 0 var(--space-2) var(--space-2);
+}
+.qv-console-pane[data-collapsed="true"] .qv-console-pane-body { display: none; }
+.qv-console-pane[data-collapsed="true"] { border-bottom-color: var(--border); }
+
+/* ---- console-wide chrome --------------------------------------------------- */
+
+/* Independent of the main app's light/dark setting -- its own persisted
+   preference (shiftConsole.theme), defaulting to dark. Pinned so it's
+   reachable regardless of which panes are collapsed. */
+.qv-console-theme-btn {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  z-index: 1;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-4);
+  cursor: pointer;
+}
+.qv-console-theme-btn:hover { background: var(--surface-2); color: var(--text-2); }
+.qv-console-theme-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+
+.qv-console * { scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+.qv-console *::-webkit-scrollbar { width: 6px; }
+.qv-console *::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: var(--radius-sm); }
+
+.qv-console button:focus-visible,
+.qv-console [tabindex]:focus-visible,
+.qv-console a:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qv-console-pane-caret {
+    transition: none;
+  }
+}

@@ -60,6 +60,9 @@
   --fs-table-cell:    12px;
   --fs-meta:          11px;
   --fs-micro:         10px;
+  /* v9 part 3: the shift console's one large readout (phone position). Not a
+     general-purpose step -- nothing else in the app needs a number this big. */
+  --fs-console-hero:  28px;
 
   /* Spacing scale, 4px-based. Card insets and gaps converge on these instead
      of each picking its own value from the 9-18px range they were spread
@@ -5262,14 +5265,19 @@ table.tbl th.check-col input {
   .phn-status-grid { grid-template-columns: 1fr 1fr; }
 }
 
-/* v5 phase 4d: Document PiP pop-out content. The pip window's own body is
-   the class target for the ringing state below -- its stylesheet is a
-   clone of this one (see phonePip.js), so these rules apply there exactly
-   as they do everywhere else, no second copy to keep in sync. */
-.phn-pip { padding: var(--space-3); }
+/* v5 phase 4d: Document PiP pop-out content, now the console's phone pane
+   (v9 part 3, see shiftConsole.js). The pip window's own body is the class
+   target for the ringing state below -- its stylesheet is a clone of this
+   one, so these rules apply there exactly as they do everywhere else, no
+   second copy to keep in sync. */
+.phn-pip { padding: var(--space-2); }
 .phn-pip-pos {
   font-family: var(--mono);
-  font-size: 40px;
+  font-variant-numeric: tabular-nums;
+  /* v9 part 3: the console's one "hero number" token -- was a hardcoded
+     40px, denser now that this pane sits alongside two others instead of
+     owning the whole pop-out. */
+  font-size: var(--fs-console-hero);
   font-weight: 700;
   color: var(--text);
 }
@@ -5310,7 +5318,7 @@ body.phn-ringing { background: color-mix(in srgb, var(--red) 18%, var(--bg)); }
    disappears, or on first boot after a browser restart with one left open. */
 .phn-dock-restore { margin-top: var(--space-2); display: flex; flex-direction: column; gap: var(--space-1); align-items: flex-start; }
 
-/* phonePip.popoutRow() is shared with the wider /phone page, where its
+/* shiftConsole.popoutRow() is shared with the wider /phone page, where its
    button-plus-hint reads fine side by side -- the 220px dock is too narrow
    for that, so it stacks the same way .phn-dock-restore already does. */
 .phn-dock .phn-toggle-row { flex-direction: column; align-items: flex-start; gap: var(--space-1); margin: var(--space-2) 0 0; }

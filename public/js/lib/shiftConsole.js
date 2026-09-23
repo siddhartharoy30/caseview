@@ -1,6 +1,7 @@
 /**
- * Document Picture-in-Picture pop-out for the phone queue -- v5 phase 4d,
- * made cross-tab-aware in v6 phase 3.
+ * Document Picture-in-Picture shift console -- v5 phase 4d (phone-only pop-out),
+ * made cross-tab-aware in v6 phase 3, turned into a multi-pane console in v9
+ * part 3.
  *
  * A web page cannot make an ordinary browser window stay on top; the
  * Document PiP API (`documentPictureInPicture.requestWindow()`) is the one
@@ -11,9 +12,20 @@
  * sniffing, per the plan's own constraint: the reason is always a secure
  * context or an old Chrome, and either way the fallback is identical).
  *
- * Reuses the `phoneMonitor` singleton from phase 3 for its content exactly
- * like the page and the dock do -- opening a pop-out adds a subscriber, not
- * a second poller or a second alert path.
+ * v9 part 3: Chrome allows exactly one Document PiP window per browser, so a
+ * second always-on-top window for the case queue is not possible -- the
+ * phone monitor already occupies the one available slot. So this module
+ * stopped being a phone-only pop-out and became a console: one window,
+ * three independent panes (ticker, phone, queue), each owning its own
+ * subscribe-and-paint cycle into its own container under the PiP body,
+ * rather than one subscriber owning the whole body the way the phone pane
+ * used to. Window lifecycle, sizing, stylesheet cloning, pagehide handling
+ * and cross-tab ownership below are unchanged from v5/v6 -- this release
+ * only changes what gets built inside the window once it opens.
+ *
+ * Reuses the `phoneMonitor` singleton from phase 3 for the phone pane's
+ * content exactly like the page and the dock do -- opening the console adds
+ * a subscriber, not a second poller or a second alert path.
  *
  * v6 phase 3: `documentPictureInPicture.requestWindow()` requires a user
  * gesture, and when the tab owning it dies no other tab can silently
@@ -32,12 +44,16 @@ import * as phoneMonitor from "./phoneMonitor.js";
 import { statusTone } from "./phoneMonitor.js";
 import * as store from "./store.js";
 import * as tabSync from "./tabSync.js";
-import { h, mount } from "./dom.js";
+import { h, mount, icon } from "./dom.js";
 import { button, toast } from "./ui.js";
 
 const KEY_SIZE = "phonePip.size";
 const KEY_PIP_WAS_OPEN = "phonePip.wasOpen";
-const DEFAULT_SIZE = { width: 380, height: 520 };
+const KEY_CONSOLE_THEME = "shiftConsole.theme";
+// Taller default than the phone-only pop-out's old 380x520 -- there are now
+// up to three stacked panes. Still just a starting point: the resize
+// listener below persists whatever the operator actually settles on.
+const DEFAULT_SIZE = { width: 380, height: 640 };
 
 let popupRef = null;
 let pipOwnerTabId = null;
@@ -78,9 +94,9 @@ export function isPipOwnerLocal() {
   return pipOwnerTabId === tabSync.tabId;
 }
 
-/** True from the moment a pop-out opens until its graceful close -- a crash
- * never clears it, which is exactly the signal the dock's restore banner
- * needs, whether the crash just happened or the browser has since
+/** True from the moment the console opens until its graceful close -- a
+ * crash never clears it, which is exactly the signal the dock's restore
+ * banner needs, whether the crash just happened or the browser has since
  * restarted entirely. */
 export function pipWasOpen() {
   return store.get(KEY_PIP_WAS_OPEN, false);
@@ -136,9 +152,11 @@ tabSync.onLeaderChange((leaderTabId) => {
 /**
  * Styles never carry over into a PiP document automatically. Cloning the
  * `<link>` elements (not inlining a duplicate copy of the CSS) means a
- * future edit to app.css needs no second file kept in sync. Waiting for
- * every clone's own load/error before the caller reveals content avoids the
- * flash-of-unstyled-content a naive "just append and go" would produce.
+ * future edit to app.css or console.css needs no second file kept in sync
+ * -- whatever stylesheets the main document links, the console gets too.
+ * Waiting for every clone's own load/error before the caller reveals
+ * content avoids the flash-of-unstyled-content a naive "just append and go"
+ * would produce.
  */
 function cloneStylesheets(doc) {
   const links = Array.from(document.querySelectorAll('link[rel="stylesheet"]'));
@@ -151,12 +169,115 @@ function cloneStylesheets(doc) {
 }
 
 /**
- * `buildContent(host, state, pipWindow)` is called once per phoneMonitor
- * update, exactly like a page's own paint(state) -- the caller owns
- * rendering, this module owns the window lifecycle. Must be called from a
- * user gesture (a button click), never from page load.
+ * One collapsible pane shell -- the ticker, phone and queue panes (v9 part
+ * 3) all use this instead of each inventing its own head/collapse markup.
+ * `title` is the always-visible label ("PHONE"); `setMeta(text)` updates the
+ * one-line summary next to it, visible whether or not the pane is
+ * collapsed, so a collapsed pane still reads at a glance (the spec's own
+ * mockup: a collapsed ticker line still shows the price).
+ *
+ * Collapse state persists per pane, per the same "<owner>.collapsed"
+ * localStorage idiom phoneDock.js and tzstrip.js already use.
  */
-export async function openPip(buildContent) {
+function consolePane(key, title, { defaultCollapsed = false } = {}) {
+  const collapseKey = `shiftConsole.${key}.collapsed`;
+  let collapsed = store.get(collapseKey, defaultCollapsed);
+
+  const metaEl = h("span", { class: "qv-console-pane-meta" });
+  const caretEl = icon(["M9 6l6 6-6 6"], 13);
+  caretEl.classList.add("qv-console-pane-caret");
+  const body = h("div", { class: "qv-console-pane-body" });
+
+  const head = h("div", {
+    class: "qv-console-pane-head",
+    role: "button",
+    tabindex: "0",
+    "aria-expanded": String(!collapsed),
+    onclick: () => toggle(),
+    onkeydown: (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+    },
+  },
+    h("span", { class: "qv-console-pane-title", text: title }),
+    metaEl,
+    caretEl);
+
+  const root = h("div", { class: "qv-console-pane", "data-collapsed": String(collapsed) }, head, body);
+
+  function toggle() {
+    collapsed = !collapsed;
+    root.dataset.collapsed = String(collapsed);
+    head.setAttribute("aria-expanded", String(!collapsed));
+    store.set(collapseKey, collapsed);
+  }
+
+  return {
+    root,
+    body,
+    setMeta(text) { metaEl.textContent = text || ""; },
+  };
+}
+
+/** One-line summary shown in the phone pane's header, visible even while
+ * collapsed -- "#1 of 3 · AMER/IN", matching the spec's own mockup. */
+function phoneMetaText(state) {
+  if (!state.enabled) return "off";
+  const board = state.board;
+  if (!board || !board.ok) return "—";
+  const mine = board.agents.find((a) => a.name === state.myName);
+  if (!mine) return "not on board";
+  const r = state.position;
+  if (!r || r.position == null) return mine.statusText || "";
+  return "#" + r.position + " of " + r.poolSize + (r.poolLabel ? " · " + r.poolLabel : "");
+}
+
+/** Reads the persisted console-only theme preference and applies it to the
+ * PiP document -- independent of the main app's own light/dark setting,
+ * which the className clone above already copied in. Defaults to dark
+ * (the "instrument panel" mood), applied *after* that clone so it wins. */
+function applyConsoleTheme(pipWindow) {
+  const theme = store.get(KEY_CONSOLE_THEME, "dark");
+  pipWindow.document.body.classList.toggle("light", theme === "light");
+  pipWindow.document.body.classList.toggle("dark", theme !== "light");
+}
+
+function consoleThemeButton(pipWindow) {
+  return h("button", {
+    class: "qv-console-theme-btn", type: "button", title: "Toggle console theme",
+    onclick: () => {
+      const next = pipWindow.document.body.classList.contains("light") ? "dark" : "light";
+      pipWindow.document.body.classList.toggle("light", next === "light");
+      pipWindow.document.body.classList.toggle("dark", next !== "light");
+      store.set(KEY_CONSOLE_THEME, next);
+    },
+  }, icon(["M20 14a8 8 0 01-10-10 8 8 0 1010 10z"], 13));
+}
+
+/**
+ * Builds the console's fixed pane skeleton once and wires the phone pane's
+ * subscription into it. `cleanups` collects unsubscribe functions the
+ * pagehide handler runs on close -- phases 2 (queue) and 4 (ticker) push
+ * their own subscriptions' cleanups into the same array rather than this
+ * function growing a bespoke teardown path per pane.
+ */
+function buildConsole(host, pipWindow, cleanups) {
+  host.classList.add("qv-console");
+
+  const phonePane = consolePane("phone", "PHONE");
+  mount(host, consoleThemeButton(pipWindow), phonePane.root);
+
+  const unsubPhone = phoneMonitor.subscribe((state) => {
+    phonePane.setMeta(phoneMetaText(state));
+    pipContent(phonePane.body, state, pipWindow);
+  });
+  cleanups.push(unsubPhone);
+}
+
+/**
+ * `openPip()` must be called from a user gesture (a button click), never
+ * from page load.
+ */
+export async function openPip() {
   if (isPipOpenLocally()) { documentPictureInPicture.window.focus(); return; }
   if (pipOwnerTabId != null) { requestPipFocus(); return; } // defensive -- the UI shouldn't offer "Pop out" when another tab owns one
 
@@ -170,20 +291,22 @@ export async function openPip(buildContent) {
     // etc.) is an unhandled promise rejection -- invisible to the operator,
     // who just sees the click do nothing. Surfacing it is the whole fix;
     // what it actually says decides what (if anything) needs fixing next.
-    toast(`Could not open the pop-out: ${err && err.message ? err.message : err}`, "err");
+    toast(`Could not open the shift console: ${err && err.message ? err.message : err}`, "err");
     return;
   }
   await cloneStylesheets(pipWindow.document);
-  pipWindow.document.body.className = document.body.className; // theme (light/dark) travels with it
+  pipWindow.document.body.className = document.body.className; // app theme/density travel with it
+  applyConsoleTheme(pipWindow); // then the console's own theme preference wins
 
   const host = pipWindow.document.body;
-  const unsubscribe = phoneMonitor.subscribe((state) => buildContent(host, state, pipWindow));
+  const cleanups = [];
+  buildConsole(host, pipWindow, cleanups);
 
   announceOwnership(true);
   store.set(KEY_PIP_WAS_OPEN, true);
 
   pipWindow.addEventListener("pagehide", () => {
-    unsubscribe();
+    for (const unsubscribe of cleanups) unsubscribe();
     announceOwnership(false);
     store.set(KEY_PIP_WAS_OPEN, false);
   }, { once: true });
@@ -224,7 +347,7 @@ export function popoutRow(state) {
         h("span", { class: "dim", text: "Open in another tab." }));
     }
     return h("div", { class: "phn-toggle-row" },
-      button("Pop out", { small: true, onclick: () => openPip(pipContent) }),
+      button("Pop out", { small: true, onclick: () => openPip() }),
       h("span", { class: "dim", text: "Opens an always-on-top window." }));
   }
 
@@ -274,11 +397,13 @@ function agentsAheadOf(state) {
 }
 
 /**
- * v5 phase 4d: the pop-out's content -- a glance surface, not a page.
- * Reuses `STATUS_TONE`/`.phn-*` CSS verbatim (via the cloned stylesheet
- * above) rather than a second colour vocabulary, so the board, the page
- * and the pop-out never disagree about what amber means. Moved here from
- * phone.js in v6 phase 3 (see agentsAheadOf's comment above).
+ * The phone pane's content -- a glance surface, not a page. Reuses
+ * `STATUS_TONE`/`.phn-*` CSS verbatim (via the cloned stylesheet above)
+ * rather than a second colour vocabulary, so the board, the page and the
+ * console never disagree about what amber means. Moved here from phone.js
+ * in v6 phase 3 (see agentsAheadOf's comment above); in v9 part 3 this now
+ * paints into its own pane container instead of the whole PiP body (see
+ * buildConsole()) -- the markup and data logic below are unchanged.
  *
  * v8 follow-on: deliberately thinner than the dock/page here on purpose --
  * no queued-caller counts, no Connect launcher. Both stay on the dock and
@@ -289,7 +414,7 @@ export function pipContent(host, state) {
   const board = state.board;
   const mine = board && board.ok ? board.agents.find((a) => a.name === state.myName) : null;
   const ringing = mine && (mine.statusClass === "ringing" || mine.statusClass === "accepting_call");
-  host.classList.toggle("phn-ringing", !!ringing);
+  host.ownerDocument.body.classList.toggle("phn-ringing", !!ringing);
 
   if (!state.enabled) {
     mount(host, h("div", { class: "phn-pip" }, h("p", { class: "dim", text: "Phone monitor is off." })));

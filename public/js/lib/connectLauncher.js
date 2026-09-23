@@ -10,7 +10,7 @@
  *
  * QView cannot see anything about the CCP window once it opens -- it's
  * cross-origin, so there is no session-status API to read and no `resize`
- * listener to attach (unlike the Document PiP window in phonePip.js, which
+ * listener to attach (unlike the Document PiP window in shiftConsole.js, which
  * *is* same-origin). The one honest signal available is second-hand: the
  * phone board's own status for me. `connectButton()` surfaces that as a
  * hint, never as a claim about the Connect session itself.
