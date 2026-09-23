@@ -19,7 +19,6 @@ import { banner, emptyState, button, dialog, field, select } from "../lib/ui.js"
 import { page, pageHead, cardHead, eyebrow } from "./_shared.js";
 import * as phoneMonitor from "../lib/phoneMonitor.js";
 import { statusTone } from "../lib/phoneMonitor.js";
-import * as shiftConsole from "../lib/shiftConsole.js";
 import { connectButton } from "../lib/connectLauncher.js";
 
 /** v5 phase 2: any non-federal row is clickable, so a wrong classification
@@ -140,7 +139,6 @@ export function render(ctx, host, shell) {
           h("input", { type: "checkbox", checked: state.enabled, onchange: (e) => phoneMonitor.setEnabled(e.target.checked) }),
           h("span", { text: "I'm on the phone queue" })),
         h("span", { class: "dim", text: "Polls the board every 10s while this is on, from anywhere in QView. Off means zero requests." })),
-      shiftConsole.popoutRow(state),
       statusCard(state),
       boardTable(state));
   }
@@ -148,9 +146,5 @@ export function render(ctx, host, shell) {
   mount(host, page(pageHead("Phone Queue"), bodyHost));
 
   const unsubscribeMonitor = phoneMonitor.subscribe(paint);
-  // Ownership changes (another tab opening/closing the pop-out) don't flow
-  // through phoneMonitor -- this re-renders popoutRow for those without
-  // phone.js ever importing tabSync.js directly.
-  const unsubscribePip = shiftConsole.onOwnershipChange(() => paint(phoneMonitor.getState()));
-  return () => { unsubscribeMonitor(); unsubscribePip(); };
+  return () => { unsubscribeMonitor(); };
 }

@@ -5314,11 +5314,3 @@ body.phn-ringing { background: color-mix(in srgb, var(--red) 18%, var(--bg)); }
 .phn-connect-disclosure summary:hover { color: var(--blue-2); }
 .phn-connect-disclosure[open] summary { margin-bottom: var(--space-1); }
 
-/* v6 phase 3: the dock's one-click recovery when the pop-out owner tab
-   disappears, or on first boot after a browser restart with one left open. */
-.phn-dock-restore { margin-top: var(--space-2); display: flex; flex-direction: column; gap: var(--space-1); align-items: flex-start; }
-
-/* shiftConsole.popoutRow() is shared with the wider /phone page, where its
-   button-plus-hint reads fine side by side -- the 220px dock is too narrow
-   for that, so it stacks the same way .phn-dock-restore already does. */
-.phn-dock .phn-toggle-row { flex-direction: column; align-items: flex-start; gap: var(--space-1); margin: var(--space-2) 0 0; }

@@ -45,7 +45,7 @@ import { statusTone } from "./phoneMonitor.js";
 import * as store from "./store.js";
 import * as tabSync from "./tabSync.js";
 import { h, mount, icon } from "./dom.js";
-import { button, toast } from "./ui.js";
+import { toast } from "./ui.js";
 import * as consoleQueue from "./consoleQueue.js";
 import * as fmt from "./fmt.js";
 import { navigate } from "../router.js";
@@ -725,43 +725,27 @@ export function openPopupFallback() {
 }
 
 /**
- * Pop-out control: shows the best available tier and never renders a
- * button that does nothing. Moved here from phone.js (v8 follow-on) so the
- * dock can offer the exact same trigger the /phone page does -- previously
- * the dock only ever showed a *conditional* "Restore pop-out" banner (only
- * after a pop-out had been opened once and then lost), with no way to
- * start one for the first time without visiting /phone. When another tab
- * already owns the pop-out, this offers "Focus pop-out" instead of trying
- * (and failing) to open a second one -- Chrome allows only one PiP window
- * at a time regardless of tab.
+ * Opens the console; focuses it instead if another tab already owns it;
+ * falls back to a plain popup on a browser/context that can't do Document
+ * PiP at all. The one decision every pop-out trigger needs to make,
+ * regardless of what UI calls it.
  *
- * v9 part 3 follow-on: no longer gated on state.enabled ("I'm on the phone
- * queue"). That gate made sense when this was a phone-only pop-out with
- * nothing to show otherwise; now the console's ticker and queue panes are
- * useful whether or not phone monitoring is even on, so the trigger is
- * available unconditionally (still subject to the browser-support tier
- * check below).
+ * v9 part 3 follow-on: used directly by the main topbar's icon button
+ * (app.js) instead of a labeled row rendered separately on /phone and in
+ * the dock -- the console is a general-purpose tool now, not phone-specific,
+ * so its one entry point lives in global chrome rather than phone-specific
+ * pages. No longer gated on phone-monitor state either: that gate made
+ * sense when this was a phone-only pop-out with nothing to show otherwise;
+ * now the console's ticker and queue panes are useful on their own.
  */
-export function popoutRow(state) {
+export function openOrFocusConsole() {
   const t = tier();
-
   if (t === "pip") {
-    if (isPipOpen() && !isPipOwnerLocal()) {
-      return h("div", { class: "phn-toggle-row" },
-        button("Focus pop-out", { small: true, onclick: () => requestPipFocus() }),
-        h("span", { class: "dim", text: "Open in another tab." }));
-    }
-    return h("div", { class: "phn-toggle-row" },
-      button("Pop out", { small: true, onclick: () => openPip() }),
-      h("span", { class: "dim", text: "Opens an always-on-top window." }));
+    if (isPipOpen() && !isPipOwnerLocal()) requestPipFocus();
+    else openPip();
+    return;
   }
-
-  const why = t === "insecure-context"
-    ? "Always-on-top needs QView on https or localhost."
-    : "Always-on-top needs a newer Chrome.";
-  return h("div", { class: "phn-toggle-row" },
-    button("Pop out (window)", { small: true, onclick: () => openPopupFallback() }),
-    h("span", { class: "dim", text: why }));
+  openPopupFallback();
 }
 
 // v5 phase 4's "close the window when phone monitoring turns off" rule is

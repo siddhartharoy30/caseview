@@ -16,6 +16,7 @@ import { startNotifications } from "./lib/notify.js";
 import { initTzStrip } from "./lib/tzstrip.js";
 import { init as initPhoneMonitor } from "./lib/phoneMonitor.js";
 import { initPhoneDock } from "./lib/phoneDock.js";
+import { openOrFocusConsole } from "./lib/shiftConsole.js";
 import { route, setNotFound, onRouteChange, onQueryChange, navigate, start, resolve, currentRoute } from "./router.js";
 
 /* ------------------------------------------------------------- navigation */
@@ -225,6 +226,13 @@ function wireTopbar() {
     }
   });
 
+  // v9 part 3 follow-on: the console's one entry point, now that it's a
+  // general-purpose tool (ticker, phone, queue) rather than phone-specific
+  // -- previously only reachable from /phone or the docked mini-panel.
+  // openOrFocusConsole() itself decides open vs. focus-another-tab vs. the
+  // plain-popup fallback; this button just triggers it from a real click,
+  // which is what documentPictureInPicture.requestWindow() requires.
+  $("#consolePopoutBtn").addEventListener("click", () => openOrFocusConsole());
   $("#refreshBtn").addEventListener("click", () => manualSync());
   $("#themeBtn").addEventListener("click", () => {
     const next = document.body.classList.contains("light") ? "dark" : "light";

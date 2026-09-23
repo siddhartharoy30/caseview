@@ -2,16 +2,20 @@
  * Docked phone-queue mini-panel -- v5 phase 4b (build order's "tier 3").
  *
  * A compact panel pinned to a corner of QView, subscribing to the same
- * `phoneMonitor` singleton every other surface uses (the page, and from
- * phase 4d, the Document PiP pop-out) -- no fetch or alert logic of its own,
- * per the "one poll, one alert" constraint. Worth building on its own merit,
- * not just as a fallback for browsers without Document PiP: it means the
- * position stays visible while working the Queue or a case, which the page
- * alone can't do.
+ * `phoneMonitor` singleton every other surface uses -- no fetch or alert
+ * logic of its own, per the "one poll, one alert" constraint. Worth
+ * building on its own merit, not just as a fallback for browsers without
+ * Document PiP: it means the position stays visible while working the
+ * Queue or a case, which the page alone can't do.
  *
  * Modeled on `tzstrip.js`'s shape: a fixed top-level DOM slot in index.html,
  * a module-level `init...()` called once from app.js's boot(), so it
  * survives every route change untouched.
+ *
+ * v9 part 3 follow-on: the shift console's open/restore controls moved to
+ * the main topbar (app.js's consolePopoutBtn) now that the console is a
+ * general-purpose tool, not phone-specific -- this dock no longer shows or
+ * tracks pop-out state at all.
  */
 
 import { h, mount } from "./dom.js";
@@ -19,8 +23,6 @@ import * as store from "./store.js";
 import * as phoneMonitor from "./phoneMonitor.js";
 import { statusTone } from "./phoneMonitor.js";
 import { connectButton } from "./connectLauncher.js";
-import * as shiftConsole from "./shiftConsole.js";
-import { button } from "./ui.js";
 
 const KEY_COLLAPSED = "phoneDock.collapsed";
 
@@ -29,28 +31,11 @@ export function initPhoneDock() {
   if (!container) return;
 
   let collapsed = store.get(KEY_COLLAPSED, false);
-  // v6 phase 3: forces the body open regardless of the collapsed preference
-  // right after the pop-out owner disappears, or on first boot if a pop-out
-  // was left open before a browser restart -- an explicit user action
-  // (collapsing/expanding, or the pop-out reopening) always overrides it.
-  let forceExpanded = shiftConsole.pipWasOpen() && !shiftConsole.isPipOpen();
 
   function setCollapsed(next) {
     collapsed = next;
-    forceExpanded = false;
     store.set(KEY_COLLAPSED, next);
     paint(phoneMonitor.getState());
-  }
-
-  function restoreBanner() {
-    // v9 part 3 follow-on: no longer gated on state.enabled -- the console
-    // is useful (ticker, queue) whether or not phone monitoring is on, so
-    // losing one is worth offering to restore regardless.
-    if (shiftConsole.isPipOpen()) return null; // nothing to restore
-    if (!shiftConsole.pipWasOpen()) return null;
-    return h("div", { class: "phn-dock-restore" },
-      h("p", { class: "dim", text: "Pop-out isn't open right now." }),
-      button("Restore pop-out", { small: true, onclick: () => shiftConsole.openPip() }));
   }
 
   function body(state) {
@@ -86,7 +71,7 @@ export function initPhoneDock() {
     // init(), so this still hides the dock on the login screen without
     // depending on the toggle.
     container.hidden = state.loading;
-    const showBody = !collapsed || forceExpanded;
+    const showBody = !collapsed;
     mount(container,
       h("div", { class: "phn-dock-head" },
         h("span", { class: "eyebrow", text: "Phone queue" }),
@@ -96,22 +81,8 @@ export function initPhoneDock() {
           onclick: () => setCollapsed(!collapsed),
         }, collapsed ? "+" : "–")),
       connectButton(state, { compact: true }),
-      showBody && state.enabled ? body(state) : null,
-      // The dock used to offer only the *conditional* restore banner (a
-      // pop-out that existed once and was lost) -- with no way to start one
-      // for the first time without leaving the page you're on to visit
-      // /phone. restoreBanner's specific "it disappeared" framing wins when
-      // it applies; shiftConsole.popoutRow (the exact same control /phone
-      // shows) is the fallback the rest of the time, so there's always a
-      // one-click way to open the always-on-top window right from here.
-      showBody ? (restoreBanner() || shiftConsole.popoutRow(state)) : null);
+      showBody && state.enabled ? body(state) : null);
   }
-
-  shiftConsole.onOwnershipChange((ownerId, { lostUngracefully } = {}) => {
-    if (lostUngracefully) forceExpanded = true; // no blind window between the owner dying and the restore offer appearing
-    if (ownerId != null) forceExpanded = false; // a pop-out exists again -- nothing left to restore
-    paint(phoneMonitor.getState());
-  });
 
   phoneMonitor.subscribe(paint);
 }
