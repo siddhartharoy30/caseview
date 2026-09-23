@@ -221,7 +221,25 @@ function consolePane(key, title, { defaultCollapsed = false } = {}) {
     root,
     body,
     setMeta(text) { metaEl.textContent = text || ""; },
+    /** One value-change wash on the pane's header line, then it settles --
+     * never a loop. `urgent` swaps the neutral wash for the red pulse
+     * (reaching phone position #1, or a new P1 landing). */
+    flash(urgent = false) { flashChange(metaEl, urgent); },
   };
+}
+
+/** Adds the wash/pulse class, forces a reflow so re-triggering it right
+ * after a previous flash still restarts the animation, then removes it --
+ * a single one-shot signal, per the spec's "then fading out" / "then
+ * stop." Reduced-motion users get the class add/remove with no visible
+ * transition (console.css's own media query), which is the spec's own
+ * "state colour changes, animation doesn't." */
+function flashChange(el, urgent) {
+  const cls = urgent ? "qv-console-pulse" : "qv-console-flash";
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
+  setTimeout(() => el.classList.remove(cls), urgent ? 600 : 400);
 }
 
 /** One-line summary shown in the phone pane's header, visible even while
@@ -276,11 +294,11 @@ function openCaseFromConsole(caseNumber) {
   navigate("/case/" + encodeURIComponent(caseNumber));
 }
 
-function queueRow(c) {
+function queueRow(c, isNew) {
   const urgent = fmt.priorityClass(c.priority) === "p1" || c.isEscalated;
   const age = c.createdDate ? fmt.ageDays(c.createdDate).days + "d" : "—";
   return h("div", {
-    class: `qv-console-queue-row ${urgent ? "is-urgent" : ""}`,
+    class: `qv-console-queue-row ${urgent ? "is-urgent" : ""} ${isNew ? "qv-console-row-enter" : ""}`,
     role: "button", tabindex: "0",
     onclick: () => openCaseFromConsole(c.caseNumber),
     onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCaseFromConsole(c.caseNumber); } },
@@ -294,13 +312,18 @@ function queueRow(c) {
 /**
  * The queue pane's body: needs-reply cases in full, everything else
  * collapsed behind one expandable summary line (a second, inner collapse
- * independent of the pane's own head-collapse). `showAllRef` is a one-item
- * array used as a mutable box so this closes over the *same* boolean across
- * repeated calls -- both the 15s local re-render and a real data refresh
- * call this function again and neither should reset the operator's choice
- * to expand "everything else".
+ * independent of the pane's own head-collapse).
+ *
+ * `showAllRef` and `historyRef` are one-item mutable boxes so this closes
+ * over the *same* state across repeated calls -- both the 15s no-network
+ * re-render and a real data refresh call this function again, and neither
+ * should reset the operator's "everything else" choice or wrongly replay
+ * the arrival animation for a row that was already there last render.
+ * `historyRef[0]` is the previous render's needs-reply case-number set;
+ * comparing against it is what tells a genuinely new row (slide-in) apart
+ * from a routine re-render of one already on screen.
  */
-function renderQueueBody(pane, snap, showAllRef) {
+function renderQueueBody(pane, snap, showAllRef, historyRef) {
   if (!snap.loaded) {
     mount(pane.body, h("p", { class: "dim", text: "Loading…" }));
     return;
@@ -309,27 +332,56 @@ function renderQueueBody(pane, snap, showAllRef) {
     mount(pane.body, h("p", { class: "dim", text: "Could not load the queue." }));
     return;
   }
+  if (!snap.cases.length) {
+    // Zero cases is a different fact than "nothing needs a reply right
+    // now" (which implies there's a queue, just none of it urgent) -- says
+    // so plainly rather than leaving a pane that could be mistaken for
+    // broken or still loading.
+    mount(pane.body, h("p", { class: "dim", text: "No open cases." }));
+    historyRef[0] = new Set();
+    return;
+  }
   const needReply = snap.needReply;
   const rest = snap.cases.filter((c) => !needReply.includes(c));
+  // null means "first successful render" -- nothing has arrived, the
+  // console just opened. "No entrance animation on open" (the spec's own
+  // rule) means the very first paint must not slide anything in, however
+  // many cases already need a reply at that moment.
+  const firstRender = historyRef[0] === null;
+  const prevCaseNumbers = historyRef[0] || new Set();
+  const isNewRow = (c) => !firstRender && !prevCaseNumbers.has(c.caseNumber);
 
   const restSummary = rest.length
     ? h("div", {
         class: "qv-console-queue-rest-toggle", role: "button", tabindex: "0",
-        onclick: () => { showAllRef[0] = !showAllRef[0]; renderQueueBody(pane, snap, showAllRef); },
+        onclick: () => { showAllRef[0] = !showAllRef[0]; renderQueueBody(pane, snap, showAllRef, historyRef); },
         onkeydown: (e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             showAllRef[0] = !showAllRef[0];
-            renderQueueBody(pane, snap, showAllRef);
+            renderQueueBody(pane, snap, showAllRef, historyRef);
           }
         },
       }, `— ${rest.length} more`)
     : null;
 
   mount(pane.body,
-    needReply.length ? needReply.map(queueRow) : h("p", { class: "dim", text: "Nothing needs a reply right now." }),
+    needReply.length
+      ? needReply.map((c) => queueRow(c, isNewRow(c)))
+      : h("p", { class: "dim", text: "Nothing needs a reply right now." }),
     restSummary,
-    showAllRef[0] ? rest.map(queueRow) : null);
+    showAllRef[0] ? rest.map((c) => queueRow(c, false)) : null);
+
+  // A newly-arrived P1 or escalated case gets the urgent pulse on the
+  // pane's own header; any other change to who needs a reply gets the
+  // quieter neutral wash. Both are a single wash-and-settle, never a loop.
+  if (!firstRender) {
+    const arrivedUrgent = needReply.some((c) => isNewRow(c) && (fmt.priorityClass(c.priority) === "p1" || c.isEscalated));
+    const changed = needReply.length !== prevCaseNumbers.size || needReply.some(isNewRow);
+    if (changed) pane.flash(arrivedUrgent);
+  }
+
+  historyRef[0] = new Set(needReply.map((c) => c.caseNumber));
 }
 
 function queuePaneMeta(snap) {
@@ -373,6 +425,7 @@ function tickerBody(quote) {
 function startTickerPoll(pane, cleanups) {
   let timer = null;
   let stopped = false;
+  let prevPrice = null; // null until the first real quote -- no flash on arrival, no entrance animation
 
   async function tick() {
     try {
@@ -381,6 +434,10 @@ function startTickerPoll(pane, cleanups) {
       if (data.enabled) {
         pane.setMeta(tickerMetaText(data.quote));
         mount(pane.body, tickerBody(data.quote));
+        if (data.quote) {
+          if (prevPrice !== null && data.quote.price !== prevPrice) pane.flash(false);
+          prevPrice = data.quote.price;
+        }
       }
     } catch {
       // Transient network hiccup -- the next tick tries again. The pane
@@ -419,9 +476,15 @@ function buildConsole(host, pipWindow, cleanups) {
 
   startTickerPoll(tickerPane, cleanups);
 
+  // null until the first real board read -- no entrance pulse on open,
+  // even if position #1 happens to be true the moment the console opens.
+  let prevPhonePosition = null;
   const unsubPhone = phoneMonitor.subscribe((state) => {
     phonePane.setMeta(phoneMetaText(state));
     pipContent(phonePane.body, state, pipWindow);
+    const pos = state.position && state.position.position != null ? state.position.position : null;
+    if (pos === 1 && prevPhonePosition !== null && prevPhonePosition !== 1) phonePane.flash(true);
+    prevPhonePosition = pos;
   });
   cleanups.push(unsubPhone);
 
@@ -429,10 +492,13 @@ function buildConsole(host, pipWindow, cleanups) {
   // refresh and the 15s no-network re-render below -- a plain closure
   // variable captured by both would work too, but a one-item array makes
   // the "this is a shared mutable box, not a fresh copy" intent explicit.
+  // historyRef starts at null (see renderQueueBody's own comment) so the
+  // very first paint never plays the arrival animation.
   const showAllRef = [false];
+  const historyRef = [null];
   const unsubQueue = consoleQueue.subscribe((snap) => {
     queuePane.setMeta(queuePaneMeta(snap));
-    renderQueueBody(queuePane, snap, showAllRef);
+    renderQueueBody(queuePane, snap, showAllRef, historyRef);
   });
   cleanups.push(unsubQueue);
   consoleQueue.refresh();
@@ -443,7 +509,7 @@ function buildConsole(host, pipWindow, cleanups) {
   // data refresh (initial load, or a watch-poll-detected change below) goes
   // through consoleQueue.refresh() instead, which is a separate, explicit
   // call.
-  const queueTicker = setInterval(() => renderQueueBody(queuePane, consoleQueue.getSnapshot(), showAllRef), 15000);
+  const queueTicker = setInterval(() => renderQueueBody(queuePane, consoleQueue.getSnapshot(), showAllRef, historyRef), 15000);
   cleanups.push(() => clearInterval(queueTicker));
 
   startWatchPoll(cleanups);

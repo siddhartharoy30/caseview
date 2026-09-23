@@ -88,6 +88,59 @@ should say which it did, not just tick a box silently.
 - [ ] Dock (collapsed mini-panel) and pop-out both work; pop-out
       ownership/restore across tabs.
 
+## Shift Console (v9 part 3, the Document PiP pop-out)
+
+Everything the phone-only pop-out already had (v5/v6) must still work
+unchanged: window lifecycle, sizing/resize persistence, stylesheet cloning,
+`pagehide` handling, cross-tab ownership, Focus-pop-out, restore, and
+monitor-off closing. The items below are what this release added.
+
+- [ ] One always-on-top window holds the ticker, phone and queue panes,
+      styled correctly at 380px and at a resized width.
+- [ ] Every colour/size/radius/shadow/spacing value resolves from a `:root`
+      token; the only new token is `--fs-console-hero`.
+- [ ] No app layout rule (`.sidebar`, `.topbar`, `.page`, `.card`, the queue
+      table) leaks into the console — inspect the live PiP document, don't
+      just reason about it.
+- [ ] No flash of unstyled content when the console opens.
+- [ ] The console's own theme toggle (top-right icon) is independent of the
+      main app's light/dark setting and persists across reopens.
+- [ ] Each pane collapses independently and remembers its state
+      (`shiftConsole.<pane>.collapsed`).
+- [ ] Ticker disabled, phone monitor off and zero cases each produce a
+      deliberate empty state, not a broken-looking blank pane.
+- [ ] Focus rings are visible on every interactive element (pane headers,
+      queue rows, the theme toggle, the "— N more" toggle).
+- [ ] Needs-reply cases are readable without scrolling; the rest collapse
+      behind a summary line that expands on click.
+- [ ] The needs-reply bucket and count come from `coverageTriggerStatuses`
+      — adding a status there updates the pane, the coverage trigger and
+      the v6 notification together, not independently.
+- [ ] A case transitioning into a trigger status alerts through the
+      existing `case.waiting_on_support` path — no duplicate/second toast.
+- [ ] Clicking a queue row focuses the QView tab and opens that case.
+- [ ] The queue pane's ages/countdowns visibly update every 15s with zero
+      network calls in between (check the Network tab).
+- [ ] The watch poll (`POST /api/console/watch-poll`) fires only while the
+      console is open, only on the leader tab (three tabs open → one call,
+      not three — check server logs/Network tab across tabs), and a status
+      change is reflected within the configured interval.
+- [ ] Settings shows "Console watch-poll calls today" and a projected daily
+      total that moves when `watchPollIntervalSeconds` changes.
+- [ ] With `TICKER_ENABLED`/a provider key unset, the ticker pane does not
+      render at all and nothing errors.
+- [ ] With a key set, the ticker line shows price/change during NYSE hours
+      and a labeled last-close outside them, with zero requests firing
+      outside 09:30–16:00 ET, on weekends, or once a holiday is detected.
+- [ ] `prefers-reduced-motion: reduce` removes the pane-collapse animation,
+      the value-change wash, the arrival pulse and the new-row slide-in —
+      state colours (the red rail, green/red ticker direction) still change
+      instantly.
+- [ ] No hover scale transform anywhere in the console — hover is colour
+      only.
+- [ ] No animation loops at rest (nothing pulses or shimmers when nothing
+      has changed).
+
 ## Sync
 
 - [ ] Manual sync button (`/settings` "Sync now") completes and updates

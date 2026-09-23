@@ -95,8 +95,57 @@
 .qv-console-pane-body {
   padding: 0 var(--space-2) var(--space-2);
 }
-.qv-console-pane[data-collapsed="true"] .qv-console-pane-body { display: none; }
 .qv-console-pane[data-collapsed="true"] { border-bottom-color: var(--border); }
+
+/* Animated collapse (height + opacity, --speed) for the bounded panes --
+   ticker and phone, whose content is a handful of lines at most. Not the
+   last pane (queue): it must grow via flex to fill remaining window
+   height, and animating "grow to fill" and "collapse to zero" on the same
+   element needs either a taller max-height guess (risking real content
+   clipping -- the queue's "show more" list is not bounded the way the
+   other two panes are) or a live-measured height this environment has no
+   browser to verify against. That one pane keeps an instant toggle below. */
+.qv-console-pane:not(:last-child) .qv-console-pane-body {
+  overflow: hidden;
+  max-height: 400px;
+  opacity: 1;
+  transition: max-height var(--speed) ease, opacity var(--speed) ease, padding var(--speed) ease;
+}
+.qv-console-pane:not(:last-child)[data-collapsed="true"] .qv-console-pane-body {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.qv-console-pane:last-child[data-collapsed="true"] .qv-console-pane-body { display: none; }
+
+/* One value-change wash (400ms), then settle -- nothing loops. Toggled by
+   JS adding/removing this class on the element whose text just changed
+   (shiftConsole.js's flashChange()), never by a CSS animation that repeats
+   on its own. */
+.qv-console-flash {
+  transition: background-color 400ms ease;
+  background-color: color-mix(in srgb, var(--blue) 22%, transparent);
+  border-radius: var(--radius-sm);
+}
+
+/* New needs-reply row: fade in with a slight downward slide, once, on
+   arrival -- never on every re-render (shiftConsole.js only adds this
+   class to rows it didn't render last time). */
+@keyframes qv-console-row-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.qv-console-row-enter { animation: qv-console-row-in 160ms ease; }
+
+/* Reaching phone position #1, or a new P1 landing: a single two-cycle
+   pulse (300ms x 2 = 600ms total), then stops -- never a loop. */
+@keyframes qv-console-pulse {
+  0%, 100% { background-color: transparent; }
+  25%, 75% { background-color: color-mix(in srgb, var(--red) 30%, transparent); }
+}
+.qv-console-pulse { animation: qv-console-pulse 300ms ease-in-out 2; }
 
 /* ---- console-wide chrome --------------------------------------------------- */
 
@@ -187,8 +236,17 @@
   outline-offset: 1px;
 }
 
+/* Every animated rule above, disabled -- state still changes colour and
+   collapse still changes what's visible, both instantly, per the spec's
+   own "the state still changes colour -- it just stops animating there." */
 @media (prefers-reduced-motion: reduce) {
-  .qv-console-pane-caret {
+  .qv-console-pane-caret,
+  .qv-console-pane-body,
+  .qv-console-flash {
     transition: none;
+  }
+  .qv-console-row-enter,
+  .qv-console-pulse {
+    animation: none;
   }
 }
