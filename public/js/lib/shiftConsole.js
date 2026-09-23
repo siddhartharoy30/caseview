@@ -185,7 +185,7 @@ function cloneStylesheets(doc) {
  * Collapse state persists per pane, per the same "<owner>.collapsed"
  * localStorage idiom phoneDock.js and tzstrip.js already use.
  */
-function consolePane(key, title, { defaultCollapsed = false } = {}) {
+function consolePane(key, title, { defaultCollapsed = false, actions = [] } = {}) {
   const collapseKey = `shiftConsole.${key}.collapsed`;
   let collapsed = store.get(collapseKey, defaultCollapsed);
 
@@ -204,9 +204,19 @@ function consolePane(key, title, { defaultCollapsed = false } = {}) {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
     },
   },
-    h("span", { class: "qv-console-pane-title", text: title }),
+    // `title` is usually a plain string, but the ticker pane passes an
+    // array (logo image + "RBRK" text) -- h()'s children handling accepts
+    // either, wrapping a bare string in a text node the same way it always
+    // has, so this is a no-op for every other caller.
+    h("span", { class: "qv-console-pane-title" }, title),
     metaEl,
-    caretEl);
+    // Grouped so margin-left:auto pushes the whole trailing cluster to the
+    // right edge as a unit -- putting that margin on the bare caret would
+    // only push the caret itself, leaving any action button stranded right
+    // after the meta text instead of beside the caret. Each action button
+    // must stop its click from bubbling to the head's own onclick, or
+    // pressing it would also toggle the pane collapsed/open.
+    h("div", { class: "qv-console-pane-head-trailing" }, actions, caretEl));
 
   const root = h("div", { class: "qv-console-pane", "data-collapsed": String(collapsed) }, head, body);
 
@@ -265,16 +275,19 @@ function applyConsoleTheme(pipWindow) {
   pipWindow.document.body.classList.toggle("dark", theme !== "light");
 }
 
-/** The same headset mark used app-wide (login screen, favicon) -- reused
- * verbatim rather than a new asset, so the console still reads as QView at
- * a glance instead of introducing a second brand mark. */
-const BRAND_MARK_SVG =
-  '<svg viewBox="0 0 24 24" width="60%" height="60%" fill="none" stroke="white" stroke-width="2" ' +
-  'stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/>' +
-  '<path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>';
-
-function consoleBrandMark() {
-  return h("div", { class: "qv-console-brand", html: BRAND_MARK_SVG });
+/** The actual Rubrik mark, next to the ticker's own name -- this app has
+ * no Rubrik brand asset of its own to embed, so this loads it the same way
+ * a browser tab gets any site's icon: by domain, from a public favicon
+ * service. Degrades to just not showing an image if that request fails or
+ * is blocked; nothing else depends on it. */
+function rubrikLogoImg() {
+  return h("img", {
+    class: "qv-console-ticker-logo",
+    src: "https://www.google.com/s2/favicons?domain=rubrik.com&sz=64",
+    alt: "",
+    width: "14",
+    height: "14",
+  });
 }
 
 function consoleThemeButton(pipWindow) {
@@ -300,16 +313,16 @@ function openCaseFromConsole(caseNumber) {
 
 // Requested by name, not read from coverageTriggerStatuses -- the trigger
 // list can grow (Reopen, New, Assigned...) without every one of those
-// deserving a continuous blink. This is specifically the "someone at
-// Rubrik owes this customer a response" status.
-const WAITING_ON_RUBRIK_STATUS = "Waiting for Rubrik Support";
+// deserving a continuous blink. These two specifically: "someone at Rubrik
+// owes this customer a response" and "actively being worked."
+const BLINK_STATUSES = new Set(["Waiting for Rubrik Support", "In Progress"]);
 
 function queueRow(c, isNew) {
   const urgent = fmt.priorityClass(c.priority) === "p1" || c.isEscalated;
-  const waitingOnRubrik = c.status === WAITING_ON_RUBRIK_STATUS;
+  const blinking = BLINK_STATUSES.has(c.status);
   const age = c.createdDate ? fmt.ageDays(c.createdDate).days + "d" : "—";
   return h("div", {
-    class: `qv-console-queue-row ${urgent ? "is-urgent" : ""} ${waitingOnRubrik ? "qv-console-blink" : ""} ${isNew ? "qv-console-row-enter" : ""}`,
+    class: `qv-console-queue-row ${urgent ? "is-urgent" : ""} ${blinking ? "qv-console-blink" : ""} ${isNew ? "qv-console-row-enter" : ""}`,
     role: "button", tabindex: "0",
     title: c.subject || "",
     onclick: () => openCaseFromConsole(c.caseNumber),
@@ -463,21 +476,15 @@ function tickerSparkline(history) {
   });
 }
 
-/** Expanded detail: the change/prev-close line, a closed-market note when
- * applicable, and the session sparkline above. Still no real-time chart,
- * no price alerts -- one lightweight visual on top of the original
- * "glance, not a trading tool" design. */
+/** Expanded detail: just the sparkline plus a closed-market note when
+ * applicable -- the change/prev-close text line that used to sit under it
+ * is gone by request, on the reasoning that the graph already shows
+ * direction and the header's own price line covers the number. */
 function tickerBody(quote, history) {
   if (!quote) return h("p", { class: "dim", text: "No quote yet." });
-  const up = quote.change >= 0;
-  const sign = up ? "+" : "";
   return h("div", { class: "qv-console-ticker-body" },
     tickerSparkline(history),
-    h("div", { class: "qv-console-ticker-detail" },
-      h("span", { class: `mono ${up ? "qv-console-ticker-up" : "qv-console-ticker-down"}`,
-        text: sign + quote.change.toFixed(2) + " (" + sign + quote.changePercent.toFixed(2) + "%)" }),
-      h("span", { class: "dim", text: "prev close " + quote.previousClose.toFixed(2) }),
-      !quote.marketOpen ? h("span", { class: "dim", text: "market closed" }) : null));
+    !quote.marketOpen ? h("span", { class: "dim", text: "market closed" }) : null);
 }
 
 /**
@@ -539,11 +546,15 @@ function buildConsole(host, pipWindow, cleanups) {
   // until the first /api/ticker response confirms the feature is actually
   // configured. "No key, no pane, no error" means no visible placeholder
   // either while that first response is in flight.
-  const tickerPane = consolePane("ticker", "RBRK", { defaultCollapsed: true });
+  const tickerPane = consolePane("ticker", [rubrikLogoImg(), " RBRK"], { defaultCollapsed: true });
   tickerPane.root.hidden = true;
   const phonePane = consolePane("phone", "PHONE");
-  const queuePane = consolePane("queue", "QUEUE");
-  const topbar = h("div", { class: "qv-console-topbar" }, consoleBrandMark(), consoleThemeButton(pipWindow));
+  const queueRefreshBtn = h("button", {
+    class: "qv-console-pane-action", type: "button", title: "Refresh the queue now",
+    onclick: (e) => { e.stopPropagation(); consoleQueue.refresh(); },
+  }, icon(["M20 11a8 8 0 10-.6 4", "M20 4v7h-7"], 12));
+  const queuePane = consolePane("queue", "QUEUE", { actions: [queueRefreshBtn] });
+  const topbar = h("div", { class: "qv-console-topbar" }, consoleThemeButton(pipWindow));
   mount(host, topbar, tickerPane.root, phonePane.root, queuePane.root);
 
   startTickerPoll(tickerPane, cleanups);
@@ -583,6 +594,17 @@ function buildConsole(host, pipWindow, cleanups) {
   // call.
   const queueTicker = setInterval(() => renderQueueBody(queuePane, consoleQueue.getSnapshot(), expandedGroupsRef, historyRef), 15000);
   cleanups.push(() => clearInterval(queueTicker));
+
+  // A plain periodic data refresh, independent of the watch poll's leader
+  // gating below. consoleQueue.refresh() only ever reads the local cache
+  // (GET /api/cases, GET /api/settings) -- never Salesforce directly -- so
+  // there's no "one poll" cost to running it from every tab that has a
+  // console open, unlike the watch poll itself. This is the fallback that
+  // keeps the queue's own view catching up with a status change within a
+  // bounded time even if tabSync's leader election is ever wrong about
+  // which tab should be doing the polling.
+  const queueDataRefresh = setInterval(() => consoleQueue.refresh(), 45000);
+  cleanups.push(() => clearInterval(queueDataRefresh));
 
   startWatchPoll(cleanups);
 }

@@ -64,6 +64,8 @@
 }
 
 .qv-console-pane-title {
+  display: inline-flex;
+  align-items: center;
   font-family: var(--sans);
   font-weight: 600;
   font-size: var(--fs-micro);
@@ -71,6 +73,7 @@
   color: var(--text-3);
   white-space: nowrap;
 }
+.qv-console-ticker-logo { border-radius: 3px; flex-shrink: 0; }
 
 .qv-console-pane-meta {
   font-family: var(--mono);
@@ -82,15 +85,38 @@
   white-space: nowrap;
 }
 
+.qv-console-pane-head-trailing {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
 .qv-console-pane-caret {
   flex-shrink: 0;
-  margin-left: auto;
   width: 13px;
   height: 13px;
   color: var(--text-4);
   transition: transform var(--speed) ease;
 }
 .qv-console-pane[data-collapsed="true"] .qv-console-pane-caret { transform: rotate(-90deg); }
+
+.qv-console-pane-action {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-4);
+  cursor: pointer;
+}
+.qv-console-pane-action:hover { background: var(--surface-2); color: var(--text-2); }
+.qv-console-pane-action:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
 
 .qv-console-pane-body {
   padding: 0 var(--space-2) var(--space-2);
@@ -150,9 +176,8 @@
 /* ---- console-wide chrome --------------------------------------------------- */
 
 /* A real strip above the panes rather than floating chrome over the
-   ticker's own head row -- the brand mark and theme toggle used to be
-   position:absolute over the first pane, which visually collided with its
-   title text. */
+   ticker's own head row -- the theme toggle used to be position:absolute
+   over the first pane, which visually collided with its title text. */
 .qv-console-topbar {
   display: flex;
   align-items: center;
@@ -161,16 +186,6 @@
   padding: var(--space-1) var(--space-2);
   border-bottom: 1px solid var(--border);
   background: var(--surface);
-}
-
-.qv-console-brand {
-  width: 18px;
-  height: 18px;
-  border-radius: 5px;
-  flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  background: linear-gradient(135deg, var(--blue-2), var(--green-2));
 }
 
 /* Independent of the main app's light/dark setting -- its own persisted
@@ -263,14 +278,6 @@
 }
 .qv-console-ticker-spark { line-height: 0; }
 .qv-console-ticker-spark svg { display: block; width: 100%; height: 28px; }
-.qv-console-ticker-detail {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-variant-numeric: tabular-nums;
-}
-.qv-console-ticker-up   { color: var(--green); }
-.qv-console-ticker-down { color: var(--red); }
 
 .qv-console * { scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
 .qv-console *::-webkit-scrollbar { width: 6px; }
