@@ -290,10 +290,18 @@ function rubrikLogoImg() {
   });
 }
 
+/** Lives inside the phone pane's own head (see buildConsole()) rather than
+ * a separate top strip -- a whole extra row for one button left a bare
+ * band of empty space above the panes, which read as unfinished rather
+ * than deliberate. The phone pane, not the ticker, because the ticker
+ * pane is hidden entirely when unconfigured and this needs to stay
+ * reachable regardless. Shares .qv-console-pane-action with the queue's
+ * refresh button so the two are visually the same size. */
 function consoleThemeButton(pipWindow) {
   return h("button", {
-    class: "qv-console-theme-btn", type: "button", title: "Toggle console theme",
-    onclick: () => {
+    class: "qv-console-pane-action", type: "button", title: "Toggle console theme",
+    onclick: (e) => {
+      e.stopPropagation();
       const next = pipWindow.document.body.classList.contains("light") ? "dark" : "light";
       pipWindow.document.body.classList.toggle("light", next === "light");
       pipWindow.document.body.classList.toggle("dark", next !== "light");
@@ -548,14 +556,16 @@ function buildConsole(host, pipWindow, cleanups) {
   // either while that first response is in flight.
   const tickerPane = consolePane("ticker", [rubrikLogoImg(), " RBRK"], { defaultCollapsed: true });
   tickerPane.root.hidden = true;
-  const phonePane = consolePane("phone", "PHONE");
+  // The theme toggle lives here, not the ticker pane -- the ticker pane is
+  // hidden entirely when unconfigured, and this needs to stay reachable
+  // regardless.
+  const phonePane = consolePane("phone", "PHONE", { actions: [consoleThemeButton(pipWindow)] });
   const queueRefreshBtn = h("button", {
     class: "qv-console-pane-action", type: "button", title: "Refresh the queue now",
     onclick: (e) => { e.stopPropagation(); consoleQueue.refresh(); },
-  }, icon(["M20 11a8 8 0 10-.6 4", "M20 4v7h-7"], 12));
+  }, icon(["M20 11a8 8 0 10-.6 4", "M20 4v7h-7"], 13));
   const queuePane = consolePane("queue", "QUEUE", { actions: [queueRefreshBtn] });
-  const topbar = h("div", { class: "qv-console-topbar" }, consoleThemeButton(pipWindow));
-  mount(host, topbar, tickerPane.root, phonePane.root, queuePane.root);
+  mount(host, tickerPane.root, phonePane.root, queuePane.root);
 
   startTickerPoll(tickerPane, cleanups);
 

@@ -104,8 +104,8 @@
 
 .qv-console-pane-action {
   flex-shrink: 0;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -172,39 +172,6 @@
   25%, 75% { background-color: color-mix(in srgb, var(--red) 30%, transparent); }
 }
 .qv-console-pulse { animation: qv-console-pulse 300ms ease-in-out 2; }
-
-/* ---- console-wide chrome --------------------------------------------------- */
-
-/* A real strip above the panes rather than floating chrome over the
-   ticker's own head row -- the theme toggle used to be position:absolute
-   over the first pane, which visually collided with its title text. */
-.qv-console-topbar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-shrink: 0;
-  padding: var(--space-1) var(--space-2);
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-}
-
-/* Independent of the main app's light/dark setting -- its own persisted
-   preference (shiftConsole.theme), defaulting to dark. */
-.qv-console-theme-btn {
-  margin-left: auto;
-  width: 22px;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-4);
-  cursor: pointer;
-}
-.qv-console-theme-btn:hover { background: var(--surface-2); color: var(--text-2); }
-.qv-console-theme-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
 
 /* ---- queue pane (v9 part 3 phase 2) --------------------------------------- */
 
