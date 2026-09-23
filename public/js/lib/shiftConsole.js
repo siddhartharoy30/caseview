@@ -338,19 +338,86 @@ function queuePaneMeta(snap) {
   return `${snap.needReply.length} need reply · ${snap.waitingOnCustomerCount} waiting on customer`;
 }
 
+const TICKER_POLL_MS = 60_000;
+
+/** The always-visible header line -- shown whether or not the pane is
+ * collapsed, same as the phone pane's position summary, so a collapsed
+ * ticker still reads as one quiet line per the spec's own mockup. */
+function tickerMetaText(quote) {
+  if (!quote) return "no quote yet";
+  const sign = quote.change >= 0 ? "+" : "";
+  return quote.price.toFixed(2) + "  " + sign + quote.changePercent.toFixed(2) + "%" + (quote.marketOpen ? "" : " · closed");
+}
+
+/** Expanded detail -- deliberately thin: no chart, no history, no alerts,
+ * per the spec's own "this is a glance, not a trading tool." */
+function tickerBody(quote) {
+  if (!quote) return h("p", { class: "dim", text: "No quote yet." });
+  const up = quote.change >= 0;
+  const sign = up ? "+" : "";
+  return h("div", { class: "qv-console-ticker-detail" },
+    h("span", { class: `mono ${up ? "qv-console-ticker-up" : "qv-console-ticker-down"}`,
+      text: sign + quote.change.toFixed(2) + " (" + sign + quote.changePercent.toFixed(2) + "%)" }),
+    h("span", { class: "dim", text: "prev close " + quote.previousClose.toFixed(2) }),
+    !quote.marketOpen ? h("span", { class: "dim", text: "market closed" }) : null);
+}
+
+/**
+ * Polls /api/ticker every 60s while the console is open -- cheap on the
+ * client; the server-side cache and market-hours gate (src/ticker.ts) are
+ * what actually control upstream traffic, so there's no leader-election
+ * gating needed here the way the Salesforce watch poll needs it. The pane
+ * stays hidden ({enabled:false}) until a key is actually configured, per
+ * the spec's "no key, no pane, no error."
+ */
+function startTickerPoll(pane, cleanups) {
+  let timer = null;
+  let stopped = false;
+
+  async function tick() {
+    try {
+      const data = await api.ticker();
+      pane.root.hidden = !data.enabled;
+      if (data.enabled) {
+        pane.setMeta(tickerMetaText(data.quote));
+        mount(pane.body, tickerBody(data.quote));
+      }
+    } catch {
+      // Transient network hiccup -- the next tick tries again. The pane
+      // stays in whatever state it was already in rather than flashing to
+      // hidden on one bad request.
+    }
+    if (!stopped) timer = setTimeout(tick, TICKER_POLL_MS);
+  }
+
+  tick();
+  cleanups.push(() => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+  });
+}
+
 /**
  * Builds the console's fixed pane skeleton once and wires each pane's
  * subscription into it. `cleanups` collects unsubscribe/stop functions the
- * pagehide handler runs on close -- phase 4 (ticker) pushes its own
- * subscription's cleanup into the same array rather than this function
- * growing a bespoke teardown path per pane.
+ * pagehide handler runs on close -- each pane pushes its own cleanup into
+ * the same array rather than this function growing a bespoke teardown path
+ * per pane.
  */
 function buildConsole(host, pipWindow, cleanups) {
   host.classList.add("qv-console");
 
+  // Collapsed by default (per spec) -- hidden entirely, not just collapsed,
+  // until the first /api/ticker response confirms the feature is actually
+  // configured. "No key, no pane, no error" means no visible placeholder
+  // either while that first response is in flight.
+  const tickerPane = consolePane("ticker", "RBRK", { defaultCollapsed: true });
+  tickerPane.root.hidden = true;
   const phonePane = consolePane("phone", "PHONE");
   const queuePane = consolePane("queue", "QUEUE");
-  mount(host, consoleThemeButton(pipWindow), phonePane.root, queuePane.root);
+  mount(host, consoleThemeButton(pipWindow), tickerPane.root, phonePane.root, queuePane.root);
+
+  startTickerPoll(tickerPane, cleanups);
 
   const unsubPhone = phoneMonitor.subscribe((state) => {
     phonePane.setMeta(phoneMetaText(state));

@@ -134,6 +134,7 @@ export const api = {
 
   /* phone queue monitor (v4 phase 6) */
   phoneBoard: () => request("GET", "/api/phone/board"),
+  ticker: () => request("GET", "/api/ticker"),
   /* v5 phase 2: explicit region roster, since nothing on the wire exposes it */
   phoneRoster: () => request("GET", "/api/phone/roster"),
   savePhoneRoster: (patch) => request("POST", "/api/phone/roster", patch),

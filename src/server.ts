@@ -85,6 +85,7 @@ import { syncOnce, startSync, reconcileCommitments, lastSyncPhases, runWatchPoll
 import { listEvents, unreadEventCount, markEventsRead, sendWebhookTest, EventKind } from "./notify";
 import { getPhoneBoard, cachedPhoneBoard, positionOf, listRoster, upsertRosterEntry, deleteRosterEntry } from "./phone";
 import type { Region } from "./phone";
+import { getQuote } from "./ticker";
 import { log, errText } from "./log";
 
 const app = express();
@@ -1013,6 +1014,23 @@ app.get("/api/phone/board", requireAuth, noStore, async (_req, res) => {
     ? board.agents.map((a) => ({ ...a, region: a.federal ? null : (map!.get(a.name)?.region ?? "unknown") }))
     : [];
   res.json({ ...board, agents, myName, position });
+});
+
+/* ------------------------------------------------------ shift console ticker */
+
+/**
+ * v9 part 3 phase 4. `enabled: false` -- no fetch attempted at all -- when
+ * no provider key is configured, per the spec's "no key, no pane, no
+ * error." The key itself never leaves this route; the client only ever
+ * sees the quote.
+ */
+app.get("/api/ticker", requireAuth, noStore, async (_req, res) => {
+  if (!config.ticker.enabled) {
+    res.json({ enabled: false });
+    return;
+  }
+  const quote = await getQuote();
+  res.json({ enabled: true, quote });
 });
 
 /**

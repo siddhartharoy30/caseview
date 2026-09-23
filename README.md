@@ -188,7 +188,15 @@ Sync schedule, active window and all the thresholds (`staleDays`,
 `atRiskHours`, `escalationUpdateHours`, `closedCaseWindowDays`) are runtime
 settings, not env vars — change them in the Settings page and they take effect
 on the next read. `reconcileOwnership` (default on) is one of these settings
-too — see *How it works* above.
+too — see *How it works* above. `watchPollIntervalSeconds` (default 60,
+minimum 15) is the shift console's own poll cadence, separate from the sync
+interval above.
+
+The shift console's RBRK ticker (v9 part 3) is off unless configured —
+`TICKER_ENABLED=true` plus one of `FINNHUB_API_KEY` or `TWELVEDATA_API_KEY`
+(Finnhub is preferred when both are set). `TICKER_SYMBOL` defaults to `RBRK`.
+No key, no ticker pane, no error — this is deliberately not one of the
+required five above.
 
 ### First run
 
@@ -277,6 +285,7 @@ without a cookie.
 | `GET /api/patterns` · `GET /api/events` | derived |
 | `GET /api/settings` · `PATCH /api/settings` · `POST /api/settings/rebuild-cache` · `POST /api/settings/test-webhook` | settings |
 | `POST /api/sync` · `GET /api/sync/status` | sync |
+| `POST /api/console/watch-poll` · `GET /api/ticker` | shift console |
 | `POST /api/intelligence/suggest-reply` | AI |
 | `GET /healthz` · `GET /api/app-versions` | ops |
 | `GET /go/case/:caseNumber` | redirect straight into Salesforce |

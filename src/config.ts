@@ -83,6 +83,18 @@ export const config = {
   anthropic,
   session: { secret: process.env.SESSION_SECRET || "" },
   auth: { allowedEmail: required("QVIEW_ALLOWED_EMAIL") },
+  // v9 part 3 phase 4: the shift console's RBRK ticker. Off unless a
+  // provider key is present -- same "no key, no pane, no error" shape as
+  // Layer 2 above, never a required() that would fail boot over an optional
+  // feature.
+  ticker: {
+    symbol: process.env.TICKER_SYMBOL || "RBRK",
+    finnhubKey: process.env.FINNHUB_API_KEY || "",
+    twelveDataKey: process.env.TWELVEDATA_API_KEY || "",
+    enabled:
+      (process.env.TICKER_ENABLED || "false").toLowerCase() === "true" &&
+      !!(process.env.FINNHUB_API_KEY || process.env.TWELVEDATA_API_KEY),
+  },
 };
 
 if (!config.session.secret) {

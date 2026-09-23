@@ -165,6 +165,17 @@
 }
 .qv-console-queue-rest-toggle:hover { background: var(--surface-2); color: var(--text-2); }
 
+/* ---- ticker pane (v9 part 3 phase 4) -------------------------------------- */
+
+.qv-console-ticker-detail {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-variant-numeric: tabular-nums;
+}
+.qv-console-ticker-up   { color: var(--green); }
+.qv-console-ticker-down { color: var(--red); }
+
 .qv-console * { scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
 .qv-console *::-webkit-scrollbar { width: 6px; }
 .qv-console *::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: var(--radius-sm); }
