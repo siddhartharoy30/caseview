@@ -190,7 +190,7 @@
   color: var(--text);
   flex-shrink: 0;
 }
-.qv-console-queue-contact {
+.qv-console-queue-subject {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -204,15 +204,17 @@
   font-size: var(--fs-meta);
 }
 
-.qv-console-queue-rest-toggle {
-  margin-top: var(--space-1);
+.qv-console-queue-group { margin-top: var(--space-1); }
+.qv-console-queue-group-toggle {
   padding: var(--space-1) var(--space-2);
   font-size: var(--fs-meta);
   color: var(--text-3);
   cursor: pointer;
   border-radius: var(--radius-sm);
 }
-.qv-console-queue-rest-toggle:hover { background: var(--surface-2); color: var(--text-2); }
+.qv-console-queue-group-toggle:hover { background: var(--surface-2); color: var(--text-2); }
+.qv-console-queue-group-toggle:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.qv-console-queue-group .qv-console-queue-row { margin-left: var(--space-2); }
 
 /* ---- ticker pane (v9 part 3 phase 4) -------------------------------------- */
 

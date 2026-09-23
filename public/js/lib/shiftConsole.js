@@ -277,14 +277,6 @@ function consoleThemeButton(pipWindow) {
   }, icon(["M20 14a8 8 0 01-10-10 8 8 0 1010 10z"], 13));
 }
 
-/** Last word of a contact's full name -- "contact surname" per the spec's
- * compact row, since a 380px pane has no room for a full name next to a
- * case number, priority chip and age. */
-function surname(contactName) {
-  const parts = String(contactName || "").trim().split(/\s+/);
-  return parts.length ? parts[parts.length - 1] : "";
-}
-
 function openCaseFromConsole(caseNumber) {
   // The PiP window's content runs in the same script realm as the tab that
   // opened it -- no cross-window messaging needed, unlike requestPipFocus()
@@ -300,30 +292,44 @@ function queueRow(c, isNew) {
   return h("div", {
     class: `qv-console-queue-row ${urgent ? "is-urgent" : ""} ${isNew ? "qv-console-row-enter" : ""}`,
     role: "button", tabindex: "0",
+    title: c.subject || "",
     onclick: () => openCaseFromConsole(c.caseNumber),
     onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCaseFromConsole(c.caseNumber); } },
   },
     h("span", { class: "mono qv-console-queue-case", text: c.caseNumber }),
     h("span", { class: `chip ${fmt.priorityClass(c.priority)}`, text: c.priority || "—" }),
-    h("span", { class: "qv-console-queue-contact", text: surname(c.contactName) }),
+    h("span", { class: "qv-console-queue-subject", text: c.subject || "(no subject)" }),
     h("span", { class: "dim mono qv-console-queue-age", text: age }));
 }
 
+/** A group toggle for one status bucket -- "— Waiting on Customer (5)",
+ * same plain-text-button idiom as the pane's own "— N more" toggle used to
+ * be, now one per status instead of one for everything. */
+function statusGroupToggle(status, count, isOpen, onToggle) {
+  return h("div", {
+    class: "qv-console-queue-group-toggle", role: "button", tabindex: "0",
+    "aria-expanded": String(isOpen),
+    onclick: onToggle,
+    onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); } },
+  }, `— ${status} (${count})`);
+}
+
 /**
- * The queue pane's body: needs-reply cases in full, everything else
- * collapsed behind one expandable summary line (a second, inner collapse
- * independent of the pane's own head-collapse).
+ * The queue pane's body: needs-reply cases in full up top, everything else
+ * grouped into per-status sections (each its own expandable toggle,
+ * independent of the pane's own head-collapse and of each other).
  *
- * `showAllRef` and `historyRef` are one-item mutable boxes so this closes
- * over the *same* state across repeated calls -- both the 15s no-network
- * re-render and a real data refresh call this function again, and neither
- * should reset the operator's "everything else" choice or wrongly replay
- * the arrival animation for a row that was already there last render.
+ * `expandedGroupsRef` and `historyRef` are one-item mutable boxes so this
+ * closes over the *same* state across repeated calls -- both the 15s
+ * no-network re-render and a real data refresh call this function again,
+ * and neither should collapse a group the operator just opened or wrongly
+ * replay the arrival animation for a row that was already there last
+ * render. `expandedGroupsRef[0]` is a `Map<status, boolean>`.
  * `historyRef[0]` is the previous render's needs-reply case-number set;
  * comparing against it is what tells a genuinely new row (slide-in) apart
  * from a routine re-render of one already on screen.
  */
-function renderQueueBody(pane, snap, showAllRef, historyRef) {
+function renderQueueBody(pane, snap, expandedGroupsRef, historyRef) {
   if (!snap.loaded) {
     mount(pane.body, h("p", { class: "dim", text: "Loading…" }));
     return;
@@ -351,26 +357,33 @@ function renderQueueBody(pane, snap, showAllRef, historyRef) {
   const prevCaseNumbers = historyRef[0] || new Set();
   const isNewRow = (c) => !firstRender && !prevCaseNumbers.has(c.caseNumber);
 
-  const restSummary = rest.length
-    ? h("div", {
-        class: "qv-console-queue-rest-toggle", role: "button", tabindex: "0",
-        onclick: () => { showAllRef[0] = !showAllRef[0]; renderQueueBody(pane, snap, showAllRef, historyRef); },
-        onkeydown: (e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            showAllRef[0] = !showAllRef[0];
-            renderQueueBody(pane, snap, showAllRef, historyRef);
-          }
-        },
-      }, `— ${rest.length} more`)
-    : null;
+  // Group everything that doesn't need a reply by its own Status, in the
+  // order `rest` is already sorted (byUrgency) -- so the group holding the
+  // single most urgent case naturally lands first, not alphabetically and
+  // not by raw count.
+  const groups = new Map();
+  for (const c of rest) {
+    const key = c.status || "No status";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(c);
+  }
+  const expanded = expandedGroupsRef[0];
+  const groupEls = Array.from(groups, ([status, cases]) => {
+    const isOpen = expanded.get(status) || false;
+    const toggle = () => {
+      expanded.set(status, !isOpen);
+      renderQueueBody(pane, snap, expandedGroupsRef, historyRef);
+    };
+    return h("div", { class: "qv-console-queue-group" },
+      statusGroupToggle(status, cases.length, isOpen, toggle),
+      isOpen ? cases.map((c) => queueRow(c, false)) : null);
+  });
 
   mount(pane.body,
     needReply.length
       ? needReply.map((c) => queueRow(c, isNewRow(c)))
       : h("p", { class: "dim", text: "Nothing needs a reply right now." }),
-    restSummary,
-    showAllRef[0] ? rest.map((c) => queueRow(c, false)) : null);
+    groupEls);
 
   // A newly-arrived P1 or escalated case gets the urgent pulse on the
   // pane's own header; any other change to who needs a reply gets the
@@ -488,17 +501,17 @@ function buildConsole(host, pipWindow, cleanups) {
   });
   cleanups.push(unsubPhone);
 
-  // The "everything else" disclosure's state must survive both a real data
-  // refresh and the 15s no-network re-render below -- a plain closure
+  // Each status group's expand/collapse state must survive both a real
+  // data refresh and the 15s no-network re-render below -- a plain closure
   // variable captured by both would work too, but a one-item array makes
   // the "this is a shared mutable box, not a fresh copy" intent explicit.
   // historyRef starts at null (see renderQueueBody's own comment) so the
   // very first paint never plays the arrival animation.
-  const showAllRef = [false];
+  const expandedGroupsRef = [new Map()];
   const historyRef = [null];
   const unsubQueue = consoleQueue.subscribe((snap) => {
     queuePane.setMeta(queuePaneMeta(snap));
-    renderQueueBody(queuePane, snap, showAllRef, historyRef);
+    renderQueueBody(queuePane, snap, expandedGroupsRef, historyRef);
   });
   cleanups.push(unsubQueue);
   consoleQueue.refresh();
@@ -509,7 +522,7 @@ function buildConsole(host, pipWindow, cleanups) {
   // data refresh (initial load, or a watch-poll-detected change below) goes
   // through consoleQueue.refresh() instead, which is a separate, explicit
   // call.
-  const queueTicker = setInterval(() => renderQueueBody(queuePane, consoleQueue.getSnapshot(), showAllRef, historyRef), 15000);
+  const queueTicker = setInterval(() => renderQueueBody(queuePane, consoleQueue.getSnapshot(), expandedGroupsRef, historyRef), 15000);
   cleanups.push(() => clearInterval(queueTicker));
 
   startWatchPoll(cleanups);
