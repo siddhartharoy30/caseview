@@ -1124,7 +1124,17 @@ app.get("/api/app-versions", (_req, res) => {
 /* --------------------------------------------------------------- static/SPA */
 
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
-app.use(express.static(PUBLIC_DIR, { index: false }));
+// v9 part 3: no maxAge means serve-static sends no Cache-Control at all,
+// which lets a browser cache CSS/JS heuristically and keep serving it
+// without even asking the server -- the shift console clones whatever
+// <link rel="stylesheet"> the main tab already has loaded (shiftConsole.js's
+// cloneStylesheets()), so a stale cached console.css/app.css means every
+// future deploy silently doesn't show up until something forces a real
+// revalidation. no-cache still lets the browser keep a local copy, it just
+// has to check with the server (a fast 304 when unchanged) before using it,
+// so a real content change is never more than one request away from
+// showing up.
+app.use(express.static(PUBLIC_DIR, { index: false, setHeaders: (res) => res.set("Cache-Control", "no-cache") }));
 
 const SPA_ROUTES = [
   "/",
